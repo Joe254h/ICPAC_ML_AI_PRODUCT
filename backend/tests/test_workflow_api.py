@@ -36,6 +36,17 @@ def test_raw_candidate_promotion_requires_confirmation(tmp_path):
             client.post(
                 "/models/raw-v1/promote",
                 json={
+                    "actor": "  ",
+                    "comment": "Reviewed evidence",
+                    "confirmed": True,
+                },
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                "/models/raw-v1/promote",
+                json={
                     "actor": "Reviewer",
                     "comment": "Prototype review",
                     "confirmed": False,
