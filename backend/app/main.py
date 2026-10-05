@@ -37,6 +37,14 @@ def create_app(database_url: str | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.platform = Platform(Repository(database_url))
+        for job in app.state.platform.repo.list("job"):
+            if job["executor"] == "local" and job["status"] in {"queued", "running"}:
+                job.update(
+                    status="failed",
+                    exit_code=1,
+                    log="Local worker interrupted by service restart; resubmit explicitly.",
+                )
+                app.state.platform.repo.save("job", job, job["id"])
         yield
         app.state.platform.repo.engine.dispose()
 
