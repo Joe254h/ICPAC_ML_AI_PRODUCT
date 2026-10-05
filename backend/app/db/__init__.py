@@ -1,31 +1,32 @@
 import json
 import os
 from datetime import datetime, timezone
-from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import Column, String, Text, create_engine, select
-from sqlalchemy.orm import Session, declarative_base
+from sqlalchemy import String, Text, create_engine, select
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from climate_engine.core import ROOT
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
 
 
 class Record(Base):
     """Portable entity storage; typed service schemas own entity validation."""
 
     __tablename__ = "records"
-    id = Column(String, primary_key=True)
-    kind = Column(String, nullable=False, index=True)
-    payload = Column(Text, nullable=False)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class Repository:
     def __init__(self, url: str | None = None):
         path = ROOT / "data" / "prototype.db"
         path.parent.mkdir(exist_ok=True)
-        self.url = url or os.getenv("DATABASE_URL", f"sqlite:///{path.as_posix()}")
+        self.url: str = url or os.environ.get("DATABASE_URL") or f"sqlite:///{path.as_posix()}"
         self.engine = create_engine(
             self.url,
             connect_args={"check_same_thread": False} if self.url.startswith("sqlite") else {},

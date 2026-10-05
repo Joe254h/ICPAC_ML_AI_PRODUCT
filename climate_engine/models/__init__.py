@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -49,7 +50,7 @@ class ArtifactModel(ForecastModel):
             Path(artifact),
             feature_schema,
         )
-        self.estimator = None
+        self.estimator: Any = None
 
     def load(self) -> None:
         if not self.artifact.is_file():
