@@ -180,7 +180,7 @@ class Platform:
             "start_time": start,
             "end_time": end,
             "creation_timestamp": now(),
-            "qc_status": "PASS",
+            "qc_status": "WARN" if any(item["status"] == "WARN" for item in qc) else "PASS",
             "mode": "synthetic",
             "mask_status": cfg["mask_status"],
             "config_checksum": checksum(cfg),
