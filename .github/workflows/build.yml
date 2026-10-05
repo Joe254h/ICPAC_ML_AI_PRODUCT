@@ -1,0 +1,17 @@
+name: Container build
+on:
+  pull_request:
+  push: {branches: [main]}
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet
+      - run: docker compose build
+      - run: docker compose up -d --wait
+      - run: curl --fail http://localhost:8000/health && curl --fail http://localhost:3000/api/health
+      - if: always()
+        run: docker compose logs && docker compose down

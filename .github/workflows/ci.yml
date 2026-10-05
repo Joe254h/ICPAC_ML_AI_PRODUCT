@@ -1,0 +1,30 @@
+name: CI
+on: [push, pull_request, workflow_dispatch]
+permissions: {contents: read}
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -e '.[dev]'
+      - run: ruff format --check backend climate_engine chatbot hpc scripts
+      - run: ruff check backend climate_engine chatbot hpc scripts
+      - run: mypy backend climate_engine chatbot hpc
+      - run: pytest -q
+      - uses: pnpm/action-setup@v4
+        with: {version: '11.19.0'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22', cache: pnpm, cache-dependency-path: frontend/pnpm-lock.yaml}
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - run: pnpm lint && pnpm typecheck && pnpm test && pnpm build
+        working-directory: frontend
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: frontend
+      - run: pnpm test:e2e
+        working-directory: frontend

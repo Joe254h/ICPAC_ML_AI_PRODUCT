@@ -1,0 +1,24 @@
+services:
+  backend:
+    build: {context: ., dockerfile: docker/backend.Dockerfile}
+    ports: ["127.0.0.1:8000:8000"]
+    environment:
+      DATABASE_URL: sqlite:////app/data/prototype.db
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:8001/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen-prototype}
+      MODEL_ROOT: /app/artifacts
+    volumes: ["climate-data:/app/data", "./artifacts:/app/artifacts:ro"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  frontend:
+    build: {context: ., dockerfile: docker/frontend.Dockerfile}
+    ports: ["127.0.0.1:3000:3000"]
+    environment: {API_URL: "http://backend:8000"}
+    depends_on:
+      backend: {condition: service_healthy}
+volumes:
+  climate-data:
