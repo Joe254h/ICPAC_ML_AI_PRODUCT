@@ -9,32 +9,35 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "format": "prettier --write app components features services types tests e2e scripts \"*.ts\" \"*.mjs\" \"*.json\" \"*.yaml\"",
+    "format:check": "prettier --check app components features services types tests e2e scripts \"*.ts\" \"*.mjs\" \"*.json\" \"*.yaml\""
   },
   "dependencies": {
+    "echarts": "^6.0.0",
+    "lucide-react": "^0.577.0",
+    "maplibre-gl": "^5.12.0",
     "next": "16.3.8",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "maplibre-gl": "^5.12.0",
-    "echarts": "^6.0.0",
-    "lucide-react": "^0.577.0"
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
-    "typescript": "^5.9.3",
+    "@eslint/js": "^9",
+    "@playwright/test": "^1.58",
+    "@tailwindcss/postcss": "^4.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "^16",
+    "@types/geojson": "7946.0.16",
+    "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/node": "^22",
-    "tailwindcss": "^4.1",
-    "@tailwindcss/postcss": "^4.1",
     "eslint": "^9",
-    "typescript-eslint": "^8",
-    "@eslint/js": "^9",
-    "vitest": "^3.2",
-    "@testing-library/react": "^16",
-    "@testing-library/jest-dom": "6.9.1",
     "jsdom": "^26",
-    "@playwright/test": "^1.58",
-    "@types/geojson": "7946.0.16"
+    "prettier": "3.6.2",
+    "tailwindcss": "^4.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8",
+    "vitest": "^3.2"
   },
   "packageManager": "pnpm@11.19.0"
 }
