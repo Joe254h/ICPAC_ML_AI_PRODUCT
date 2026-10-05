@@ -33,7 +33,8 @@
     "@testing-library/react": "^16",
     "@testing-library/jest-dom": "6.9.1",
     "jsdom": "^26",
-    "@playwright/test": "^1.58"
+    "@playwright/test": "^1.58",
+    "@types/geojson": "7946.0.16"
   },
   "packageManager": "pnpm@11.19.0"
 }
