@@ -22,3 +22,6 @@ Node 22+, Python 3.12+, registry downloads, Docker for Compose validation, GitHu
 
 ## Delivery acceptance
 Feature branch and logical commits, PR to main, passing hosted CI where GitHub permits it, repeatable local commands, working preview, documentation and screenshots where practical. Clearly report environment limitations and remaining real integrations. Complete Phase 1 and validate it before later phases.
+
+## Completion record
+Phase 1 passed hosted CI and container startup before Phases 2–6 began. Later commits implement local NetCDF registration, richer provenance, local/simulated/opt-in SLURM executors, reviewed native artifact registry, grounded Copilot/retrieval/history, and frozen bulletin review/export. Local Chrome acceptance passed all five user workflows. Optional native model runtimes are tested in a dedicated CI lane. Final validation scope and remaining integrations are documented in validation.md and README.md.

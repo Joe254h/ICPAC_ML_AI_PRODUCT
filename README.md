@@ -22,7 +22,7 @@ Without Docker, use Python 3.12+ and Node 22+, with pnpm 11:
 ```bash
 python -m venv .venv
 # Linux/macOS: source .venv/bin/activate
-# PowerShell: .venv\\Scripts\\Activate.ps1
+# PowerShell: .venv\Scripts\Activate.ps1
 pip install -e '.[dev]'
 python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 # In a second terminal:
@@ -89,9 +89,9 @@ ForecastProvider has load(cycle) and metadata. The five prototype sources are EC
 
 ## Models and replacement
 
-MockForecastModel and RawECMWFModel share the ForecastModel interface. Native CatBoost/LightGBM/XGBoost loaders are isolated from frontend/API contracts; other model types require validated adapters. The only available feature schema is rainfall_total_v1 (one aligned accumulated-rainfall feature per cell). **Do not relabel Hybrid7 or Atmos37 artifacts as this schema.** Implement their frozen training-time feature transforms first.
+MockForecastModel and RawECMWFModel share the ForecastModel interface. Native CatBoost/LightGBM/XGBoost and analytical ABC loaders are isolated from frontend/API contracts; other model types require validated adapters. The only available feature schema is rainfall_total_v1 (one aligned accumulated-rainfall feature per cell). **Do not relabel Hybrid7 or Atmos37 artifacts as this schema.** Implement their frozen training-time feature transforms first.
 
-See docs/models.md for registration and replacement instructions. Installing optional model dependencies and mounting an artifact does not rebuild the frontend. Model outputs, provenance and selector metadata remain stable.
+See [exact model registration and replacement instructions](docs/models.md). The registry exposes validated candidates, confirmed promotion and rollback; the frontend automatically reads registered versions. Installing optional model dependencies and mounting an artifact does not rebuild the frontend. Model outputs, provenance and selector metadata remain stable.
 
 ## Verification and products
 
@@ -105,7 +105,15 @@ curl -X POST http://localhost:8000/verification/run -H 'Content-Type: applicatio
 
 The default interpretation provider is mock, so the application runs without a server. Optional LLM services must use deterministic tool context and grounded output checks. Generated narratives remain drafts. Human review controls bulletin approval and publication; production model promotion requires confirmation and validation. These prototype controls are not substitutes for production authentication and authorization.
 
-See docs/chatbot.md, docs/hpc.md and docs/scientific_safety.md. SLURM deployment and real publication/dissemination require an operator integration; they are never triggered merely by asking the chatbot a question.
+See [Copilot and bulletin procedures](docs/chatbot.md), [executor deployment](docs/hpc.md) and [scientific safety](docs/scientific_safety.md). SLURM deployment and real publication/dissemination require an operator integration; they are never triggered merely by asking the chatbot a question.
+
+## Screenshots and validation
+
+![Prototype overview](docs/screenshots/overview.png)
+
+[Verification](docs/screenshots/verification.png) · [Models](docs/screenshots/models.png) · [Copilot](docs/screenshots/copilot.png) · [Bulletins](docs/screenshots/bulletins.png) · [Tablet](docs/screenshots/tablet.png)
+
+See [validation scope and limitations](docs/validation.md). Browser acceptance covers observation selection, Copilot tool evidence, bulletin review, actual local execution, and confirmed model promotion/rollback.
 
 ## Remaining integrations and roadmap
 

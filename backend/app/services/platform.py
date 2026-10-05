@@ -53,6 +53,10 @@ class Platform:
                     },
                     model["model_id"],
                 )
+        for existing in self.repo.list("model"):
+            if existing["status"] == "production" and not existing.get("deployment_date"):
+                existing["deployment_date"] = existing["created_at"]
+                self.repo.save("model", existing, existing["id"])
         for source in config("observations")["sources"]:
             try:
                 self.repo.get("dataset", source)

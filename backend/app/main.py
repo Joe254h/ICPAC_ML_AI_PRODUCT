@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, Response
 
 from backend.app.db import Repository
 from backend.app.schemas import ForecastResponse, Selection
+from backend.app.services.health import system_health
 from backend.app.services.platform import Platform
 from climate_engine.core import DEMO_LABEL, config
 
@@ -23,6 +24,9 @@ class JSONFormatter(logging.Formatter):
                 "run_id": getattr(record, "run_id", None),
                 "cycle": getattr(record, "cycle", None),
                 "model": getattr(record, "model", None),
+                "dataset": getattr(record, "dataset", None),
+                "job": getattr(record, "job", None),
+                "stage": getattr(record, "stage", None),
             }
         )
 
@@ -73,23 +77,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
     @app.get("/health")
     def health(p: Platform = Depends(platform)) -> dict:
-        p.repo.list("model")
-        return {
-            "status": "Healthy",
-            "mode": "prototype",
-            "label": DEMO_LABEL,
-            "components": {
-                "API": "Healthy",
-                "Database": "Healthy",
-                "Observation providers": "Healthy",
-                "Forecast providers": "Healthy",
-                "Model registry": "Healthy",
-                "LLM": "Warning · mock provider",
-                "Local executor": "Healthy",
-                "SLURM": "Unavailable · no cluster configured",
-                "Storage": "Healthy",
-            },
-        }
+        return {**system_health(p), "label": DEMO_LABEL}
 
     @app.get("/config")
     def settings(p: Platform = Depends(platform)) -> dict:

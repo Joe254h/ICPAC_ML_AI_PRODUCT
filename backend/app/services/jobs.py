@@ -13,6 +13,15 @@ class Jobs:
         jobs = self.platform.repo.list("job")
         result = []
         for job in jobs:
+            if "dependency" not in job:
+                job["dependency"] = None
+                if job["status"] in {"queued", "running"}:
+                    job.update(
+                        status="cancelled",
+                        exit_code=130,
+                        log="Legacy simulated job retired after executor upgrade; resubmit explicitly.",
+                    )
+                job = self.platform.repo.save("job", job, job["id"])
             try:
                 result.append(executor(self.platform, job["executor"]).status(job))
             except FileNotFoundError as exc:

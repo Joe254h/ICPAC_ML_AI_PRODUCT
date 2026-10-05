@@ -28,10 +28,12 @@ class ObservationIngestion:
         record = self.platform.repo.save(
             "dataset",
             {
+                **dataset.attrs,
                 **provider.metadata(),
                 "version": dataset.attrs["version"],
                 "checksum": file_checksum(artifact),
                 "qc": qc,
+                "qc_status": qc["status"],
                 "available_until": dates[-1],
                 "registered_at": now(),
                 "label": "LOCAL OBSERVATIONS · synthetic forecasts and approximate masks remain",

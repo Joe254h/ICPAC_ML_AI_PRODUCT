@@ -8,14 +8,27 @@ from uuid import uuid4
 from backend.app.db import Repository
 from backend.app.schemas import Selection
 from backend.app.services.platform import Platform
-from climate_engine.core import ROOT, checksum, config
+from climate_engine.core import ROOT, checksum
+from climate_engine.provenance import code_version, configuration_checksum
 
 
 def run(selection: Selection, trigger: str = "forecast", force: bool = False) -> dict:
     folder = ROOT / "data" / "runs"
     folder.mkdir(parents=True, exist_ok=True)
+    platform = Platform(Repository())
+    platform.observation(selection.observation)
+    platform.model(selection.model)
+    dataset = platform.repo.get("dataset", selection.observation)
+    model = platform.repo.get("model", selection.model)
     signature = checksum(
-        {"selection": selection.model_dump(), "config": config(), "trigger": trigger}
+        {
+            "selection": selection.model_dump(),
+            "config": configuration_checksum(),
+            "trigger": trigger,
+            "git_commit": code_version(),
+            "dataset": dataset,
+            "model_checksum": model["checksum"],
+        }
     )
     state = folder / f"{trigger}-{selection.observation}.state.json"
     if state.is_file() and not force and json.loads(state.read_text())["signature"] == signature:
@@ -30,7 +43,6 @@ def run(selection: Selection, trigger: str = "forecast", force: bool = False) ->
     try:
         os.write(descriptor, str(os.getpid()).encode())
         os.close(descriptor)
-        platform = Platform(Repository())
         run_id = str(uuid4())
         if trigger == "observation":
             result = platform.run_verification(selection)

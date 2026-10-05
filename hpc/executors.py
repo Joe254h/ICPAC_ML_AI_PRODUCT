@@ -14,6 +14,7 @@ from hpc.pipeline import STAGES, run_stage
 
 TERMINAL = {"success", "failed", "cancelled", "blocked"}
 LOCAL_QUEUE = threading.Lock()
+logger = logging.getLogger("icpac.jobs")
 
 
 class JobExecutor(ABC):
@@ -104,10 +105,25 @@ class LocalExecutor(JobExecutor):
                 job.update(status="running", start_time=now(), log="Fixed local stage running.")
                 self.repo.save("job", job, job["id"])
                 try:
+                    logger.info(
+                        "stage_started",
+                        extra={
+                            "run_id": job["group_id"],
+                            "job": job["id"],
+                            "stage": job["stage"],
+                            "cycle": selection.cycle,
+                            "model": selection.model,
+                            "dataset": selection.observation,
+                        },
+                    )
                     log = run_stage(self.platform, selection, job["stage"], job["group_id"])
                     job.update(status="success", exit_code=0, log=log)
                 except Exception as exc:
                     job.update(status="failed", exit_code=1, log=f"{type(exc).__name__}: {exc}")
+                    logger.error(
+                        "stage_failed",
+                        extra={"run_id": job["group_id"], "job": job["id"], "stage": job["stage"]},
+                    )
                 if self.repo.get("job", job["id"])["status"] != "cancelled":
                     job["end_time"] = now()
                     self.repo.save("job", job, job["id"])
@@ -180,7 +196,7 @@ class SlurmExecutor(JobExecutor):
                 log = output / f"{job['stage']}.log"
                 argv = ["sbatch", "--parsable", "--output", str(log), "--error", str(log)]
                 if previous:
-                    argv.append(f"--dependency=afterok:{previous}")
+                    argv.extend([f"--dependency=afterok:{previous}", "--kill-on-invalid-dep=yes"])
                 argv.extend(
                     [
                         str(ROOT / "hpc" / "templates" / "stage.slurm"),
@@ -238,6 +254,10 @@ class SlurmExecutor(JobExecutor):
                 "COMPLETED": "success",
                 "RUNNING": "running",
                 "PENDING": "queued",
+                "CONFIGURING": "queued",
+                "COMPLETING": "running",
+                "SUSPENDED": "running",
+                "REQUEUED": "queued",
                 "CANCELLED": "cancelled",
             }.get(state, "failed")
             job.update(

@@ -1,6 +1,11 @@
 services:
   backend:
-    build: {context: ., dockerfile: docker/backend.Dockerfile}
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      args:
+        GIT_COMMIT: "${GIT_COMMIT:-unversioned}"
+        INSTALL_MODEL_RUNTIMES: "${INSTALL_MODEL_RUNTIMES:-false}"
     ports: ["127.0.0.1:8000:8000"]
     environment:
       DATABASE_URL: sqlite:////app/data/prototype.db
