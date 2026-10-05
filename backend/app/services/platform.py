@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import logging
-import os
 from functools import lru_cache
 from typing import Any
 
@@ -14,8 +13,14 @@ from climate_engine.aggregation import country_mask, weighted_mean
 from climate_engine.core import DEMO_LABEL, checksum, config
 from climate_engine.forecasts import MockForecastProvider
 from climate_engine.models import ArtifactModel, MockForecastModel, RawECMWFModel
-from climate_engine.observations import MockObservationProvider, week2_dates
+from climate_engine.observations import LocalNetCDFProvider, MockObservationProvider, week2_dates
 from climate_engine.preprocessing import accumulate_week2, align_exact
+from climate_engine.provenance import (
+    code_version,
+    configuration_checksum,
+    file_checksum,
+    permitted_file,
+)
 from climate_engine.qc import check_dataset
 from climate_engine.verification import metrics
 
@@ -40,7 +45,7 @@ class Platform:
                         "created_at": now(),
                         "artifact_path": None,
                         "checksum": checksum(model),
-                        "git_commit": os.getenv("GIT_COMMIT", "development"),
+                        "git_commit": code_version(),
                         "metrics": {},
                         "notes": DEMO_LABEL,
                         "validated": True,
@@ -48,9 +53,21 @@ class Platform:
                     model["model_id"],
                 )
         for source in config("observations")["sources"]:
-            self.repo.save("dataset", MockObservationProvider(source).metadata(), source)
+            try:
+                self.repo.get("dataset", source)
+            except KeyError:
+                self.repo.save("dataset", MockObservationProvider(source).metadata(), source)
         for cycle in config("forecasts")["cycles"]:
             self.repo.save("forecast_cycle", {"cycle": str(cycle), "mode": "synthetic"}, str(cycle))
+
+    def observation(self, source: str):
+        metadata = self.repo.get("dataset", source)
+        if metadata.get("mode") == "local":
+            path = permitted_file(metadata["path"], "DATA_ROOT", "data/observations")
+            if file_checksum(path) != metadata["checksum"]:
+                raise ValueError("Observation file changed after QC; register it again")
+            return LocalNetCDFProvider(source, str(path))
+        return MockObservationProvider(source)
 
     def model(self, model_id: str):
         metadata = self.repo.get("model", model_id)
@@ -73,7 +90,7 @@ class Platform:
             raise ValueError("Unknown country")
         start, end = week2_dates(s.cycle)
         forecast = MockForecastProvider(s.provider).load(s.cycle)
-        obs = MockObservationProvider(s.observation).load(start, end)
+        obs = self.observation(s.observation).load(start, end)
         qc = [check_dataset(forecast, forecast=True), check_dataset(obs, start, end)]
         if any(result["status"] == "FAIL" for result in qc):
             raise ValueError("QC failed: " + str(qc))
@@ -108,7 +125,7 @@ class Platform:
                 }
             )
         comparison = []
-        for model_id in ["raw-v1", "mock-v1"]:
+        for model_id in dict.fromkeys(["raw-v1", "mock-v1", s.model]):
             pred = self.model(model_id).predict(raw).values
             comparison.append(
                 {
@@ -118,13 +135,18 @@ class Platform:
             )
         obs_comparison = []
         for source in cfg_observations():
-            other = (
-                MockObservationProvider(source)
-                .load(start, end)
-                .precipitation.sum("time", skipna=False)
-            )
-            _, aligned = align_exact(corrected, other)
-            obs_comparison.append({"source": source, **metrics(f[mask], aligned.values[mask])})
+            try:
+                other_dataset = self.observation(source).load(start, end)
+                other_qc = check_dataset(other_dataset, start, end)
+                if other_qc["status"] == "FAIL":
+                    raise ValueError("Comparison observation failed QC")
+                other = other_dataset.precipitation.sum("time", skipna=False)
+                _, aligned = align_exact(corrected, other)
+                obs_comparison.append({"source": source, **metrics(f[mask], aligned.values[mask])})
+            except (ValueError, FileNotFoundError, OSError) as exc:
+                obs_comparison.append(
+                    {"source": source, "status": "unavailable", "error": str(exc)}
+                )
         fields = {
             "corrected": f,
             "raw": r,
@@ -173,7 +195,7 @@ class Platform:
             "observation_source": s.observation,
             "observation_version": obs.attrs["version"],
             "code_version": "0.1.0",
-            "git_commit": os.getenv("GIT_COMMIT", "development"),
+            "git_commit": code_version(),
             "pipeline_version": cfg["version"],
             "domain": cfg["domain"],
             "grid": cfg["grid_shape"],
@@ -183,7 +205,11 @@ class Platform:
             "qc_status": "WARN" if any(item["status"] == "WARN" for item in qc) else "PASS",
             "mode": "synthetic",
             "mask_status": cfg["mask_status"],
-            "config_checksum": checksum(cfg),
+            "config_checksum": configuration_checksum(),
+            "observation_mode": self.repo.get("dataset", s.observation).get("mode", "synthetic"),
+            "observation_checksum": self.repo.get("dataset", s.observation).get(
+                "checksum", checksum(obs.attrs)
+            ),
             "metric_scope": "paired spatial cells, one accumulated seven-day case",
             "anomaly_reference": "synthetic reference; not a historical climatology",
         }

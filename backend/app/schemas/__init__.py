@@ -60,3 +60,9 @@ class RegisterRequest(BaseModel):
     training_period: str = "not supplied"
     validation_period: str = "not supplied"
     notes: str = ""
+
+
+class IngestRequest(BaseModel):
+    source: Literal["CHIRPS", "TAMSAT", "RFE2"]
+    path: str
+    actor: str = Field(min_length=2, max_length=80)

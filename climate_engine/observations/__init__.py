@@ -113,10 +113,11 @@ class LocalNetCDFProvider(ObservationProvider):
         units = ds[variable].attrs.get("units", ds.attrs.get("units"))
         if units != "mm/day":
             raise ValueError("Explicit unit conversion required; expected mm/day")
+        ds = ds.transpose("time", "latitude", "longitude").sortby(["latitude", "longitude"])
         ds.attrs.update(
             units=units,
             source=self.source,
-            version="local",
+            version=str(ds.attrs.get("version", "local")),
             variable=variable,
             processing_level="local",
             provenance=str(self.path),

@@ -11,7 +11,6 @@ from backend.app.db import Repository
 from backend.app.schemas import ForecastResponse, Selection
 from backend.app.services.platform import Platform
 from climate_engine.core import DEMO_LABEL, config
-from climate_engine.observations import MockObservationProvider
 
 
 class JSONFormatter(logging.Formatter):
@@ -111,12 +110,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
         return p.repo.list("dataset")
 
     @app.get("/observations/{source}/availability")
-    def availability(source: str) -> dict:
-        return {"source": source, "dates": MockObservationProvider(source).list_available_dates()}
+    def availability(source: str, p: Platform = Depends(platform)) -> dict:
+        return {"source": source, "dates": p.observation(source).list_available_dates()}
 
     @app.get("/observations/{source}")
-    def observation(source: str) -> dict:
-        return MockObservationProvider(source).metadata()
+    def observation(source: str, p: Platform = Depends(platform)) -> dict:
+        return p.repo.get("dataset", source)
 
     @app.get("/models")
     def models(p: Platform = Depends(platform)) -> list[dict]:
