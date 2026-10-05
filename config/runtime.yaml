@@ -1,0 +1,2 @@
+execution: {backend: local}
+llm: {provider: mock, base_url: 'http://localhost:8001/v1', model: qwen-prototype}

@@ -1,0 +1,5 @@
+sources:
+  CHIRPS: {version: demo-2.0, seed: 11, mode: synthetic}
+  TAMSAT: {version: demo-3.1, seed: 22, mode: synthetic}
+  RFE2: {version: demo-2.0, seed: 33, mode: synthetic}
+placeholders: [IMERG, ARC2, Stations]

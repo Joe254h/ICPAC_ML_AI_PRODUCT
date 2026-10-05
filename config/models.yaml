@@ -1,0 +1,4 @@
+models:
+  - {model_id: mock-v1, model_name: Mock correction, version: 1.0.0, model_type: mock, status: production, feature_schema: rainfall_total_v1}
+  - {model_id: raw-v1, model_name: Raw ECMWF, version: 1.0.0, model_type: raw, status: candidate, feature_schema: rainfall_total_v1}
+placeholders: [CatBoost, LightGBM, XGBoost, RandomForest, ABC, Hybrid7, Atmos37, DeepLearning]
