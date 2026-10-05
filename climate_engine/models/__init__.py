@@ -1,3 +1,4 @@
+import json
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -57,7 +58,17 @@ class ArtifactModel(ForecastModel):
             raise FileNotFoundError("Model artifact unavailable")
         if self.feature_schema != "rainfall_total_v1":
             raise ValueError("Add a versioned feature builder for this schema before inference")
-        if self.model_type == "catboost":
+        if self.model_type == "abc":
+            if self.artifact.stat().st_size > 4096:
+                raise ValueError("ABC JSON is too large")
+            data = json.loads(self.artifact.read_text(encoding="utf-8"))
+            if data.get("schema") != "affine_rainfall_v1":
+                raise ValueError("Unsupported ABC analytical correction schema")
+            scale, offset = float(data["scale"]), float(data["offset"])
+            if not np.isfinite([scale, offset]).all() or scale < 0 or offset < 0:
+                raise ValueError("ABC correction coefficients must be finite and nonnegative")
+            self.estimator = (scale, offset)
+        elif self.model_type == "catboost":
             from catboost import CatBoostRegressor
 
             self.estimator = CatBoostRegressor()
@@ -79,7 +90,10 @@ class ArtifactModel(ForecastModel):
             raise ValueError("Feature schema mismatch")
         if self.estimator is None:
             self.load()
-        values = np.asarray(self.estimator.predict(dataset.values.reshape(-1, 1)))
+        if self.model_type == "abc":
+            values = dataset.values.reshape(-1) * self.estimator[0] + self.estimator[1]
+        else:
+            values = np.asarray(self.estimator.predict(dataset.values.reshape(-1, 1)))
         if not np.isfinite(values).all() or (values < 0).any():
             raise ValueError("Model returned invalid rainfall")
         return dataset.copy(data=values.reshape(dataset.shape))

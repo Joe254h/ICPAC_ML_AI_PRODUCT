@@ -49,6 +49,7 @@ class Platform:
                         "metrics": {},
                         "notes": DEMO_LABEL,
                         "validated": True,
+                        "deployment_date": now() if model["status"] == "production" else None,
                     },
                     model["model_id"],
                 )
@@ -75,11 +76,14 @@ class Platform:
             return MockForecastModel()
         if metadata["model_type"] == "raw":
             return RawECMWFModel()
-        return ArtifactModel(
-            metadata["model_type"], metadata["artifact_path"], metadata["feature_schema"]
-        )
+        path = permitted_file(metadata["artifact_path"], "ARTIFACT_ROOT", "artifacts")
+        if file_checksum(path) != metadata["checksum"]:
+            raise ValueError("Model artifact changed after registration; register a new version")
+        return ArtifactModel(metadata["model_type"], str(path), metadata["feature_schema"])
 
     def calculate(self, selection: Selection) -> dict[str, Any]:
+        self.observation(selection.observation)
+        self.model(selection.model)
         return self._calculate(selection.model_dump_json())
 
     @lru_cache(maxsize=96)
