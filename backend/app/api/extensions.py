@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI
+from fastapi.responses import Response
 
 from backend.app.schemas import (
     ChatRequest,
@@ -7,6 +8,8 @@ from backend.app.schemas import (
     ReviewRequest,
     Selection,
 )
+from backend.app.services.bulletin_export import HTMLBulletinExporter
+from backend.app.services.bulletins import BulletinService
 from backend.app.services.ingestion import ObservationIngestion
 from backend.app.services.jobs import Jobs
 from backend.app.services.registry import ModelRegistry
@@ -75,3 +78,47 @@ def install(app: FastAPI, dependency):
     @app.get("/references/{id}")
     def reference(id: str) -> dict:
         return ReferenceIndex().get(id)
+
+    @app.get("/bulletins")
+    def bulletins(platform=Depends(dependency)) -> list[dict]:
+        return list(reversed(platform.repo.list("bulletin")))
+
+    @app.post("/bulletins/generate")
+    def generate_bulletin(
+        body: Selection, parent_id: str | None = None, platform=Depends(dependency)
+    ) -> dict:
+        return BulletinService(platform).generate(body, parent_id)
+
+    @app.get("/bulletins/compare")
+    def compare_bulletins(left: str, right: str, platform=Depends(dependency)) -> dict:
+        return BulletinService(platform).compare(left, right)
+
+    @app.get("/bulletins/{id}")
+    def bulletin(id: str, platform=Depends(dependency)) -> dict:
+        return platform.repo.get("bulletin", id)
+
+    @app.get("/bulletins/{id}/map")
+    def bulletin_map(id: str, platform=Depends(dependency)):
+        return Response(
+            BulletinService(platform).map(platform.repo.get("bulletin", id)), media_type="image/png"
+        )
+
+    @app.get("/bulletins/{id}/export")
+    def export_bulletin(id: str, platform=Depends(dependency)):
+        bulletin = platform.repo.get("bulletin", id)
+        content = HTMLBulletinExporter().export(bulletin, BulletinService(platform).map(bulletin))
+        return Response(
+            content,
+            media_type="text/html",
+            headers={"Content-Disposition": f'attachment; filename="icpac-bulletin-{id}.html"'},
+        )
+
+    @app.post("/bulletins/{id}/{action}")
+    def review_bulletin(
+        id: str, action: str, body: ReviewRequest, platform=Depends(dependency)
+    ) -> dict:
+        return BulletinService(platform).transition(id, action, body)
+
+    @app.get("/audit")
+    def audit(platform=Depends(dependency)) -> list[dict]:
+        return list(reversed(platform.repo.list("audit")))[0:100]
