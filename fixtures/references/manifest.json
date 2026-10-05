@@ -1,0 +1,24 @@
+[
+  {
+    "id": "verification-guide",
+    "title": "Prototype verification guide",
+    "category": "scientific_reference",
+    "path": "verification.md",
+    "approved": true
+  },
+  {
+    "id": "review-sop",
+    "title": "Prototype forecaster review procedure",
+    "category": "operational_documentation",
+    "path": "review.md",
+    "approved": true
+  },
+  {
+    "id": "sample-bulletin",
+    "title": "Synthetic historical bulletin example",
+    "category": "historical_bulletin",
+    "path": "sample.md",
+    "approved": true,
+    "synthetic": true
+  }
+]

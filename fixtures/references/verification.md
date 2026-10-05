@@ -1,0 +1,2 @@
+# Verification reference
+RMSE and MAE summarize paired forecast and observation errors. Bias is forecast minus observation. Spatial Pearson correlation in a single seven-day accumulated case describes spatial association; it does not measure temporal forecast skill. Constant fields have undefined correlation. Days 8–14 refers to valid dates initialization plus eight through fourteen days inclusive. Anomaly maps use a synthetic reference in the demonstration and must not be treated as historical-climatology anomalies.

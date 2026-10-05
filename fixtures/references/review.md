@@ -1,0 +1,2 @@
+# Forecaster review procedure
+This is a prototype SOP, not an official ICPAC policy. Check sources, valid period, QC, map extent, units, masks and model version before reviewing a narrative. Scientific numbers must originate in deterministic backend tools. Bulletin approval, publication and production model promotion require named human confirmation and an audit record. A draft cannot publish automatically. Live dissemination and operational authentication are not configured.
