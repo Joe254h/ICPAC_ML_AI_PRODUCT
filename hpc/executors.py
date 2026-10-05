@@ -1,5 +1,6 @@
 """Allowlisted execution; no user-provided command strings."""
 
+import logging
 import os
 import re
 import subprocess
