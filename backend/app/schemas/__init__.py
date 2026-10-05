@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Selection(BaseModel):
@@ -48,6 +48,14 @@ class ReviewRequest(BaseModel):
     actor: str = Field(min_length=2, max_length=80)
     confirmed: bool = False
     comment: str = Field(default="", max_length=1000)
+
+    @field_validator("actor")
+    @classmethod
+    def named_reviewer(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("A named reviewer is required")
+        return value
 
 
 class RegisterRequest(BaseModel):

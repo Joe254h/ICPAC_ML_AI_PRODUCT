@@ -77,11 +77,9 @@ test("Model promotion requires explicit confirmation and can roll back", async (
   page,
 }) => {
   await page.goto("/models");
-  const raw = page
-    .locator(".product-card")
-    .filter({
-      has: page.getByRole("heading", { name: "Raw ECMWF", exact: true }),
-    });
+  const raw = page.locator(".product-card").filter({
+    has: page.getByRole("heading", { name: "Raw ECMWF", exact: true }),
+  });
   await raw.getByRole("button", { name: "Promote", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Confirm action", exact: true }),
@@ -96,11 +94,9 @@ test("Model promotion requires explicit confirmation and can roll back", async (
   await page
     .getByRole("button", { name: "Confirm action", exact: true })
     .click();
-  const mock = page
-    .locator(".product-card")
-    .filter({
-      has: page.getByRole("heading", { name: "Mock correction", exact: true }),
-    });
+  const mock = page.locator(".product-card").filter({
+    has: page.getByRole("heading", { name: "Mock correction", exact: true }),
+  });
   await expect(
     mock.getByRole("button", { name: "Rollback", exact: true }),
   ).toBeVisible();

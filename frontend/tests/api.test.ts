@@ -4,24 +4,20 @@ afterEach(() => vi.unstubAllGlobals());
 test("surfaces API failures instead of inventing data", async () => {
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockResolvedValue({
-        ok: false,
-        json: async () => ({ detail: "QC failed" }),
-      }),
+    vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ detail: "QC failed" }),
+    }),
   );
   await expect(request("/analysis")).rejects.toThrow("QC failed");
 });
 test("successful typed response is used", async () => {
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ mode: "synthetic" }),
-      }),
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: "synthetic" }),
+    }),
   );
   await expect(request("/health")).resolves.toEqual({ mode: "synthetic" });
 });

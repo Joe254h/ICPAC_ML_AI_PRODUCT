@@ -2,6 +2,8 @@
 
 Phase 1 was completed before later phases and passed hosted Python checks, TypeScript/lint/unit/build checks, browser selection/verification, and Docker Compose image/startup/proxy checks.
 
+The final fast backend suite passes 27 tests; three additional trained native-artifact round-trip tests pass in their dedicated hosted CI lane. Frontend validation includes three unit tests, a production build, and five Chrome acceptance workflows.
+
 Full prototype acceptance checks cover:
 - canonical synthetic/local observation interfaces, units, slicing and missing files;
 - corrupt NetCDF, missing coordinates/variables/leads, NaNs/infinities and exact alignment;
