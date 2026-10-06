@@ -7,8 +7,8 @@ A modular, CPU-friendly climate-operations prototype: Next.js/TypeScript fronten
 Requires Docker Engine and Docker Compose.
 
 ```bash
-git clone https://github.com/Joe254h/icpac.git
-cd icpac
+git clone https://github.com/Joe254h/ICPAC_ML_AI_PRODUCT.git
+cd ICPAC_ML_AI_PRODUCT
 cp .env.example .env
 docker compose up --build
 ```
