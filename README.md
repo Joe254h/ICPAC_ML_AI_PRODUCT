@@ -9,8 +9,6 @@ Requires Docker Engine and Docker Compose.
 ```bash
 git clone https://github.com/Joe254h/icpac.git
 cd icpac
-# Until merged, use the implementation branch:
-git switch feat/climate-intelligence-prototype
 cp .env.example .env
 docker compose up --build
 ```
