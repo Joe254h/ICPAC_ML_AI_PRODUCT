@@ -19,6 +19,8 @@ export type Model = {
   training_period: string;
   validation_period: string;
   checksum: string;
+  /** "week2_operational" models run on the ICPAC-11 grid, not the demo grid. */
+  task?: string;
   [key: string]: unknown;
 };
 export type Config = {

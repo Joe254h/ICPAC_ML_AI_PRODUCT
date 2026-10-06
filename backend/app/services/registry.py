@@ -1,12 +1,14 @@
 """Versioned artifact registration and explicitly reviewed model transitions."""
 
 import json
+from pathlib import Path
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from backend.app.db import Record, now
 from backend.app.schemas import RegisterRequest, ReviewRequest, Selection
+from backend.app.services import operational
 from climate_engine.core import config
 from climate_engine.provenance import code_version, file_checksum, permitted_file
 
@@ -24,6 +26,8 @@ class ModelRegistry:
         self.repo = platform.repo
 
     def register(self, body: RegisterRequest) -> dict:
+        if operational.is_operational_schema(body.feature_schema):
+            return self._register_bundle(body)
         if body.feature_schema != config()["feature_schema"]:
             raise ValueError(
                 "Unsupported feature schema; implement and validate its versioned builder first"
@@ -33,12 +37,7 @@ class ModelRegistry:
             raise ValueError(
                 "Use a supported native artifact format: CatBoost, LightGBM, XGBoost or ABC JSON"
             )
-        try:
-            self.repo.get("model", body.model_id)
-        except KeyError:
-            pass
-        else:
-            raise ValueError("Model IDs are immutable; register a new version ID")
+        self._require_new_id(body.model_id)
         record = self.repo.save(
             "model",
             {
@@ -61,8 +60,67 @@ class ModelRegistry:
         )
         return record
 
+    def _register_bundle(self, body: RegisterRequest) -> dict:
+        path = permitted_file(
+            str(operational.manifest_path(body.artifact_path)), "ARTIFACT_ROOT", "artifacts"
+        )
+        self._require_new_id(body.model_id)
+        details = operational.describe(path)
+        for key in ("feature_schema", "model_type"):
+            if details[key] != getattr(body, key):
+                raise ValueError(f"{key} does not match the bundle manifest")
+        record = self.repo.save(
+            "model",
+            {
+                **body.model_dump(),
+                **details,
+                "artifact_path": str(path),
+                "created_at": now(),
+                "git_commit": code_version(),
+                "status": "experimental",
+                "validated": False,
+                "metrics": {},
+            },
+            body.model_id,
+        )
+        self.repo.audit(
+            "register_model", "prototype", body.model_id, {"checksum": record["checksum"]}
+        )
+        return record
+
+    def _require_new_id(self, model_id: str) -> None:
+        try:
+            self.repo.get("model", model_id)
+        except KeyError:
+            return
+        raise ValueError("Model IDs are immutable; register a new version ID")
+
+    def _validate_bundle(self, model_id: str, metadata: dict) -> dict:
+        """Attach the bundle's own hindcast validation metrics as reviewable evidence."""
+        current = operational.describe(Path(metadata["artifact_path"]))
+        if current["bundle_checksums"] != metadata["bundle_checksums"]:
+            raise ValueError("Bundle files changed after registration; register a new version")
+        if not current["training_metrics"]:
+            raise ValueError("Bundle has no metrics.json; supply validation-period metrics")
+        metadata.update(
+            validated=True,
+            metrics=current["training_metrics"],
+            validation={
+                "source": "metrics.json supplied with the bundle",
+                "period": metadata.get("validation_period"),
+                "artifact_checksum": metadata["checksum"],
+                "timestamp": now(),
+                "scope": "experiment validation period; independent operational "
+                "verification still required",
+            },
+        )
+        self.repo.audit("validate_model", "prototype", model_id, {"source": "bundle metrics"})
+        return self.repo.save("model", metadata, model_id)
+
     def validate(self, model_id: str, selection: Selection) -> dict:
         metadata = self.repo.get("model", model_id)
+        if metadata.get("task") == operational.TASK:
+            return self._validate_bundle(model_id, metadata)
         result = self.platform.calculate(selection.model_copy(update={"model": model_id}))
         metadata.update(
             validated=True,
