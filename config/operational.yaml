@@ -1,42 +1,52 @@
 # Operational Week-2 inference on the authoritative ICPAC-11 domain.
 #
-# Values marked REQUIRED are deliberately null: they must be copied from the
-# frozen training code, never guessed. The pipeline refuses to run until they
-# are set, and names the missing key in its error.
-version: week2-operational-v1
+# Every scientific value here is taken from the HPC artifacts or must be copied from the
+# frozen training code. Values marked REQUIRED are null on purpose: the pipeline refuses
+# to run until they are set and names the missing key, rather than guessing.
+# Evidence for derived values: docs/hpc_integration_audit.md.
+version: week2-operational-v2
 task: week2_precipitation_operational
+experiment: MBC_EXPERIMENT_20261005
 
 grid:
-  # Authoritative ML grid: 800 latitude x 700 longitude points at 0.05 degrees.
+  # Authoritative ML grid: 800 latitude x 700 longitude points at 0.05 degrees,
+  # ascending in both axes. Cells are numbered in C order (lat_index * 700 + lon_index).
   shape: [800, 700]
   latitude: [-14.975, 24.975]
   longitude: [19.025, 53.975]
   domain_cells: 205999
-  # authoritative_icpac11_mask.npz (latitude, longitude, domain_mask,
-  # country_id, country_names). ICPAC_MASK_PATH overrides this value.
-  mask_path: null
+  # Repository-relative unless absolute; ICPAC_MASK_PATH overrides.
+  mask_path: artifacts/domain/authoritative_icpac11_mask.npz
 
 ecmwf:
   member_dim: number
   step_dim: step
   level_dim: isobaricInhPa
+  # ECMWF numbering: control = 0, perturbed = 1..N. Training used perturbed members
+  # only (HPC files *_pf_*), so the control member is excluded from the features.
+  control_member_number: 0
+  include_control_member: false
   rainfall:
     variable: tp
-    # Days 8-14: accumulation between the 168 h and 336 h forecast points.
+    # ECMWF tp is accumulated from initialization ("cumulative"); "daily" accepts
+    # 24-hour totals labelled by the step that ends each day.
+    accumulation: cumulative
+    # Days 8-14: the accumulation between the 168 h and 336 h forecast points.
     accumulation_steps_hours: [168, 336]
-    # REQUIRED only if the rainfall input is not already on the model grid:
-    # set to the regridding method used in training (bilinear is supported).
+    # REQUIRED only when the rainfall input is not already on the model grid.
     regrid: null
   pressure:
-    # REQUIRED: the seven Week-2 step hours used to build the training features.
+    # REQUIRED: the seven Week-2 step hours used for the atmospheric training features.
     week2_steps_hours: null
 
 calendar:
-  # REQUIRED: which date selects the MBC calendar month and the doy features.
-  # One of: initialization, target_start (init + 8 d), target_mid (init + 11 d),
-  # target_end (init + 14 d).
-  mbc_month_basis: null
-  doy_basis: null
+  # Derived from the artifacts: the initialization month reproduces the MBC pair_count
+  # exactly, and a 1-based initialization day of year over 365.25 days matches every
+  # CatBoost split border on doy_sin and doy_cos.
+  mbc_month_basis: initialization
+  doy_basis: initialization
+  doy_index_base: 1
+  doy_year_length: 365.25
 
 mbc:
   ratio_min: 0.05
@@ -46,6 +56,12 @@ mbc:
 abc:
   # Frozen on the 2020-2021 validation period: ABC = max(0, a*DPP + (1-a)*PPP).
   alpha: 0.124
+
+periods:
+  training: [2008, 2019]
+  validation: [2020, 2021]
+  # Independent test period: never used for tuning, fitting or model selection.
+  protected_test: [2022, 2024]
 
 feature_schemas:
   hybrid7:
