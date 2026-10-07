@@ -13,6 +13,10 @@ import pandas as pd
 import xarray as xr
 
 LABEL = "SYNTHETIC TEST FIXTURE - NOT ECMWF DATA"
+# Pressure-level steps written into synthetic fixtures. They are test values chosen for
+# the fixture, not the training definition, which stays REQUIRED in
+# config/operational.yaml (ecmwf.pressure.week2_steps_hours) until the HPC supplies it.
+FIXTURE_PRESSURE_STEPS_HOURS = (168, 192, 216, 240, 264, 288, 312)
 # Typical magnitudes: (base, amplitude, units) per pressure-level variable and level.
 PRESSURE_FIELDS = {
     "q": ({850: 0.009, 700: 0.005, 500: 0.002, 200: 0.0001}, 0.003, "kg kg**-1"),
@@ -119,12 +123,19 @@ def write_fixture(
     longitude: np.ndarray,
     steps_hours: Sequence[float] | None,
     members: int = 3,
+    rainfall_steps_hours: Sequence[float] | None = None,
 ) -> tuple[Path, Path | None]:
-    """Write rainfall (on the given grid) and, if steps are given, coarse pressure files."""
+    """Write rainfall (on the given grid) and, if steps are given, coarse pressure files.
+
+    ``rainfall_steps_hours`` keeps only those cumulative steps (smaller files).
+    """
     directory.mkdir(parents=True, exist_ok=True)
     tag = initialization.isoformat()
     rain_path = directory / f"ecmwf_s2s_tp_{tag}.nc"
-    rainfall_fixture(initialization, latitude, longitude, members).to_netcdf(rain_path)
+    rainfall = rainfall_fixture(initialization, latitude, longitude, members)
+    if rainfall_steps_hours is not None:
+        rainfall = rainfall.sel(step=pd.to_timedelta(list(rainfall_steps_hours), unit="h"))
+    rainfall.to_netcdf(rain_path)
     if steps_hours is None:
         return rain_path, None
     plat, plon = coarse_axes(

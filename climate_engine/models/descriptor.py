@@ -134,12 +134,16 @@ class ModelDescriptor:
 
     def verify(self, grid: DomainGrid, cfg: dict) -> dict[str, Any]:
         """Every registration check; returns the registry fields."""
+        return self.verified(grid, cfg)[0]
+
+    def verified(self, grid: DomainGrid, cfg: dict) -> tuple[dict[str, Any], ResidualMBCModel]:
+        """Every registration check; returns the registry fields and the loaded model."""
         checksums = self.verify_checksums()
         metrics, manifest = self.check_metadata()
         model = self.load_model(grid, cfg)
         d = self.data
         root = artifact_root()
-        return {
+        fields = {
             "model_id": d["model_id"],
             "model_name": d["model_name"],
             "version": d["version"],
@@ -177,6 +181,7 @@ class ModelDescriptor:
             },
             "matrix_manifest": {k: manifest[k] for k in ("experiment", "target") if k in manifest},
         }
+        return fields, model
 
 
 def load_descriptor(path: str | Path) -> ModelDescriptor:

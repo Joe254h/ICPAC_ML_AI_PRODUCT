@@ -44,6 +44,55 @@ def continuous_metrics(forecast: np.ndarray, observed: np.ndarray) -> dict[str, 
     return out
 
 
+def sufficient_statistics(forecast: np.ndarray, observed: np.ndarray) -> dict[str, float]:
+    """Sums from which MAE, RMSE, bias and Pearson r of pooled cases follow exactly."""
+    f, o = np.asarray(forecast, dtype=np.float64), np.asarray(observed, dtype=np.float64)
+    if f.shape != o.shape:
+        raise ValueError("Aligned arrays required")
+    valid = np.isfinite(f) & np.isfinite(o)
+    f, o = f[valid], o[valid]
+    e = f - o
+    return {
+        "n": float(f.size),
+        "sum_f": float(f.sum()),
+        "sum_o": float(o.sum()),
+        "sum_ff": float(np.dot(f, f)),
+        "sum_oo": float(np.dot(o, o)),
+        "sum_fo": float(np.dot(f, o)),
+        "sum_abs_e": float(np.abs(e).sum()),
+        "sum_ee": float(np.dot(e, e)),
+    }
+
+
+def pooled_metrics(statistics: Iterable[dict[str, float]]) -> dict[str, float | int | None]:
+    """Metrics over every cell of several cases, from their sufficient statistics."""
+    keys = ("n", "sum_f", "sum_o", "sum_ff", "sum_oo", "sum_fo", "sum_abs_e", "sum_ee")
+    total = dict.fromkeys(keys, 0.0)
+    cases = 0
+    for item in statistics:
+        cases += 1
+        for key in keys:
+            total[key] += item[key]
+    n = total["n"]
+    if not n:
+        raise ValueError("No valid paired cells")
+    var_f = n * total["sum_ff"] - total["sum_f"] ** 2
+    var_o = n * total["sum_oo"] - total["sum_o"] ** 2
+    covariance = n * total["sum_fo"] - total["sum_f"] * total["sum_o"]
+    return {
+        "mae": total["sum_abs_e"] / n,
+        "rmse": float(np.sqrt(total["sum_ee"] / n)),
+        "bias": (total["sum_f"] - total["sum_o"]) / n,
+        "correlation": float(covariance / np.sqrt(var_f * var_o))
+        if var_f > 0 and var_o > 0
+        else None,
+        "forecast_mean": total["sum_f"] / n,
+        "observed_mean": total["sum_o"] / n,
+        "sample_count": int(n),
+        "cases": cases,
+    }
+
+
 def season_of(day: date) -> str:
     return next(name for name, months in SEASONS.items() if day.month in months)
 

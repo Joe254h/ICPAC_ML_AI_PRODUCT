@@ -51,7 +51,7 @@ from matplotlib.path import Path as MplPath
 from matplotlib.transforms import Bbox
 
 from climate_engine.core import ROOT
-from climate_engine.operational.grid import load_grid
+from climate_engine.operational.grid import DomainGrid, load_grid
 
 BOUNDARIES = ROOT / "cartography" / "east_africa_11_adm0.geojson"
 LOGO = ROOT / "cartography" / "IGAD-CPAC-01.jpg"
@@ -262,13 +262,19 @@ class Canvas:
         use_valid_mask: bool = True,
         boundaries: Path = BOUNDARIES,
         logo: Path = LOGO,
-        mask: Path = DOMAIN_MASK,
+        mask: Path | DomainGrid = DOMAIN_MASK,
     ):
         self.countries = load_boundaries(boundaries)
         self.extent = frozen_extent(self.countries)
         self.clip = union_path(self.countries)
         self.logo = logo_image(logo)
-        self.valid = valid_mask(mask) if use_valid_mask else None
+        self.valid: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
+        if use_valid_mask:
+            self.valid = (
+                (mask.mask, mask.latitude, mask.longitude)
+                if isinstance(mask, DomainGrid)
+                else valid_mask(mask)
+            )
         west, east, south, north = self.extent
         self.aspect = 1.0 / math.cos(math.radians((south + north) / 2))
         self.height_per_width = (north - south) * self.aspect / (east - west)

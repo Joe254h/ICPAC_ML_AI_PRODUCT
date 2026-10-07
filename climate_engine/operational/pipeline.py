@@ -28,7 +28,7 @@ from climate_engine.operational.settings import (
 )
 from climate_engine.preprocessing.atmos37 import build_features
 from climate_engine.provenance import code_version, configuration_checksum
-from climate_engine.verification import continuous_metrics
+from climate_engine.verification import continuous_metrics, season_of, sufficient_statistics
 
 FIELDS = {
     "raw": "Raw ECMWF ensemble-mean Week-2 rainfall",
@@ -107,7 +107,9 @@ def run_forecast(
     grid: DomainGrid,
     cfg: dict,
     model_record: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> ForecastRun:
+    """One forecast; ``overrides`` records any configuration a caller replaced (provenance)."""
     initialization = date.fromisoformat(cycle)
     rainfall = provider.load(cycle)
     pressure = provider.load_pressure(cycle)
@@ -144,6 +146,10 @@ def run_forecast(
         "software_version": {"package": "0.1.0", "git_commit": code_version()},
         "pipeline_version": cfg["version"],
         "config_checksum": configuration_checksum(),
+        "configuration_overrides": overrides or {},
+        "pressure_steps_hours": cfg["ecmwf"]["pressure"].get("week2_steps_hours")
+        if pressure is not None
+        else None,
         "ensemble_members": result.metadata["members"],
         "mbc_month": result.metadata["mbc_month"],
         "doy_date": result.metadata["doy_date"],
@@ -183,11 +189,25 @@ def load_observed(path: Path, grid: DomainGrid, start: datetime, end: datetime) 
     return grid.to_cells(np.asarray(field.values, dtype=np.float64))
 
 
-def verify(run: ForecastRun, observed_cells: np.ndarray, grid: DomainGrid, cfg: dict) -> dict:
-    """MAE, RMSE, bias and spatial correlation of raw, MBC and hybrid against observations."""
+def verify(
+    run: ForecastRun,
+    observed_cells: np.ndarray,
+    grid: DomainGrid,
+    cfg: dict,
+    observation: dict[str, Any] | None = None,
+) -> dict:
+    """MAE, RMSE, bias and spatial correlation of raw, MBC and hybrid against observations.
+
+    Domain results carry sufficient statistics so that cases can be pooled exactly (for
+    seasonal metrics) without keeping the observed fields.
+    """
     forecasts = {name: grid.to_cells(run.dataset[name].values) for name in ("raw", "mbc", "hybrid")}
     domain = {
-        name: continuous_metrics(values, observed_cells) for name, values in forecasts.items()
+        name: {
+            **continuous_metrics(values, observed_cells),
+            "statistics": sufficient_statistics(values, observed_cells),
+        }
+        for name, values in forecasts.items()
     }
     countries = {}
     for country, selected in country_selections(grid).items():
@@ -197,8 +217,12 @@ def verify(run: ForecastRun, observed_cells: np.ndarray, grid: DomainGrid, cfg: 
                 for name, values in forecasts.items()
             }
     protected = run.provenance["protected_test_period"]
+    valid_start = datetime.fromisoformat(run.provenance["forecast_valid_start"]).date()
     return {
         "status": "available",
+        "observation": observation or {},
+        "season": season_of(valid_start),
+        "protected_test_period": protected,
         "domain": domain,
         "countries": countries,
         "scope": "spatial metrics over one Week-2 case on the authoritative domain",
