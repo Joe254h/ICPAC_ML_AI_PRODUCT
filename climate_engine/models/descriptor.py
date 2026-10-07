@@ -8,6 +8,7 @@ happens only after every check passes.
 """
 
 import json
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -52,8 +53,24 @@ REQUIRED = (
     "checksums",
 )
 DECLARABLE = {"experimental", "candidate"}
+# Validation evidence a metrics file must carry (hybrid rainfall against CHIRPS).
+VALIDATION_SCORES = ("rainfall_MAE", "rainfall_RMSE", "rainfall_bias", "rainfall_pearson_r")
 TEST_STATUSES = {"untested", "passed", "failed"}
 PERIOD = re.compile(r"^\d{4}-\d{4}$")
+
+
+def validation_scores(metrics: dict[str, Any]) -> dict[str, float]:
+    """The validation scores in a metrics file; every one must be a finite number."""
+    bad = [
+        key
+        for key in VALIDATION_SCORES
+        if isinstance(metrics.get(key), bool)
+        or not isinstance(metrics.get(key), int | float)
+        or not math.isfinite(metrics[key])
+    ]
+    if bad:
+        raise ValueError(f"The metrics lack finite validation scores: {bad}")
+    return {key: float(metrics[key]) for key in VALIDATION_SCORES}
 
 
 def artifact_root() -> Path:
@@ -110,6 +127,7 @@ class ModelDescriptor:
             raise ValueError(f"Artifact metadata disagrees with the descriptor: {failed}")
         if metrics.get("test_2022_2024_used") is not False or manifest.get("test_period_used"):
             raise ValueError("The artifact reports use of the independent test period")
+        validation_scores(metrics)
         return metrics, manifest
 
     def load_model(self, grid: DomainGrid, cfg: dict) -> ResidualMBCModel:

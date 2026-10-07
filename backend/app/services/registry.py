@@ -11,10 +11,14 @@ Production is per task: promoting a model retires only that task's production mo
 """
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.db import Record, now
@@ -26,6 +30,7 @@ from backend.app.schemas import (
 )
 from backend.app.services import operational
 from climate_engine.core import config
+from climate_engine.models.descriptor import VALIDATION_SCORES, validation_scores
 from climate_engine.provenance import code_version, file_checksum, permitted_file
 
 FORMATS = {
@@ -42,6 +47,40 @@ def task_of(record: dict[str, Any]) -> str:
     return str(record.get("task") or DEMO_TASK)
 
 
+def status_history(record: dict[str, Any]) -> list[dict[str, str]]:
+    """Every status a model has held and since when, oldest first. A record from before
+    histories were kept starts with its declared status if that never changed, else with
+    'unknown'."""
+    if record.get("status_history"):
+        return list(record["status_history"])
+    declared = (record.get("descriptor") or {}).get("declared_status")
+    unchanged = declared == record.get("status") and not record.get("deployment_date")
+    return [
+        {
+            "status": str(declared) if unchanged else "unknown",
+            "since": str(record.get("created_at") or "1970-01-01T00:00:00+00:00"),
+        }
+    ]
+
+
+def status_at(record: dict[str, Any], moment: str) -> str:
+    """A model's registry status at an ISO time. Before registration it is the status its
+    reviewed descriptor declared (production is only ever granted by the registry)."""
+    history = status_history(record)
+    when = datetime.fromisoformat(moment)
+    status = history[0]["status"]
+    for entry in history:
+        if datetime.fromisoformat(entry["since"]) <= when:
+            status = entry["status"]
+    return status
+
+
+def set_status(record: dict[str, Any], status: str, since: str) -> None:
+    if record.get("status") != status:
+        record["status_history"] = [*status_history(record), {"status": status, "since": since}]
+    record["status"] = status
+
+
 class ModelRegistry:
     def __init__(self, platform):
         self.platform = platform
@@ -55,45 +94,75 @@ class ModelRegistry:
         self._require_new_id(descriptor.model_id)
         self._require_unused_artifact(fields["checksum"])
         declared = descriptor.data["declared_status"]
+        stamp = now()
+        model_id = descriptor.model_id
         record = {
             **fields,
+            "id": model_id,
             "task": operational.TASK,
             "status": declared,
+            "status_history": [{"status": declared, "since": stamp}],
             "validated": True,
             "validation": {
                 "source": "metrics.json supplied with the artifacts",
                 "period": fields["validation_period"],
                 "scope": "experiment validation period; independent test still required",
-                "timestamp": now(),
+                "timestamp": stamp,
             },
             "inference_test": {
                 "status": "passed",
                 "fixture": "controlled synthetic matrix (seed 20261005)",
-                "timestamp": now(),
+                "timestamp": stamp,
             },
             "test_result": None,
-            "created_at": now(),
+            "created_at": stamp,
             "git_commit": code_version(),
             "registered_by": actor,
             "descriptor_data": descriptor.data,
             "deployment_date": None,
         }
-        saved = self.repo.save("model", record, descriptor.model_id)
-        self.repo.audit(
-            "register_model",
-            actor,
-            descriptor.model_id,
-            {"checksum": fields["checksum"], "descriptor": fields["descriptor"]},
-        )
-        if declared == "candidate":
-            self._approval(
-                "candidate",
-                descriptor.model_id,
-                str(descriptor.data.get("declared_by") or actor),
-                f"Declared candidate in reviewed descriptor {fields['descriptor']['path']}",
-                "registered",
+        # Checks and inserts in one locked transaction; the primary keys on the model ID
+        # and on the artifact claim make a concurrent duplicate fail instead of merging.
+        with self._write_lock() as session:
+            if session.get(Record, model_id) is not None:
+                raise ValueError("Model IDs are immutable; register a new version ID")
+            for row in session.scalars(select(Record).where(Record.kind == "model")):
+                other = json.loads(row.payload)
+                if (
+                    operational.is_operational(other)
+                    and other.get("checksum") == fields["checksum"]
+                ):
+                    raise ValueError(
+                        f"This model artifact is already registered as {other['model_id']}"
+                    )
+            session.add(Record(id=model_id, kind="model", payload=json.dumps(record)))
+            session.add(
+                self._record(
+                    "model_artifact",
+                    {"model_id": model_id, "checksum": fields["checksum"], "timestamp": stamp},
+                    f"model-artifact-{fields['checksum']}",
+                )
             )
-        return saved
+            session.add(
+                self._audit_record(
+                    "register_model",
+                    actor,
+                    model_id,
+                    {"checksum": fields["checksum"], "descriptor": fields["descriptor"]},
+                )
+            )
+            if declared == "candidate":
+                reviewer = str(descriptor.data.get("declared_by") or actor)
+                comment = (
+                    f"Declared candidate in reviewed descriptor {fields['descriptor']['path']}"
+                )
+                session.add(
+                    self._approval_record("candidate", model_id, reviewer, comment, "registered")
+                )
+                session.add(
+                    self._audit_record("model_candidate", reviewer, model_id, {"comment": comment})
+                )
+        return record
 
     def register(self, body: RegisterRequest) -> dict:
         """Demonstration models on the synthetic grid (one-feature schema)."""
@@ -182,26 +251,39 @@ class ModelRegistry:
         """Record the HPC's independent test outcome once; it can never be overwritten."""
         if not body.confirmed or not body.comment.strip():
             raise ValueError("Explicit confirmation, reviewer name and justification are required")
-        metadata = self.repo.get("model", model_id)
-        if not operational.is_operational(metadata):
-            raise ValueError("Independent test results apply to operational models only")
-        if metadata.get("test_status") != "untested":
-            raise ValueError(
-                "An independent test result is already recorded; a model is tested once. "
-                "Register a new version for any change"
+        # The result, its approval and the audit entry commit together or not at all.
+        with self._write_lock() as session:
+            row = session.scalars(
+                select(Record).where(Record.id == model_id).with_for_update()
+            ).first()
+            if row is None or row.kind != "model":
+                raise KeyError(model_id)
+            metadata = json.loads(row.payload)
+            if not operational.is_operational(metadata):
+                raise ValueError("Independent test results apply to operational models only")
+            if metadata.get("test_status") != "untested":
+                raise ValueError(
+                    "An independent test result is already recorded; a model is tested once. "
+                    "Register a new version for any change"
+                )
+            if body.period != metadata.get("test_period"):
+                raise ValueError(f"The independent test period is {metadata.get('test_period')}")
+            metadata["test_status"] = body.status
+            metadata["test_result"] = {
+                **body.model_dump(exclude={"confirmed"}),
+                "recorded_at": now(),
+            }
+            row.payload = json.dumps(metadata)
+            action = f"independent_test_{body.status}"
+            session.add(
+                self._approval_record(action, model_id, body.actor, body.comment, "untested")
             )
-        if body.period != metadata.get("test_period"):
-            raise ValueError(f"The independent test period is {metadata.get('test_period')}")
-        metadata["test_status"] = body.status
-        metadata["test_result"] = {
-            **body.model_dump(exclude={"confirmed"}),
-            "recorded_at": now(),
-        }
-        saved = self.repo.save("model", metadata, model_id)
-        self._approval(
-            f"independent_test_{body.status}", model_id, body.actor, body.comment, "untested"
-        )
-        return saved
+            session.add(
+                self._audit_record(
+                    f"model_{action}", body.actor, model_id, {"comment": body.comment}
+                )
+            )
+        return metadata
 
     # ------------------------------------------------------------------ transitions
 
@@ -233,9 +315,7 @@ class ModelRegistry:
         # Check artifact integrity and runtime before production changes.
         if action in {"promote", "rollback"}:
             self.platform.model(model_id).load()
-        with Session(self.repo.engine) as session:
-            if self.repo.url.startswith("sqlite"):
-                session.execute(text("BEGIN IMMEDIATE"))
+        with self._write_lock() as session:
             records = list(
                 session.scalars(select(Record).where(Record.kind == "model").with_for_update())
             )
@@ -244,14 +324,15 @@ class ModelRegistry:
                 raise KeyError(model_id)
             target = models[model_id]
             old = target["status"]
+            stamp = now()
             if action == "candidate":
                 if old != "experimental" or not target.get("validated"):
                     raise ValueError("Validate an experimental model before marking it candidate")
-                target["status"] = "candidate"
+                set_status(target, "candidate", stamp)
             elif action == "retire":
                 if old == "production":
                     raise ValueError("Promote a replacement before retiring production")
-                target["status"] = "retired"
+                set_status(target, "retired", stamp)
             else:
                 allowed = (
                     old == "candidate"
@@ -265,35 +346,30 @@ class ModelRegistry:
                 task = task_of(target)
                 for metadata in models.values():
                     if metadata["status"] == "production" and task_of(metadata) == task:
-                        metadata["status"] = "retired"
-                target.update(status="production", deployment_date=now())
+                        set_status(metadata, "retired", stamp)
+                set_status(target, "production", stamp)
+                target["deployment_date"] = stamp
             for record in records:
                 record.payload = json.dumps(models[record.id])
             session.add(self._approval_record(action, model_id, review.actor, review.comment, old))
             session.add(
-                Record(
-                    id=str(uuid4()),
-                    kind="audit",
-                    payload=json.dumps(
-                        {
-                            "action": f"model_{action}",
-                            "entity": model_id,
-                            "actor": review.actor,
-                            "details": {"comment": review.comment, "previous_status": old},
-                            "timestamp": now(),
-                        }
-                    ),
+                self._audit_record(
+                    f"model_{action}",
+                    review.actor,
+                    model_id,
+                    {"comment": review.comment, "previous_status": old},
                 )
             )
-            session.commit()
         self.platform._calculate.cache_clear()
         return target
 
     @staticmethod
     def _check_production_gate(record: dict) -> None:
         missing = []
-        if not record.get("metrics"):
-            missing.append("training and validation metrics")
+        try:
+            validation_scores(record.get("metrics") or {})
+        except ValueError:
+            missing.append(f"validation scores ({', '.join(VALIDATION_SCORES)})")
         if not record.get("validated"):
             missing.append("validation check")
         if record.get("test_status") != "passed":
@@ -303,24 +379,51 @@ class ModelRegistry:
         if missing:
             raise ValueError("Production promotion requires " + ", ".join(missing))
 
-    def _approval_record(self, action: str, entity: str, actor: str, comment: str, previous: str):
-        return Record(
-            id=str(uuid4()),
-            kind="approval",
-            payload=json.dumps(
-                {
-                    "action": action,
-                    "entity": entity,
-                    "actor": actor,
-                    "comment": comment,
-                    "previous_status": previous,
-                    "timestamp": now(),
-                }
-            ),
+    @contextmanager
+    def _write_lock(self) -> Iterator[Session]:
+        """One registry transaction: SQLite holds its write lock until the commit; on
+        PostgreSQL the row locks and primary keys make a conflicting writer fail."""
+        with Session(self.repo.engine) as session:
+            if self.repo.url.startswith("sqlite"):
+                session.execute(text("BEGIN IMMEDIATE"))
+            yield session
+            try:
+                session.commit()
+            except IntegrityError as exc:
+                raise ValueError(
+                    "A concurrent registry change conflicted with this one; reload and retry"
+                ) from exc
+
+    @staticmethod
+    def _record(kind: str, payload: dict[str, Any], record_id: str | None = None) -> Record:
+        record_id = record_id or str(uuid4())
+        return Record(id=record_id, kind=kind, payload=json.dumps({**payload, "id": record_id}))
+
+    def _audit_record(
+        self, action: str, actor: str, entity: str, details: dict[str, Any]
+    ) -> Record:
+        return self._record(
+            "audit",
+            {
+                "action": action,
+                "actor": actor,
+                "entity": entity,
+                "details": details,
+                "timestamp": now(),
+            },
         )
 
-    def _approval(self, action: str, entity: str, actor: str, comment: str, previous: str) -> None:
-        with Session(self.repo.engine) as session:
-            session.add(self._approval_record(action, entity, actor, comment, previous))
-            session.commit()
-        self.repo.audit(f"model_{action}", actor, entity, {"comment": comment})
+    def _approval_record(
+        self, action: str, entity: str, actor: str, comment: str, previous: str
+    ) -> Record:
+        return self._record(
+            "approval",
+            {
+                "action": action,
+                "entity": entity,
+                "actor": actor,
+                "comment": comment,
+                "previous_status": previous,
+                "timestamp": now(),
+            },
+        )

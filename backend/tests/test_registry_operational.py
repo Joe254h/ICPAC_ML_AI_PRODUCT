@@ -1,5 +1,7 @@
 """Operational model registry: descriptor registration, independent test and promotion."""
 
+import json
+import threading
 from typing import Any
 
 import pytest
@@ -8,7 +10,7 @@ from backend.app.db import Repository
 from backend.app.schemas import IndependentTestRequest, ReviewRequest, Selection
 from backend.app.services import operational
 from backend.app.services.platform import Platform
-from backend.app.services.registry import ModelRegistry
+from backend.app.services.registry import ModelRegistry, status_at
 from backend.tests.tiny import tiny_cfg, train_catboost, write_artifacts, write_descriptor
 from climate_engine.operational.grid import load_grid
 
@@ -67,11 +69,17 @@ def test_descriptor_registration_validates_then_records_a_candidate(setup):
         ("trees", "trees"),
         ("production", "declared_status"),
         ("metadata", "metadata disagrees"),
+        ("scores", "finite validation scores"),
     ],
 )
 def test_registration_rejects_any_failed_check(setup, corrupt, message):
     platform, registry, paths, root, tmp = setup
     overrides: dict[str, Any] = {}
+    if corrupt == "scores":
+        metrics = json.loads(paths["metrics"].read_text())
+        metrics.pop("rainfall_RMSE")
+        metrics["rainfall_MAE"] = float("nan")
+        paths["metrics"].write_text(json.dumps(metrics))
     if corrupt == "model":
         paths["model"].write_bytes(b"corrupted")
     if corrupt == "trees":
@@ -120,6 +128,74 @@ def test_production_needs_a_passed_independent_test_recorded_once(setup):
     }
     demo = platform.repo.get("model", "mock-v1")
     assert demo["status"] == "production", "promotion must not retire another task's model"
+
+
+def test_concurrent_registrations_of_one_model_record_it_once(setup):
+    platform, registry, paths, root, tmp = setup
+    descriptors = [
+        write_descriptor(tmp / "a.yaml", paths, root),
+        write_descriptor(tmp / "b.yaml", paths, root),
+        write_descriptor(tmp / "c.yaml", paths, root, model_id="same_artifact_other_id"),
+    ]
+    start = threading.Barrier(len(descriptors))
+    outcomes: list[str] = []
+
+    def register(path) -> None:
+        start.wait()
+        try:
+            registry.register_descriptor(str(path), "me")
+            outcomes.append("registered")
+        except ValueError as exc:
+            outcomes.append(str(exc))
+
+    threads = [threading.Thread(target=register, args=(path,)) for path in descriptors]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert outcomes.count("registered") == 1, outcomes
+    assert len([m for m in platform.repo.list("model") if operational.is_operational(m)]) == 1
+    assert len([a for a in platform.repo.list("approval") if a["action"] == "candidate"]) == 1
+
+
+def test_independent_test_result_and_approval_commit_together(setup, monkeypatch):
+    platform, registry, paths, root, tmp = setup
+    model_id = registry.register_descriptor(str(write_descriptor(tmp / "d.yaml", paths, root)))[
+        "model_id"
+    ]
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("approval store unavailable")
+
+    monkeypatch.setattr(ModelRegistry, "_approval_record", fail)
+    with pytest.raises(RuntimeError):
+        registry.record_independent_test(model_id, passed())
+    assert platform.repo.get("model", model_id)["test_status"] == "untested"
+    monkeypatch.undo()
+    recorded = registry.record_independent_test(model_id, passed())
+    assert recorded["test_status"] == "passed"
+    assert [a["action"] for a in platform.repo.list("approval")].count("independent_test_passed")
+    assert platform.repo.get("model", model_id)["test_result"]["report"].startswith("HPC")
+
+
+def test_production_needs_validation_scores_and_keeps_a_status_history(setup):
+    platform, registry, paths, root, tmp = setup
+    model_id = registry.register_descriptor(str(write_descriptor(tmp / "d.yaml", paths, root)))[
+        "model_id"
+    ]
+    registry.record_independent_test(model_id, passed())
+    record = platform.repo.get("model", model_id)
+    scores = dict(record["metrics"])
+    platform.repo.save("model", {**record, "metrics": {"features": 37}}, model_id)
+    with pytest.raises(ValueError, match="validation scores"):
+        registry.transition(model_id, "promote", REVIEW)
+    platform.repo.save("model", {**record, "metrics": scores}, model_id)
+    registered = record["status_history"][0]["since"]
+    promoted = registry.transition(model_id, "promote", REVIEW)
+    assert [h["status"] for h in promoted["status_history"]] == ["candidate", "production"]
+    assert status_at(promoted, registered) == "candidate"
+    assert status_at(promoted, promoted["deployment_date"]) == "production"
+    assert status_at(promoted, "2020-01-01T00:00:00+00:00") == "candidate"
 
 
 def test_failed_independent_test_blocks_promotion(setup):
