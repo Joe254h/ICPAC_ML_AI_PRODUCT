@@ -1,20 +1,46 @@
-# Prototype validation
+# Validation
 
-Phase 1 was completed before later phases and passed hosted Python checks, TypeScript/lint/unit/build checks, browser selection/verification, and Docker Compose image/startup/proxy checks.
+What the automated checks establish, and what they do not.
 
-The final fast backend suite passes 27 tests; three additional trained native-artifact round-trip tests pass in their dedicated hosted CI lane. Frontend validation includes three unit tests, a production build, and five Chrome acceptance workflows.
+## Backend (`pytest -q`, about a minute)
 
-Full prototype acceptance checks cover:
-- canonical synthetic/local observation interfaces, units, slicing and missing files;
-- corrupt NetCDF, missing coordinates/variables/leads, NaNs/infinities and exact alignment;
-- known-array MAE/RMSE/bias/correlation and missing accumulated cells;
-- local pipeline output manifests, simulated failed dependencies and cancellation;
-- native artifact checksums, schema validation, one production model, confirmation and rollback;
-- grounded Copilot tools, country/source context, prompt-injection resistance, citation categories, session history and unavailable/invalid LLM fallback;
-- frozen bulletin facts/maps, consistency, manual review, rejection, publication gating and export;
-- major REST endpoints, frontend data-loading errors and selector encoding;
-- Chrome workflows for observation selection, Copilot, named bulletin approval, local jobs and model promotion/rollback.
+* **Artifacts**: every HPC file against `SHA256SUMS.txt`; the authoritative mask (800 × 700,
+  205,999 cells, eleven country counts, Somalia to 51.375° E); MBC ratios at known cells
+  and the ratio formula; `pair_count` and CatBoost split borders that fix the calendar;
+  the 378-tree model, its metrics and matrix manifest.
+* **Feature contract**: missing, duplicated, unexpected or reordered features; wrong dtype
+  or shape; NaN/Inf; the Atmos37 builder's order and values; Week-2 accumulation.
+* **Inference**: residual + MBC, non-negative rainfall, determinism, real-model load.
+* **Registry**: descriptor validation (checksums, metadata, corrupted model, tree count,
+  production declarations), immutability, the recorded independent test, the production
+  gate, artifact changes after registration, per-task promotion, descriptor paths.
+* **Maps**: structural regression against the three reference PNGs (frames, extent,
+  aspect, colourbars, logo, boundary overlay, clipping, eleven countries, full Somalia);
+  mutation-tested.
+* **Forecast API**: runs, package contents and integrity, every endpoint, refusals
+  (disabled synthetic runs, missing inputs, concurrent runs, demo models), verification,
+  seasonal pooling, gridded verification maps, HPC package import and its checks.
+* **End to end**: the real candidate on a synthetic fixture through the API on the full
+  grid, and the HPC command stopping at the missing pressure-step setting.
 
-Screenshots in screenshots/ include desktop overview, verification, registry, Copilot, bulletins and tablet overview. Capture with `LOCAL_BROWSER=chrome node scripts/capture-preview.cjs` from frontend while the services run (or omit LOCAL_BROWSER after installing Playwright Chromium).
+The optional LightGBM/XGBoost lane runs separately (`RUN_NATIVE_MODEL_TESTS=true`).
 
-The native host has no Docker Engine. Compose image/startup validation therefore runs in GitHub Actions. Optional native model adapters have a separate CI job using trained tiny artifacts. The fast local suite skips the optional native lane. To run it after installing .[models], set RUN_NATIVE_MODEL_TESTS=true and OMP_NUM_THREADS=1, then run pytest backend/tests/test_native_models.py. No real ECMWF feed, official model, authoritative mask, live LLM server, SLURM cluster or external publication has been validated. Those are explicitly documented production integrations.
+## Frontend
+
+`pnpm lint`, `pnpm typecheck`, `pnpm test` (routing, formatting, API errors), `pnpm build`
+and six Playwright flows: a synthetic forecast run displayed with its labels, maps and
+countries; demonstration verification; Copilot evidence; named bulletin review; the local
+executor; model promotion with confirmation and rollback.
+
+## Screenshots
+
+`docs/screenshots/` shows the workspace with a synthetic forecast. Recreate them with
+`node scripts/capture-preview.cjs` from `frontend/` while the API (with
+`ALLOW_SYNTHETIC_FORECASTS=true`) and the frontend run.
+
+## Not established
+
+No real ECMWF S2S input has run end to end: the seven Week-2 pressure steps are missing.
+No forecast has been verified against real CHIRPS, so no operational skill is shown. The
+independent 2022–2024 test belongs to the HPC. Container builds run in GitHub Actions
+(`build.yml`).

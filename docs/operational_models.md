@@ -1,148 +1,150 @@
-# Operational Week-2 models (Hybrid7, Atmos37, MBC, ABC)
+# Operational Week-2 forecasting: MBC + Atmos37 CatBoost
 
-This path runs the real ICPAC Week-2 residual models on the authoritative ICPAC-11 domain.
-It is separate from the synthetic demonstration grid used by the web pages, which is
-documented in [models.md](models.md).
+This path reproduces the validated HPC inference chain on the authoritative ICPAC-11
+domain. The synthetic demonstration grid of the first release is separate
+([models.md](models.md)) and stays available under Workspace › Demonstration.
 
 ```text
-ECMWF S2S tp (members)          ECMWF pressure levels (members)
-  Week-2 = tp(336 h) - tp(168 h)   bilinear -> derived vars -> mean of 7 Week-2 steps
-          |                                  |
-  X_mean, X_spread                  30 atmospheric means/spreads
-          |                                  |
-          +-- MBC = max(0, X_mean * R[month, cell])
+ECMWF S2S tp (perturbed members)       ECMWF pressure levels (perturbed members)
+  per member: tp(336 h) - tp(168 h)      bilinear -> derived fields -> mean of 7 steps
+          |                                       |
+  X_mean, X_spread (ddof 0)              30 atmospheric means and spreads
+          |                                       |
+          +-- MBC = max(0, X_mean * R[init month, cell])        (feature 37)
           |
-   feature matrix (205,999 cells x 7 or 37, exact training order)
+  37-feature matrix, 205,999 cells, exact HPC order (feature_names_37_MBC.npy)
           |
-   residual model (CatBoost / LightGBM / XGBoost / Random Forest)
+  CatBoost residual model (378 trees): residual = CHIRPS - MBC
           |
-   forecast = max(0, MBC + residual)  -> 800 x 700 NetCDF + country table + manifest
+  hybrid = max(MBC + residual, 0)  ->  product package (NetCDF, maps, countries, provenance)
 ```
 
-## Grid and cell ordering
+## Domain and grid
 
-* Model grid: 800 latitude x 700 longitude points, 0.05 degrees,
-  latitude -14.975 to 24.975, longitude 19.025 to 53.975.
-* Domain: the authoritative `authoritative_icpac11_mask.npz` (latitude, longitude,
-  domain_mask, country_id, country_names) with exactly 205,999 cells.
-* Cells are numbered in C order, `flat = lat_index * 700 + lon_index`, and the model sees
-  them in ascending flat order. `climate_engine/operational/grid.py` is the only place
+* Model grid: 800 latitude × 700 longitude, 0.05°, latitude −14.975…24.975, longitude
+  19.025…53.975 (`config/operational.yaml`, `grid`).
+* Domain: `artifacts/domain/authoritative_icpac11_mask.npz` with exactly 205,999 cells and
+  the authoritative `country_id` (1…11, Kenya … Burundi). Cells are numbered in C order
+  (`lat_index * 700 + lon_index`); `climate_engine/operational/grid.py` is the only place
   that converts between grids and cell vectors.
+* Cartography uses the official 11-country GeoJSON (`cartography/`), never the raster mask:
+  see `climate_engine/cartography/icpac_maps.py`.
 
-Point the platform at the mask with `ICPAC_MASK_PATH` or `grid.mask_path` in
-`config/operational.yaml`. Loading checks the shape, the cell count, the coordinate
-extent and, when the file stores `domain_cells`, that it equals the C-order flattening.
+## The 37 features
 
-## Feature schemas
+Locked in `config/operational.yaml` (`feature_schemas.atmos37`) and checked against the
+HPC schema (`artifacts/schema/feature_names_37_MBC.npy`) at registration:
 
-Locked in `config/operational.yaml` (`feature_schemas`):
+X_mean, X_spread, latitude, longitude, doy_sin, doy_cos, then `_mean` and `_spread` of
+q850, q700, u850, v850, wind850, qu850, qv850, qwind850, t850, t500, deltaT850_500,
+gh500, u200, v200, shear200_850, then MBC_forecast (feature 37).
 
-* **hybrid7**: X_mean, X_spread, latitude, longitude, doy_sin, doy_cos, MBC_forecast.
-* **atmos37**: the first six Hybrid7 features, the 30 atmospheric features
-  (q850, q700, u850, v850, wind850, qu850, qv850, qwind850, t850, t500, deltaT850_500,
-  gh500, u200, v200, shear200_850; each as `_mean` then `_spread`), then MBC_forecast.
+Derived from the artifacts themselves (evidence in [hpc_integration_audit.md](hpc_integration_audit.md)):
 
-Derived variables, computed after bilinear interpolation and before the seven-step mean:
-wind850 = sqrt(u850^2 + v850^2); qu850 = q850*u850; qv850 = q850*v850;
-qwind850 = q850*wind850; deltaT850_500 = t850 - t500;
-shear200_850 = sqrt((u200-u850)^2 + (v200-v850)^2). The q-transport terms are proxies,
-not vertically integrated moisture transport.
+* MBC month = initialization month: it reproduces the MBC `pair_count` exactly.
+* `doy_sin`/`doy_cos` = sin/cos(2π·doy/365.25) with the 1-based day of year of the
+  initialization date: it matches every CatBoost split border on those features.
 
-Ensemble reduction: per member, mean over the seven Week-2 points (rainfall: the 168-336 h
-accumulation), then ensemble mean and population standard deviation (ddof=0).
+A feature matrix is rejected when a feature is missing, duplicated, unexpected or out of
+order, when the dtype is not floating, when the shape is wrong, or when a value is NaN/Inf.
 
-Units are read from file metadata. Rainfall accepts kg m-2 or mm (1 kg m-2 = 1 mm) and
-converts metres explicitly; pressure fields must declare kg kg-1, m s-1, K and gpm.
-Anything else stops the run rather than being converted on assumption.
+## MBC
 
-## Corrections
+`MBC = max(0, X_mean × R[m, cell])` with R of shape (12, 205,999) from
+`final_mbc_params_2005_2021_full_corrected_domain.npz`, where
+`R = clip(observed_mean / max(forecast_mean, 0.1), 0.05, 20)` (re-verified on load to
+better than 1e-5). The platform never refits MBC.
 
-* **MBC**: `MBC_c = max(0, raw_c * R[m, c])` with R of shape (12, 205,999). The locked
-  artifact (`final_mbc_params_..._full_corrected_domain.npz`) must carry `ratio`,
-  `domain_cells`, `latitude` and `longitude` matching the mask; ratios must lie in
-  [0.05, 20.0] and stored bounds must equal the configured ones.
-* **ABC**: `ABC = max(0, 0.124 * DPP + 0.876 * PPP)` is implemented (`abc_blend`). Running
-  ABC operationally additionally needs the DPP and PPP component formulas (see below).
+## Registering a model version
 
-## Uploading a trained model
-
-A model is uploaded as a bundle directory inside `ARTIFACT_ROOT`:
-
-```text
-catboost_hybrid7_v1/
-├── feature_manifest.json
-├── model.cbm                      # or model.txt / model.json / model.joblib
-├── final_mbc_params_2005_2021_full_corrected_domain.npz
-└── metrics.json                   # validation-period metrics from the experiment
-```
-
-`feature_manifest.json`:
-
-```json
-{
-  "bundle_version": 1,
-  "schema": "hybrid7",
-  "features": ["X_mean", "X_spread", "latitude", "longitude", "doy_sin", "doy_cos",
-               "MBC_forecast"],
-  "model_type": "catboost",
-  "model_file": "model.cbm",
-  "target": "residual",
-  "mbc_params": "final_mbc_params_2005_2021_full_corrected_domain.npz",
-  "mbc_params_sha256": "<sha256sum of the npz>",
-  "training_period": "2008-2019",
-  "validation_period": "2020-2021"
-}
-```
-
-Register it by its manifest (CLI or `POST /models/register`):
+Each version is described by a reviewed YAML descriptor in `config/model_registry/` that
+names every artifact (model, metrics, MBC, feature names, matrix manifest, domain) by a
+path inside `ARTIFACT_ROOT` and pins its SHA256. Registration (startup, CLI or API) records
+the model only after every check passes: checksums, metadata agreement (baseline, family,
+algorithm, features, trees, periods, no test-period use), the MBC artifact against the
+mask, the feature schema against the locked one, the model load and a deterministic smoke
+prediction.
 
 ```bash
-python -m scripts.register_model --name catboost_hybrid7 --version 1.0.0 --type catboost \
-  --artifact "$ARTIFACT_ROOT/catboost_hybrid7_v1/feature_manifest.json" \
-  --feature-schema hybrid7 --training-period 2008-2019 --validation-period 2020-2021
+python -m scripts.register_model \
+  --descriptor config/model_registry/mbc_atmos37_catboost_candidate_v1.yaml --actor Joe254h
+# or: POST /models/register {"descriptor": "config/model_registry/....yaml", "actor": "..."}
 ```
 
-Registration refuses the bundle unless the feature order equals the locked schema, the MBC
-artifact matches the mask, the model loads, its trained feature count equals the schema,
-and a smoke prediction returns finite values. Checksums of the manifest, model and MBC
-file are stored; any later change blocks validation and promotion.
+Model IDs and artifacts are immutable: a changed file blocks validation and promotion, and
+the same artifact cannot be registered twice.
 
-`validate` attaches `metrics.json` as experiment evidence (scope: validation period;
-independent operational verification still required). Candidate, promote and rollback then
-follow the same reviewed, audited steps as every other model. Random Forest `.joblib` files
-unpickle, so they load only with `ALLOW_JOBLIB_ARTIFACTS=true` and from trusted storage.
+### Candidate and production
+
+* `mbc_atmos37_catboost_candidate_v1` (378 trees, training 2008–2019, validation
+  2020–2021, independent test 2022–2024 untested) is declared **candidate**. It runs
+  forecasts only while no production model exists and is labelled "candidate, not
+  production" on every page, map and package.
+* Production is per task and requires: training and validation metrics, verified
+  artifacts, a **passed independent 2022–2024 test** recorded once from the HPC report
+  (`POST /models/{id}/independent-test`), a passed inference test, and a named reviewer
+  (`POST /models/{id}/promote`). The backend re-verifies artifacts before promoting.
+
+### Replacing the candidate with the refitted model
+
+1. On the HPC, finish the refit and the independent 2022–2024 test.
+2. Copy the new artifacts to a **new** directory, e.g.
+   `artifacts/models/atmos37_mbc_catboost_final_v1/` (and new MBC/schema files only if they
+   changed). Never overwrite the candidate's files.
+3. Write `config/model_registry/mbc_atmos37_catboost_final_v1.yaml` from the candidate's
+   descriptor: new `model_id`, `version`, artifact paths, SHA256 values (`sha256sum`),
+   `expected_trees`, periods; keep `test_status: untested`, `declared_status: candidate`.
+4. Register it (startup does it automatically, or use the command above). Check
+   `/models/candidate`.
+5. Record the HPC independent-test result for it (Models › Record independent test).
+6. Promote it with a named reviewer. The candidate stays registered; retire it when the
+   reviewers agree. Its past forecasts keep their own model labels.
 
 ## Running a forecast
 
-```bash
-python -m scripts.run_operational --init-date 2026-10-05 \
-  --rainfall /scratch/.../ecmwf_tp_pf_2005_2024_v2.zarr \
-  --pressure /scratch/.../ecmwf_pl_2026-10-05.nc \
-  --bundle "$ARTIFACT_ROOT/catboost_hybrid7_v1" --output /scratch/runs/2026-10-05
-```
+* Web/API: `POST /forecasts/run {"initialization": "2026-10-05", "source": "ecmwf_files",
+  "actor": "..."}` reads the files described in
+  [forecast_input_format.md](forecast_input_format.md) from `FORECAST_INPUT_ROOT`.
+  `"source": "synthetic_fixture"` runs the real model on labelled synthetic input where
+  `ALLOW_SYNTHETIC_FORECASTS=true`.
+* HPC: `python -m scripts.run_operational --init-date 2026-10-05 --descriptor
+  config/model_registry/<model>.yaml --rainfall <tp file> --pressure <pl file> --output
+  <RUN_ROOT>/forecasts [--model-status candidate|production]`, then
+  `POST /forecasts/import {"forecast_id": "...", "actor": "..."}`. Import checks the
+  package checksums, the producing model's artifacts and the truth of its status label.
 
-`--pressure` is required for atmos37. Inputs need `number` (member), `step` (timedelta or
-hours) and, for pressure fields, `isobaricInhPa` dimensions (names configurable). A store
-with a `time` dimension is reduced to the requested initialization. Outputs:
-`week2_forecast.nc` (forecast, mbc, residual, raw_mean, raw_spread, domain_mask on the
-800 x 700 grid, NaN outside the domain, full provenance attributes),
-`country_summary.json` (cos-latitude weighted means per country from the mask's
-country_id) and `manifest.json` with SHA256 checksums.
+### Product package
 
-## Settings that must come from the training code
+`RUN_ROOT/forecasts/<forecast_id>/` with stable names: `manifest.json` (labels and the
+SHA256 of every file), `forecast.nc` (raw, mbc, residual, hybrid in mm, domain mask, NaN
+outside the domain), `provenance.json`, `model.json`, `countries.json`/`.csv`,
+`verification.json`, `interpretation_inputs.json`, `maps/{hybrid,mbc,raw,residual}.png`
+(ICPAC map standard; raw, MBC and hybrid share one colour scale) and, once verified,
+`observation.nc`. Packages are published atomically and never overwritten.
 
-These are `null` in `config/operational.yaml` and the pipeline stops with a message naming
-the key until they are set. They are not guessed because a wrong value silently changes the
-features.
+Country outputs: mean (cos-latitude weighted), median, minimum and maximum of raw, MBC and
+hybrid over the authoritative country cells. Anomaly and tercile category are reported as
+unavailable: no climatology or thresholds are among the artifacts.
 
-| Key | Question |
-|---|---|
-| `calendar.mbc_month_basis` | Is the MBC calendar month taken from the initialization date or from the target week? |
-| `calendar.doy_basis` | Same question for `doy_sin`/`doy_cos`. |
-| `ecmwf.pressure.week2_steps_hours` | Which seven step hours are the Week-2 pressure-level time points (e.g. 168-312 or 192-336)? |
-| `ecmwf.rainfall.regrid` | Only if the rainfall input is not already on the 0.05 degree grid: the regridding used in training. |
-| `grid.mask_path` | Location of `authoritative_icpac11_mask.npz` (or set `ICPAC_MASK_PATH`). |
+## Verification and leakage control
 
-ABC additionally needs the DPP and PPP formulas: how `dynamical_pp_bias_2005_2021.npy` is
-applied to the raw forecast, and how `persistence_pp_beta_2005_2021.npy` combines the
-15- and 30-day CHIRPS lags (including any intercept and its array layout).
+* Per forecast: MAE, RMSE, bias, Pearson r and spatial means of raw, MBC and hybrid
+  against an observed CHIRPS Week-2 total, over the domain and per country.
+* Seasonal: cases of one model pooled exactly through sufficient statistics
+  (`/verification/seasonal`); gridded bias, MAE, RMSE, correlation (≥ 3 forecasts) and
+  skill maps (`/verification/maps/{metric}`).
+* The 2022–2024 test period is protected: forecasts valid in it are flagged, verified for
+  display only, left out of pooled metrics unless asked for, and nothing in the
+  application fits, tunes or selects a model. Model selection happens on the HPC.
+
+## Missing dependencies
+
+| Setting or artifact | Needed for | Status |
+|---|---|---|
+| `ecmwf.pressure.week2_steps_hours` | real Atmos37 runs | null: the seven training steps are not supplied |
+| `ecmwf.rainfall.regrid` | rainfall input not on the 0.05° grid | null: only needed for other grids |
+| Raw ECMWF and MBC validation metrics | the comparison on the overview | not in the artifacts |
+| Week-2 climatology, tercile thresholds | anomaly and category | not in the artifacts |
+| ICPAC Word bulletin template and field mapping | Word bulletin | not in the artifacts |
+| frozen `icpac_maps.py` | exact map module | reconstructed from the references; replace in one place |
+| DPP and PPP formulas | ABC as an operational model | `abc_blend` is ready; formulas not supplied |

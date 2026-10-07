@@ -1,10 +1,39 @@
-# ICPAC Climate Intelligence & Automation Platform
+# ICPAC Climate AI · Week-2 rainfall forecasting
 
-A modular, CPU-friendly climate-operations prototype: Next.js/TypeScript frontend, FastAPI API, independent xarray scientific engine, and SQLite persistence through SQLAlchemy. **DEMO DATA · SYNTHETIC · NOT FOR OPERATIONAL FORECASTING.** No model artifact, ECMWF credentials, GPU, LLM server or HPC access is required.
+Web platform for ICPAC Week-2 (Days 8–14) rainfall forecasts over the eleven member
+states. It runs the HPC-validated **MBC + Atmos37 CatBoost** residual model on the
+authoritative 800 × 700 grid (205,999-cell ICPAC-11 domain) and shows three forecasts
+side by side:
 
-## Quick start
+* **Raw ECMWF**: ECMWF S2S ensemble mean of the Week-2 total;
+* **MBC**: the locked multiplicative bias correction, `max(0, raw × R[month, cell])`;
+* **MBC + AI/ML**: the hybrid residual-corrected forecast,
+  `max(MBC + CatBoost residual, 0)`, from 37 rainfall and atmospheric features.
 
-Requires Docker Engine and Docker Compose.
+The model in use is the **candidate** `mbc_atmos37_catboost_candidate_v1` (378 trees,
+trained 2008–2019, validated 2020–2021). It is not the production model: production
+needs a passed independent 2022–2024 test from the HPC and a named reviewer. The refit
+arrives as a new version.
+
+| Part | Where |
+|---|---|
+| Interface (Next.js 16, Tailwind 4, shadcn-style workspace) | `frontend/` |
+| API (FastAPI) | `backend/app/` |
+| Science: grid, Week-2 processing, MBC, Atmos37 features, inference, verification | `climate_engine/` |
+| ICPAC map standard | `climate_engine/cartography/icpac_maps.py` |
+| Product packages and bulletin interface | `climate_engine/products/` |
+| Verified HPC artifacts (checksummed) | `artifacts/`, `cartography/`, `fixtures/references/` |
+| Model descriptors | `config/model_registry/` |
+
+Documentation: [operational models](docs/operational_models.md) ·
+[forecast input format](docs/forecast_input_format.md) ·
+[deployment (Vercel, Cloud Run, Supabase)](docs/deployment.md) ·
+[HPC integration audit](docs/hpc_integration_audit.md) ·
+[scientific safety](docs/scientific_safety.md) · [artifacts](artifacts/README.md)
+
+## Run the application
+
+With Docker:
 
 ```bash
 git clone https://github.com/Joe254h/ICPAC_ML_AI_PRODUCT.git
@@ -13,45 +42,59 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Frontend: http://localhost:3000 · API: http://localhost:8000 · API documentation: http://localhost:8000/docs. Compose binds ports to localhost. A named volume retains prototype records. No data are automatically published or emailed.
-
-Without Docker, use Python 3.12+ and Node 22+, with pnpm 11:
+Without Docker (Python 3.12+, Node 22+, pnpm 11):
 
 ```bash
-python -m venv .venv
-# Linux/macOS: source .venv/bin/activate
-# PowerShell: .venv\Scripts\Activate.ps1
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
 pip install -e '.[dev]'
-python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
-# In a second terminal:
-cd frontend
-corepack enable
-pnpm install --frozen-lockfile
-pnpm dev
+python -m scripts.verify_artifacts                    # every HPC artifact against its SHA256
+ALLOW_SYNTHETIC_FORECASTS=true python -m uvicorn backend.app.main:app --port 8000
+# second terminal
+cd frontend && corepack enable && pnpm install --frozen-lockfile && pnpm dev
 ```
 
-## Components and architecture
+Interface: http://localhost:3000 · API: http://localhost:8000 · API reference:
+http://localhost:8000/docs. On startup the API registers the reviewed descriptors in
+`config/model_registry/` after verifying every artifact.
 
-```mermaid
-flowchart TD
-  F[Forecaster / Next.js] --> A[FastAPI / typed contracts]
-  A --> S[Application services]
-  S --> DB[SQLAlchemy / SQLite or PostgreSQL]
-  S --> C[Independent climate engine]
-  C --> P[Forecast and observation adapters]
-  P --> Q[Mandatory QC]
-  Q --> W[Days 8–14 / exact alignment]
-  W --> M[Model interface]
-  M --> V[Deterministic verification and aggregation]
-  V --> O[Maps / tables / provenance]
-  S --> J[Executor adapters / local or SLURM]
-  S --> B[Grounded Copilot / retrieval]
-  O --> B
-  B --> D[Bulletin draft]
-  D --> R[Human review / audit]
+## Register the candidate model
+
+Startup does this automatically (`AUTO_REGISTER_MODELS=true`). By hand:
+
+```bash
+python -m scripts.register_model \
+  --descriptor config/model_registry/mbc_atmos37_catboost_candidate_v1.yaml --actor Joe254h
 ```
 
-Directories separate frontend, backend, climate_engine, chatbot, hpc, config, fixtures and deployment. The existing starter file is preserved. Domain configuration includes full Somalia. The production 205,999-cell ICPAC mask is absent and is not reproduced by the demo.
+## Run a test forecast
+
+The real model on labelled synthetic ECMWF input (the full chain, no HPC data needed):
+
+```bash
+curl -X POST http://localhost:8000/forecasts/run -H 'Content-Type: application/json' \
+  -d '{"initialization": "2026-10-05", "source": "synthetic_fixture", "actor": "Joe254h"}'
+```
+
+or Data › Forecast runs in the interface. With real ECMWF S2S files in
+`FORECAST_INPUT_ROOT`, use `"source": "ecmwf_files"`. Real Atmos37 runs currently stop
+at one missing setting, the seven Week-2 pressure-level steps used in training
+(`ecmwf.pressure.week2_steps_hours`), which the platform will not guess.
+
+Each run writes a product package to `RUN_ROOT/forecasts/<forecast_id>/` (NetCDF, ICPAC
+maps, country statistics, verification, provenance, bulletin inputs). Replacing the
+candidate with the refitted model is described in
+[operational models](docs/operational_models.md#replacing-the-candidate-with-the-refitted-model).
+
+## API
+
+| Concept | Endpoint |
+|---|---|
+| Models, model in use, registration | `GET /models`, `GET /models/current`, `POST /models/register` |
+| Independent test, promotion | `POST /models/{id}/independent-test`, `POST /models/{id}/promote` |
+| Forecasts | `GET /forecasts`, `GET /forecasts/latest`, `POST /forecasts/run`, `POST /forecasts/import` |
+| One forecast | `GET /forecasts/{id}`, `/map?layer=hybrid\|mbc\|raw\|residual`, `/countries`, `/verification`, `/bulletin`, `/package/{file}` |
+| Verification | `POST /forecasts/{id}/verification`, `GET /verification/seasonal`, `GET /verification/maps/{metric}` |
+| System health | `GET /health` |
 
 ## Development and tests
 
@@ -59,71 +102,39 @@ Directories separate frontend, backend, climate_engine, chatbot, hpc, config, fi
 ruff format --check backend climate_engine chatbot hpc scripts
 ruff check backend climate_engine chatbot hpc scripts
 mypy backend climate_engine chatbot hpc
-pytest -q
+pytest -q                      # science, artifacts, maps, API, one end-to-end run
 cd frontend
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm exec playwright install chromium
-pnpm test:e2e
+pnpm lint && pnpm typecheck && pnpm test && pnpm build
+pnpm exec playwright install chromium && pnpm test:e2e
 ```
 
-CI runs small deterministic fixtures; it never downloads climate datasets. GitHub Actions checks Python, API, TypeScript, frontend build and a browser workflow. Container validation is separate. The release workflow packages a source archive and does not deploy to ICPAC.
+Tests use tiny synthetic fixtures plus the committed artifacts; CI never downloads ECMWF or
+CHIRPS archives. The end-to-end tests run the real candidate on a synthetic fixture
+through the API (`backend/tests/test_end_to_end.py`) and through the interface
+(`frontend/e2e/operational.spec.ts`).
 
-## Configuration and scientific interpretation
+## Demonstration workspace
 
-Versioned YAML defines variables, units, lead window, domain, resolution, source versions and model feature schemas. Environment variables hold deployment settings; do not commit .env or credentials. Daily precipitation is mm/day. The initialization date is day zero; Days 8–14 are initialization +8 through +14, inclusive. ECMWF fixtures represent daily increments, not running cumulative totals. Real running accumulations need a validated differencing adapter.
+The first release's synthetic 60 × 60 demonstration grid remains under Workspace ›
+Demonstration, with the Forecaster Copilot, bulletin drafting with human review and the
+pipeline jobs. Everything there is labelled DEMO DATA and is not a forecast.
 
-Country rainfall means use cosine-latitude area weights. Verification metrics use finite paired spatial cells from one accumulated seven-day forecast. Correlation is spatial pattern correlation, not temporal forecast skill. The cell error map uses single-case absolute error, numerically equivalent to single-case RMSE. Anomalies use a **synthetic reference field**, not historical climatology. Probabilities, SPI and long-term skill are unavailable until scientifically validated inputs exist.
+## Screenshots
 
-Any country without finite cell centres is reported as unavailable. These values are unavailable; no neighbouring country is substituted. Natural Earth public-domain boundaries are cartographic context, not the authoritative ICPAC operational mask.
+![Overview](docs/screenshots/overview.png)
 
-## Extending providers
+[Forecast](docs/screenshots/forecast.png) · [Maps](docs/screenshots/maps.png) ·
+[Country](docs/screenshots/country.png) · [Models](docs/screenshots/models.png) ·
+[Verification](docs/screenshots/verification.png) · [Weekly product](docs/screenshots/bulletins.png) ·
+[Copilot](docs/screenshots/copilot.png) · [Dark](docs/screenshots/dark.png) ·
+[Tablet](docs/screenshots/tablet.png). The forecast shown runs the real candidate on
+labelled synthetic input.
 
-Implement ObservationProvider.load, metadata, list_available_dates and validate. Normalize to precipitation(time, latitude, longitude), mm/day, ascending coordinates and source/version/processing metadata. QC must pass before accumulation and inference. ChirpsProvider, TamsatProvider and RFE2Provider currently supply synthetic fixtures. LocalNetCDFProvider explicitly rejects missing files and unconfigured units; it never falls back to synthetic observations.
+## Scientific scope
 
-ForecastProvider has load(cycle) and metadata. The five prototype sources are ECMWF S2S, IFS, AIFS, GEFS and CFS; all are labelled synthetic. Add retrieval/authentication and provider-specific normalization behind this contract.
-
-## Models and replacement
-
-MockForecastModel and RawECMWFModel share the ForecastModel interface. Native CatBoost/LightGBM/XGBoost and analytical ABC loaders are isolated from frontend/API contracts; other model types require validated adapters. The only available feature schema is rainfall_total_v1 (one aligned accumulated-rainfall feature per cell). **Do not relabel Hybrid7 or Atmos37 artifacts as this schema.** Implement their frozen training-time feature transforms first.
-
-**Operational models.** The trained Hybrid7 and Atmos37 residual models, with their gridded monthly MBC parameters, are uploaded as a bundle (model file + feature manifest + MBC artifact) and run on the authoritative 800 × 700 grid / 205,999-cell ICPAC-11 domain through `scripts/run_operational.py`. See [operational models](docs/operational_models.md), including the settings that must be copied from the training code before the first run.
-
-See [exact model registration and replacement instructions](docs/models.md). The registry exposes validated candidates, confirmed promotion and rollback; the frontend automatically reads registered versions. Installing optional model dependencies and mounting an artifact does not rebuild the frontend. Model outputs, provenance and selector metadata remain stable.
-
-## Verification and products
-
-Select model, observation source, cycle and country in the UI. POST /verification/run persists metrics and provenance. GET /analysis returns computed data; GET /export/png, /export/csv and /export/json provide downloads. Example:
-
-```bash
-curl -X POST http://localhost:8000/verification/run -H 'Content-Type: application/json' -d '{"model":"mock-v1","observation":"TAMSAT","country":"Kenya"}'
-```
-
-## Chatbot, bulletins and HPC
-
-The default interpretation provider is mock, so the application runs without a server. Optional LLM services must use deterministic tool context and grounded output checks. Generated narratives remain drafts. Human review controls bulletin approval and publication; production model promotion requires confirmation and validation. These prototype controls are not substitutes for production authentication and authorization.
-
-See [Copilot and bulletin procedures](docs/chatbot.md), [executor deployment](docs/hpc.md) and [scientific safety](docs/scientific_safety.md). SLURM deployment and real publication/dissemination require an operator integration; they are never triggered merely by asking the chatbot a question.
-
-## Screenshots and validation
-
-![Prototype overview](docs/screenshots/overview.png)
-
-[Verification](docs/screenshots/verification.png) · [Models](docs/screenshots/models.png) · [Copilot](docs/screenshots/copilot.png) · [Bulletins](docs/screenshots/bulletins.png) · [Tablet](docs/screenshots/tablet.png)
-
-See [validation scope and limitations](docs/validation.md). Browser acceptance covers observation selection, Copilot tool evidence, bulletin review, actual local execution, and confirmed model promotion/rollback.
-
-## Remaining integrations and roadmap
-
-1. ICPAC authoritative boundaries/mask/grid and operational variable definitions.
-2. Licensed forecast retrieval, real CHIRPS/TAMSAT/RFE2 data and latency-aware ingestion events.
-3. Frozen Hybrid7/Atmos37 feature builders, trusted final trained artifacts, independent validation and hindcasts.
-4. Validated climatology, tercile probabilities, CRPS/Brier/reliability and country/ADM1 verification.
-5. Authentication, role-based approvals, immutable audit storage, rate limits and production secrets.
-6. ICPAC SLURM partitions, shared storage, Apptainer images and scheduled ingestion.
-7. Approved local bulletin archive/SOPs, LLM deployment, Word template and reviewed dissemination.
-8. PRECOF/GHACOF, seasonal, early-warning, controlled retraining and monitoring.
-
-The uploaded conversation is context. The pasted build brief defines requested work. Prior conversation claims about model accuracy or operational processing are not treated as measured results in this application.
+Every number in the interface comes from the API. Anomalies and tercile categories are
+reported as unavailable until a climatology and thresholds exist; the Word bulletin waits
+for the official template. The 2022–2024 period is the protected independent test: the
+platform never fits, tunes or selects models, and forecasts valid in that period are
+verified for display only. Open dependencies are listed in
+[operational models](docs/operational_models.md#missing-dependencies).
