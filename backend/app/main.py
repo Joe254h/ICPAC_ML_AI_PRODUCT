@@ -8,8 +8,10 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
+from backend.app.api.forecasts import install as install_forecasts
 from backend.app.db import Repository
 from backend.app.schemas import ForecastResponse, Selection
+from backend.app.services.forecasts import RunInProgress
 from backend.app.services.health import system_health
 from backend.app.services.platform import Platform
 from climate_engine.core import DEMO_LABEL, config
@@ -70,6 +72,10 @@ def create_app(database_url: str | None = None) -> FastAPI:
     async def missing_artifact(request: Request, exc: FileNotFoundError):
         return JSONResponse(status_code=503, content={"detail": str(exc)})
 
+    @app.exception_handler(RunInProgress)
+    async def busy(request: Request, exc: RunInProgress):
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
     @app.exception_handler(ImportError)
     async def missing_runtime(request: Request, exc: ImportError):
         return JSONResponse(
@@ -93,17 +99,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
             "label": DEMO_LABEL,
         }
 
-    @app.get("/forecasts")
-    def forecasts(p: Platform = Depends(platform)) -> list[dict]:
-        return p.repo.list("forecast_cycle")
-
     @app.get("/analysis", response_model=ForecastResponse)
     def analysis(selection: Selection = Depends(), p: Platform = Depends(platform)):
+        """Demonstration case on the synthetic grid (cycles listed by /config)."""
         return p.calculate(selection)
 
-    @app.get("/forecasts/{cycle}", response_model=ForecastResponse)
-    def forecast(cycle: str, selection: Selection = Depends(), p: Platform = Depends(platform)):
-        return p.calculate(selection.model_copy(update={"cycle": cycle}))
+    install_forecasts(app, platform)
 
     @app.get("/observations")
     def observations(p: Platform = Depends(platform)) -> list[dict]:

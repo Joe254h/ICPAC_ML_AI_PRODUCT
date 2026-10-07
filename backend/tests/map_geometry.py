@@ -87,14 +87,19 @@ def edges(dark: np.ndarray, min_len: int) -> list[tuple[float, int, int]]:
     ]
 
 
-def rectangles(dark: np.ndarray, min_width: int, min_height: int) -> list[Box]:
+def rectangles(
+    dark: np.ndarray,
+    min_width: int,
+    min_height: int,
+    vertical: list[tuple[float, int, int]] | None = None,
+) -> list[Box]:
     """Axis frames: pairs of vertical edges closed by horizontal edges at top and bottom.
 
     Horizontal runs may extend past a corner (a tick at the end of a colourbar), so a
     side only needs to be covered by a horizontal edge, not matched exactly.
     """
     horizontal = edges(dark, min_width)
-    vertical = edges(dark.T, min_height)
+    vertical = vertical if vertical is not None else edges(dark.T, min_height)
 
     def closed(y: float, left: float, right: float) -> float | None:
         for centre, start, end in horizontal:
@@ -154,7 +159,11 @@ def logo_box(rgb: np.ndarray, frame: Box) -> Box | None:
     return Box(fx(xs.min() + x0), fx(xs.max() + 1 + x0), fy(ys.min() + y0), fy(ys.max() + 1 + y0))
 
 
-def colourbar_beside(boxes: list[Box], frame: Box) -> Box | None:
+def colourbar_beside(
+    boxes: list[Box], vertical: list[tuple[float, int, int]], frame: Box
+) -> Box | None:
+    """The colourbar right of a frame; an extended bar (with end triangles) has no closed
+    rectangle, so its two long vertical sides are used instead."""
     beside = [
         b
         for b in boxes
@@ -163,7 +172,19 @@ def colourbar_beside(boxes: list[Box], frame: Box) -> Box | None:
         and abs(b.top - frame.top) < 0.1 * frame.height
         and abs(b.bottom - frame.bottom) < 0.1 * frame.height
     ]
-    return min(beside, key=lambda b: b.left) if beside else None
+    if beside:
+        return min(beside, key=lambda b: b.left)
+    sides = sorted(
+        (x, top, bottom)
+        for x, top, bottom in vertical
+        if x > frame.right + 2
+        and abs(top - frame.top) < 0.1 * frame.height
+        and abs(bottom - frame.bottom) < 0.1 * frame.height
+    )
+    for (left, t1, b1), (right, t2, b2) in zip(sides, sides[1:], strict=False):
+        if right - left < 0.2 * frame.width:
+            return Box(left, right, (t1 + t2) / 2 + 0.5, (b1 + b2) / 2 - 0.5)
+    return None
 
 
 @cache
@@ -172,7 +193,8 @@ def measure(path) -> list[MapFrame]:
     rgb = load(path)
     dark = dark_pixels(rgb)
     height, width = dark.shape
-    boxes = rectangles(dark, min_width=40, min_height=int(0.25 * height))
+    vertical = edges(dark.T, int(0.25 * height))
+    boxes = rectangles(dark, min_width=40, min_height=int(0.25 * height), vertical=vertical)
     frames = sorted(
         (b for b in boxes if b.width > 0.2 * width), key=lambda b: (round(b.top / 50), b.left)
     )
@@ -194,7 +216,7 @@ def measure(path) -> list[MapFrame]:
                 frame,
                 tuple(float(v) for v in extent),  # type: ignore[arg-type]
                 (float(ax), float(-ay)),
-                colourbar_beside(boxes, frame),
+                colourbar_beside(boxes, vertical, frame),
                 logo_box(rgb, frame),
             )
         )

@@ -3,9 +3,22 @@ import shutil
 
 import httpx
 
-from backend.app.services import operational
+from backend.app.services import forecasts, operational
 from chatbot.providers import MockLLMProvider, provider
 from climate_engine.core import ROOT, config
+from climate_engine.operational.settings import settings
+
+
+def operational_inputs() -> str:
+    """Whether real ECMWF runs can work: input directory and required settings."""
+    if settings()["ecmwf"]["pressure"].get("week2_steps_hours") is None:
+        return (
+            "Unavailable · real Atmos37 runs need ecmwf.pressure.week2_steps_hours "
+            "(missing scientific dependency)"
+        )
+    if not forecasts.input_root().is_dir():
+        return "Warning · FORECAST_INPUT_ROOT does not exist"
+    return "Healthy · ECMWF S2S input directory configured"
 
 
 def system_health(platform) -> dict:
@@ -46,7 +59,19 @@ def system_health(platform) -> dict:
             components[f"Observations · {source}"] = f"Healthy · {mode}"
         except (OSError, ValueError, KeyError) as exc:
             components[f"Observations · {source}"] = f"Unavailable · {exc}"
-    components["Forecast providers"] = "Warning · synthetic adapters"
+    components["Forecast providers"] = "Warning · synthetic adapters (demonstration views)"
+    components["Operational inputs"] = operational_inputs()
+    runs = platform.repo.list(forecasts.KIND)
+    real = [run for run in runs if not run.get("synthetic")]
+    if real:
+        newest = max(real, key=lambda run: (run["initialization"], run["generation_time"]))
+        components["Operational forecasts"] = (
+            f"Healthy · latest initialization {newest['initialization']} ({newest['forecast_id']})"
+        )
+    else:
+        components["Operational forecasts"] = (
+            "Warning · only synthetic demonstration runs" if runs else "Warning · no run yet"
+        )
     for model in production:
         try:
             healthy = platform.model(model["model_id"]).health_check()

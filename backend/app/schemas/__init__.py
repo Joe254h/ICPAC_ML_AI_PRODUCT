@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -101,4 +102,35 @@ class IndependentTestRequest(BaseModel):
 class IngestRequest(BaseModel):
     source: Literal["CHIRPS", "TAMSAT", "RFE2"]
     path: str
+    actor: str = Field(min_length=2, max_length=80)
+
+
+FORECAST_ID = r"^w2-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}$"
+
+
+class ForecastRunRequest(BaseModel):
+    """Run the operational Week-2 forecast for one initialization.
+
+    ``ecmwf_files`` reads the documented input files for the date from FORECAST_INPUT_ROOT;
+    ``synthetic_fixture`` generates labelled synthetic input (demonstration and tests,
+    enabled only where ALLOW_SYNTHETIC_FORECASTS=true).
+    """
+
+    initialization: date
+    source: Literal["ecmwf_files", "synthetic_fixture"] = "ecmwf_files"
+    model_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]+$", max_length=80)
+    actor: str = Field(min_length=2, max_length=80)
+
+
+class PackageImportRequest(BaseModel):
+    """Register a package written by scripts/run_operational.py under RUN_ROOT/forecasts."""
+
+    forecast_id: str = Field(pattern=FORECAST_ID)
+    actor: str = Field(min_length=2, max_length=80)
+
+
+class VerificationRequest(BaseModel):
+    """Observed Week-2 total (NetCDF inside DATA_ROOT) for a forecast's valid window."""
+
+    observation: str = Field(pattern=r"^[A-Za-z0-9_./-]+\.nc$", max_length=200)
     actor: str = Field(min_length=2, max_length=80)

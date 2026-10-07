@@ -30,7 +30,7 @@ def test_major_endpoints(client):
     assert data["provenance"]["mode"] == "synthetic"
     assert len(data["observation_comparison"]) == 3
     assert data["map"]["features"]
-    assert client.get("/forecasts/2026-09-21").status_code == 200
+    assert client.get("/analysis?cycle=2026-09-21").status_code == 200
 
 
 def test_selection_and_persistence(client):
