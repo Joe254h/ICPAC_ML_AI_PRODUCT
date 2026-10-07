@@ -1,7 +1,14 @@
 .git
 **/node_modules
 **/.next
+**/__pycache__
+**/*.pyc
+.mypy_cache
+.ruff_cache
+.pytest_cache
+catboost_info
 data
 .env
-**/__pycache__
 file
+frontend/test-results
+frontend/playwright-report

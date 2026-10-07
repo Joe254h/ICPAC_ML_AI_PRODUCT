@@ -22,4 +22,6 @@ artifacts/*
 !artifacts/domain/
 observations/*
 !observations/README.md
+forecasts/*
+!forecasts/README.md
 catboost_info/
