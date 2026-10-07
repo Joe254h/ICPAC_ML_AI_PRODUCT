@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 test("forecaster selects observations and runs verification", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/demo");
   await expect(page.getByText("DEMO DATA", { exact: true })).toBeVisible();
   await expect(
     page.getByText("Quality control", { exact: true }),
@@ -19,6 +19,9 @@ test("forecaster selects observations and runs verification", async ({
   );
   await page.getByRole("link", { name: "Verification", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Daily rainfall comparison" }),
+    page.getByRole("heading", { name: "Demonstration verification runs" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("cell", { name: "TAMSAT", exact: true }).first(),
   ).toBeVisible();
 });
