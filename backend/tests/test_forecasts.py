@@ -275,6 +275,68 @@ def test_verification_and_seasonal_pooling(env, fast_maps):
     assert escape.status_code in {422, 503}
 
 
+def test_verification_maps_pool_one_models_verified_forecasts(env, monkeypatch):
+    client = env.client
+    drawn: list = []
+
+    def capture(figure, canvas=None):
+        drawn.append(figure)
+        return PNG
+
+    monkeypatch.setattr(icpac_maps, "render_png", capture)
+    status = client.get("/verification/maps").json()
+    assert status["cases"] == 0 and not status["metrics"]["rmse"]["available"]
+    empty = client.get("/verification/maps/rmse")
+    assert empty.status_code == 404 and "needs 1 verified" in empty.json()["detail"]
+
+    records = [run(env), run(env, "2026-04-06"), run(env, "2023-03-06")]
+    observed: dict[str, np.ndarray] = {}
+    for record, name in zip(records, ("a.nc", "b.nc", "c.nc"), strict=True):
+        fid = record["forecast_id"]
+        client.post(
+            f"/forecasts/{fid}/verification",
+            json={
+                "observation": write_observation(env, record, name, scale=1 + len(observed)),
+                "actor": "Joe",
+            },
+        )
+        directory = forecasts.package_root() / fid
+        assert "observation.nc" in packages.read_manifest(directory)["files"]
+        with xr.open_dataset(directory / "observation.nc") as obs:
+            observed[fid] = obs["precipitation_week2"].values.astype(float)
+    status = client.get("/verification/maps").json()
+    assert status["cases"] == 2 and status["excluded_protected_period"] == 1
+    assert (
+        status["metrics"]["rmse"]["available"] and not status["metrics"]["correlation"]["available"]
+    )
+
+    drawn.clear()
+    assert client.get("/verification/maps/rmse").status_code == 200
+    errors = []
+    for record in records[:2]:
+        with xr.open_dataset(
+            forecasts.package_root() / record["forecast_id"] / "forecast.nc"
+        ) as data:
+            errors.append(data["hybrid"].values - observed[record["forecast_id"]])
+    expected = np.sqrt(np.mean(np.square(errors), axis=0))
+    [layer] = drawn[0].layers
+    np.testing.assert_allclose(layer.field().values[MASK], expected[MASK], rtol=1e-5)
+    assert np.isnan(layer.field().values[~MASK]).all()
+    assert layer.title == "MBC + ATMOS37 CATBOOST | Week-2 Rainfall RMSE"
+    assert "Excludes the protected 2022-2024 test period (1 forecasts)" in drawn[0].note
+
+    correlation = client.get("/verification/maps/correlation")
+    assert correlation.status_code == 404 and "needs 3 verified" in correlation.json()["detail"]
+    assert client.get("/verification/maps/correlation?include_protected=true").status_code == 200
+    assert "display only" in drawn[-1].note
+    assert client.get("/verification/maps/skill?variant=raw").status_code == 422
+    assert client.get("/verification/maps/skill?variant=mbc").status_code == 200
+    assert client.get("/verification/maps/anomaly").status_code == 422
+    calls = len(drawn)
+    assert client.get("/verification/maps/rmse").status_code == 200
+    assert len(drawn) == calls, "an unchanged map is served from the cache"
+
+
 def hpc_package(env, status: str | None = None) -> str:
     """A package written the way scripts/run_operational.py writes it."""
     initialization = date(2026, 10, 5)

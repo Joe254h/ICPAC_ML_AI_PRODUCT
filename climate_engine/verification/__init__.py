@@ -93,6 +93,51 @@ def pooled_metrics(statistics: Iterable[dict[str, float]]) -> dict[str, float | 
     }
 
 
+# Minimum number of verified cases per cell before a gridded metric is shown.
+CELL_METRICS = {"bias": 1, "mae": 1, "rmse": 1, "correlation": 3}
+
+
+class CellStatistics:
+    """Per-cell sums over verified cases; bias, MAE, RMSE and Pearson r follow exactly."""
+
+    KEYS = ("n", "e", "abs_e", "ee", "f", "o", "ff", "oo", "fo")
+
+    def __init__(self, shape: tuple[int, ...]):
+        self.cases = 0
+        self.sums = {key: np.zeros(shape) for key in self.KEYS}
+
+    def add(self, forecast: np.ndarray, observed: np.ndarray) -> None:
+        f, o = np.asarray(forecast, dtype=np.float64), np.asarray(observed, dtype=np.float64)
+        if f.shape != o.shape or f.shape != self.sums["n"].shape:
+            raise ValueError("Aligned arrays on the statistics grid required")
+        valid = np.isfinite(f) & np.isfinite(o)
+        f, o = np.where(valid, f, 0.0), np.where(valid, o, 0.0)
+        e = f - o
+        for key, value in zip(
+            self.KEYS, (valid, e, np.abs(e), e * e, f, o, f * f, o * o, f * o), strict=True
+        ):
+            self.sums[key] += value
+        self.cases += 1
+
+    def metric(self, name: str) -> np.ndarray:
+        """The metric per cell; NaN where too few cases (or no variance) support it."""
+        s = self.sums
+        n = s["n"]
+        enough = n >= CELL_METRICS[name]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            if name == "bias":
+                values = s["e"] / n
+            elif name == "mae":
+                values = s["abs_e"] / n
+            elif name == "rmse":
+                values = np.sqrt(s["ee"] / n)
+            else:
+                variance = (n * s["ff"] - s["f"] ** 2) * (n * s["oo"] - s["o"] ** 2)
+                values = (n * s["fo"] - s["f"] * s["o"]) / np.sqrt(variance)
+                enough &= variance > 1e-9
+        return np.where(enough, values, np.nan)
+
+
 def season_of(day: date) -> str:
     return next(name for name, months in SEASONS.items() if day.month in months)
 

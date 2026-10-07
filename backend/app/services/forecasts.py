@@ -17,10 +17,14 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import xarray as xr
+
 from backend.app.db import now
 from backend.app.schemas import ForecastRunRequest, PackageImportRequest, VerificationRequest
 from backend.app.services import operational
 from backend.app.services.registry import ModelRegistry
+from climate_engine.cartography import icpac_maps as maps
 from climate_engine.core import ROOT
 from climate_engine.forecasts import ECMWFS2SForecastProvider
 from climate_engine.forecasts.fixtures import FIXTURE_PRESSURE_STEPS_HOURS, write_fixture
@@ -36,7 +40,7 @@ from climate_engine.preprocessing.atmos37 import needs_pressure
 from climate_engine.products import package as packages
 from climate_engine.products.bulletin import BulletinInputs, WordTemplateGenerator
 from climate_engine.provenance import file_checksum, permitted_file
-from climate_engine.verification import pooled_metrics
+from climate_engine.verification import CELL_METRICS, CellStatistics, pooled_metrics
 
 KIND = "forecast_run"
 SYNTHETIC_ENV = "ALLOW_SYNTHETIC_FORECASTS"
@@ -54,6 +58,24 @@ class RunInProgress(RuntimeError):
     """Another forecast run holds the worker."""
 
 
+class Unavailable(LookupError):
+    """A product that cannot exist yet, with the reason (served as 404)."""
+
+
+VARIANTS = ("raw", "mbc", "hybrid")
+# metric -> (ICPAC map style, title); skill is the relative RMSE improvement over raw.
+VERIFICATION_MAPS = {
+    "bias": ("bias", "Week-2 Rainfall Bias"),
+    "mae": ("mae", "Week-2 Rainfall MAE"),
+    "rmse": ("rmse", "Week-2 Rainfall RMSE"),
+    "correlation": ("correlation", "Temporal Correlation"),
+    "skill": ("improvement", "RMSE Improvement Relative to Raw ECMWF"),
+}
+MAP_MIN_CASES = {**CELL_METRICS, "skill": CELL_METRICS["rmse"]}
+OBSERVATION = packages.OBSERVATION_FILE
+_MAP_CACHE: dict[tuple, bytes] = {}
+
+
 def input_root() -> Path:
     return Path(os.getenv("FORECAST_INPUT_ROOT", str(ROOT / "data" / "forecasts"))).resolve()
 
@@ -64,6 +86,23 @@ def package_root() -> Path:
 
 def synthetic_runs_allowed() -> bool:
     return os.getenv(SYNTHETIC_ENV, "false") == "true"
+
+
+def capabilities() -> dict[str, Any]:
+    """What this deployment can do, for the interface (no secrets, no paths)."""
+    try:
+        countries = list(operational.authoritative_grid().country_names)
+    except (OSError, ValueError):
+        countries = []
+    return {
+        "synthetic_runs_allowed": synthetic_runs_allowed(),
+        "pressure_steps_configured": settings()["ecmwf"]["pressure"].get("week2_steps_hours")
+        is not None,
+        "map_layers": list(packages.MAP_LAYERS),
+        "verification_maps": {name: title for name, (_, title) in VERIFICATION_MAPS.items()},
+        "countries": countries,
+        "protected_test_period": "-".join(map(str, settings()["periods"]["protected_test"])),
+    }
 
 
 def input_files(initialization: date) -> tuple[Path, Path | None]:
@@ -312,10 +351,20 @@ class ForecastService:
         start = datetime.fromisoformat(run.provenance["forecast_valid_start"])
         end = datetime.fromisoformat(run.provenance["forecast_valid_end"])
         observed = load_observed(path, grid, start, end)
-        result = verify(
-            run, observed, grid, settings(), {"file": path.name, "sha256": file_checksum(path)}
+        source = {"file": path.name, "sha256": file_checksum(path)}
+        result = verify(run, observed, grid, settings(), source)
+        field = xr.Dataset(
+            {
+                "precipitation_week2": (
+                    ("latitude", "longitude"),
+                    grid.to_grid(observed).astype(np.float32),
+                    {"units": "mm", "long_name": "Observed Week-2 total"},
+                )
+            },
+            coords={"latitude": grid.latitude, "longitude": grid.longitude},
+            attrs={**source, "valid_start": start.isoformat(), "valid_end": end.isoformat()},
         )
-        packages.add_verification(directory, result)
+        packages.add_verification(directory, result, field)
         record.update(
             verification_status="available",
             season=result["season"],
@@ -326,33 +375,151 @@ class ForecastService:
         self.repo.audit("forecast_verified", body.actor, forecast_id, {"observation": path.name})
         return result
 
-    def seasonal(self, include_protected: bool = False) -> dict[str, Any]:
-        """Metrics pooled over every verified forecast of each season (valid-window start).
-
-        Forecasts valid in the protected 2022-2024 test period are left out unless asked
-        for, and then labelled display only: they never feed model selection.
-        """
-        pooled: dict[str, dict[str, list[dict[str, float]]]] = {}
-        used, skipped = [], 0
-        for record in self.repo.list(KIND):
-            if record.get("verification_status") != "available":
+    def verified(
+        self, model_id: str | None, include_protected: bool
+    ) -> tuple[str, list[dict[str, Any]], int]:
+        """Verified forecasts of one model (the model in use by default) and how many
+        protected-period forecasts were left out."""
+        model_id = model_id or ModelRegistry(self.platform).current()["model"]["model_id"]
+        records, skipped = [], 0
+        for record in self.runs():
+            if record["model_id"] != model_id or record.get("verification_status") != "available":
                 continue
             if record["protected_test_period"] and not include_protected:
                 skipped += 1
                 continue
+            records.append(record)
+        return model_id, records, skipped
+
+    def seasonal(self, model_id: str | None = None, include_protected: bool = False) -> dict:
+        """Metrics pooled over every verified forecast of each season (valid-window start).
+
+        Only one model's forecasts are pooled. Forecasts valid in the protected 2022-2024
+        test period are left out unless asked for, and then labelled display only: they
+        never feed model selection.
+        """
+        model_id, records, skipped = self.verified(model_id, include_protected)
+        pooled: dict[str, dict[str, list[dict[str, float]]]] = {}
+        for record in records:
             result = self._read(record["forecast_id"], "verification.json")
             for variant, metrics in result["domain"].items():
                 pooled.setdefault(result["season"], {}).setdefault(variant, []).append(
                     metrics["statistics"]
                 )
-            used.append(record["forecast_id"])
         return {
+            "model_id": model_id,
             "seasons": {
                 season: {variant: pooled_metrics(stats) for variant, stats in variants.items()}
                 for season, variants in pooled.items()
             },
-            "forecasts": used,
+            "forecasts": [record["forecast_id"] for record in records],
             "excluded_protected_period": skipped,
             "scope": "cell-based metrics pooled over the verified forecasts of each season",
             "use": "display only" if include_protected else "monitoring",
         }
+
+    def verification_maps(
+        self, model_id: str | None = None, include_protected: bool = False
+    ) -> dict[str, Any]:
+        """Which gridded verification metrics have enough verified forecasts behind them."""
+        model_id, records, skipped = self.verified(model_id, include_protected)
+        cases = len(records)
+        return {
+            "model_id": model_id,
+            "cases": cases,
+            "forecasts": [record["forecast_id"] for record in records],
+            "excluded_protected_period": skipped,
+            "metrics": {
+                name: {
+                    "title": title,
+                    "min_cases": MAP_MIN_CASES[name],
+                    "available": cases >= MAP_MIN_CASES[name],
+                }
+                for name, (_, title) in VERIFICATION_MAPS.items()
+            },
+            "variants": list(VARIANTS),
+        }
+
+    def verification_map(
+        self,
+        metric: str,
+        variant: str = "hybrid",
+        model_id: str | None = None,
+        include_protected: bool = False,
+    ) -> bytes:
+        """A gridded metric over one model's verified forecasts, in the ICPAC map standard."""
+        if metric not in VERIFICATION_MAPS:
+            raise ValueError(f"Verification maps: {', '.join(VERIFICATION_MAPS)}")
+        if variant not in VARIANTS or (metric == "skill" and variant == "raw"):
+            raise ValueError("Variants: raw, mbc, hybrid (skill compares mbc or hybrid with raw)")
+        model_id, records, skipped = self.verified(model_id, include_protected)
+        if len(records) < MAP_MIN_CASES[metric]:
+            raise Unavailable(
+                f"{VERIFICATION_MAPS[metric][1]} needs {MAP_MIN_CASES[metric]} verified "
+                f"forecasts of {model_id}; {len(records)} available"
+            )
+        key = (
+            metric,
+            variant,
+            model_id,
+            include_protected,
+            tuple(
+                (
+                    r["forecast_id"],
+                    packages.read_manifest(self.directory(r["forecast_id"]))["files"][
+                        "verification.json"
+                    ],
+                )
+                for r in records
+            ),
+        )
+        if key not in _MAP_CACHE:
+            _MAP_CACHE[key] = self._render_verification_map(
+                metric, variant, model_id, records, skipped, include_protected
+            )
+            while len(_MAP_CACHE) > 32:
+                _MAP_CACHE.pop(next(iter(_MAP_CACHE)))
+        return _MAP_CACHE[key]
+
+    def _render_verification_map(
+        self,
+        metric: str,
+        variant: str,
+        model_id: str,
+        records: list[dict[str, Any]],
+        skipped: int,
+        include_protected: bool,
+    ) -> bytes:
+        grid = operational.authoritative_grid()
+        stats = {name: CellStatistics(grid.shape) for name in {variant, "raw"}}
+        method = ""
+        for record in records:
+            run = packages.load_run(self.directory(record["forecast_id"]))
+            method = packages.method_label(run.provenance)
+            with xr.open_dataset(self.directory(record["forecast_id"]) / OBSERVATION) as obs:
+                observed = obs["precipitation_week2"].values.astype(np.float64)
+            for name, collected in stats.items():
+                collected.add(run.dataset[name].values, observed)
+        style, title = VERIFICATION_MAPS[metric]
+        if metric == "skill":
+            values = 1.0 - stats[variant].metric("rmse") / stats["raw"].metric("rmse")
+        else:
+            values = stats[variant].metric(metric)
+        label = {"raw": "RAW ECMWF", "mbc": "MBC", "hybrid": method}[variant]
+        note = f"{len(records)} verified forecasts of {model_id} against CHIRPS | cell-based\n" + (
+            "Includes the protected 2022-2024 test period: display only"
+            if include_protected
+            else f"Excludes the protected 2022-2024 test period ({skipped} forecasts)"
+        )
+        figure = maps.Figure(
+            f"verification_{metric}_{variant}",
+            [
+                maps.Layer(
+                    f"{label} | {title}",
+                    maps.Field(metric, values, grid.latitude, grid.longitude),
+                    style,
+                )
+            ],
+            note=note,
+        )
+        return maps.render_png(figure, maps.Canvas(mask=grid))

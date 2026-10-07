@@ -9,6 +9,7 @@ Layout of ``<root>/<forecast_id>/`` (file names are fixed for downstream tools):
     countries.json              country statistics over the authoritative country_id
     countries.csv               the same statistics as a table
     verification.json           metrics against observations, or why none are available
+    observation.nc              the observed Week-2 total, once the forecast is verified
     interpretation_inputs.json  technical inputs for a bulletin writer (no narrative)
     maps/raw.png, maps/mbc.png, maps/hybrid.png
                                 ICPAC map standard; the three share one colour scale
@@ -16,7 +17,7 @@ Layout of ``<root>/<forecast_id>/`` (file names are fixed for downstream tools):
 
 A package is written to a temporary directory and published by renaming it, so readers
 never see a partial package. Only verification.json changes afterwards (when observations
-arrive) and the manifest records the change.
+arrive), together with observation.nc, and the manifest records the change.
 """
 
 import csv
@@ -36,6 +37,7 @@ from climate_engine.operational.pipeline import ForecastRun
 from climate_engine.provenance import file_checksum
 
 PACKAGE_VERSION = "icpac-week2-package-v1"
+OBSERVATION_FILE = "observation.nc"  # added with the verification, when observations arrive
 MAP_LAYERS = ("hybrid", "mbc", "raw", "residual")
 FILES = (
     "forecast.nc",
@@ -322,13 +324,12 @@ def check_package(directory: Path) -> list[str]:
     if data.get("package_version") != PACKAGE_VERSION:
         problems.append(f"package_version {data.get('package_version')!r} is not {PACKAGE_VERSION}")
     files = data.get("files", {})
-    for name in FILES:
+    problems += [f"{name} not listed in the manifest" for name in FILES if name not in files]
+    for name, checksum in files.items():
         path = directory / name
-        if name not in files:
-            problems.append(f"{name} not listed in the manifest")
-        elif not path.is_file():
+        if not path.is_file():
             problems.append(f"{name} missing")
-        elif file_checksum(path) != files[name]:
+        elif file_checksum(path) != checksum:
             problems.append(f"{name} checksum does not match the manifest")
     return problems
 
@@ -356,8 +357,11 @@ def load_run(directory: Path) -> ForecastRun:
     )
 
 
-def add_verification(directory: Path, verification: dict[str, Any]) -> dict[str, Any]:
-    """Store verification results for a published package and update its manifest."""
+def add_verification(
+    directory: Path, verification: dict[str, Any], observed: xr.Dataset | None = None
+) -> dict[str, Any]:
+    """Store verification results (and the observed field, for verification maps) in a
+    published package and update its manifest."""
     directory = Path(directory)
     problems = check_package(directory)
     if problems:
@@ -365,6 +369,14 @@ def add_verification(directory: Path, verification: dict[str, Any]) -> dict[str,
     data = read_manifest(directory)
     if data["verification_status"] == "available":
         raise ValueError("This forecast is already verified; verification is recorded once")
+    if observed is not None:
+        observed.to_netcdf(
+            directory / OBSERVATION_FILE,
+            engine="netcdf4",
+            format="NETCDF4",
+            encoding={name: {"zlib": True, "complevel": 4} for name in observed.data_vars},
+        )
+        data["files"][OBSERVATION_FILE] = file_checksum(directory / OBSERVATION_FILE)
     _write_json(directory / "verification.json", verification)
     data["files"]["verification.json"] = file_checksum(directory / "verification.json")
     data["verification_status"] = verification["status"]

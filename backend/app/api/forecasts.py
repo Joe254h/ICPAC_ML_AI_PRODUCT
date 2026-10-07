@@ -13,6 +13,7 @@ from backend.app.services.forecasts import ForecastService
 from climate_engine.products.package import countries_csv
 
 ForecastId = Path(pattern=FORECAST_ID)
+MODEL_ID = r"^[a-zA-Z0-9_-]{1,80}$"
 IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
@@ -91,6 +92,31 @@ def install(app: FastAPI, dependency) -> None:
 
     @app.get("/verification/seasonal")
     def seasonal_verification(
-        include_protected: bool = False, platform=Depends(dependency)
+        model_id: str | None = Query(None, pattern=MODEL_ID),
+        include_protected: bool = False,
+        platform=Depends(dependency),
     ) -> dict:
-        return ForecastService(platform).seasonal(include_protected)
+        """Seasonal metrics of one model (the model in use by default)."""
+        return ForecastService(platform).seasonal(model_id, include_protected)
+
+    @app.get("/verification/maps")
+    def verification_maps(
+        model_id: str | None = Query(None, pattern=MODEL_ID),
+        include_protected: bool = False,
+        platform=Depends(dependency),
+    ) -> dict:
+        """Which gridded verification maps the verified forecasts support."""
+        return ForecastService(platform).verification_maps(model_id, include_protected)
+
+    @app.get("/verification/maps/{metric}")
+    def verification_map(
+        metric: str = Path(pattern=r"^[a-z]+$"),
+        variant: str = Query("hybrid", pattern=r"^[a-z]+$"),
+        model_id: str | None = Query(None, pattern=MODEL_ID),
+        include_protected: bool = False,
+        platform=Depends(dependency),
+    ):
+        png = ForecastService(platform).verification_map(
+            metric, variant, model_id, include_protected
+        )
+        return Response(png, media_type="image/png", headers={"Cache-Control": "no-cache"})
