@@ -89,6 +89,8 @@ ForecastProvider has load(cycle) and metadata. The five prototype sources are EC
 
 MockForecastModel and RawECMWFModel share the ForecastModel interface. Native CatBoost/LightGBM/XGBoost and analytical ABC loaders are isolated from frontend/API contracts; other model types require validated adapters. The only available feature schema is rainfall_total_v1 (one aligned accumulated-rainfall feature per cell). **Do not relabel Hybrid7 or Atmos37 artifacts as this schema.** Implement their frozen training-time feature transforms first.
 
+**Operational models.** The trained Hybrid7 and Atmos37 residual models, with their gridded monthly MBC parameters, are uploaded as a bundle (model file + feature manifest + MBC artifact) and run on the authoritative 800 × 700 grid / 205,999-cell ICPAC-11 domain through `scripts/run_operational.py`. See [operational models](docs/operational_models.md), including the settings that must be copied from the training code before the first run.
+
 See [exact model registration and replacement instructions](docs/models.md). The registry exposes validated candidates, confirmed promotion and rollback; the frontend automatically reads registered versions. Installing optional model dependencies and mounting an artifact does not rebuild the frontend. Model outputs, provenance and selector metadata remain stable.
 
 ## Verification and products

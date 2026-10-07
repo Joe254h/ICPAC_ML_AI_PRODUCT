@@ -9,6 +9,7 @@ import numpy as np
 
 from backend.app.db import Repository, now
 from backend.app.schemas import Selection
+from backend.app.services import operational
 from climate_engine.aggregation import country_mask, weighted_mean
 from climate_engine.core import DEMO_LABEL, checksum, config
 from climate_engine.forecasts import MockForecastProvider
@@ -80,6 +81,13 @@ class Platform:
             return MockForecastModel()
         if metadata["model_type"] == "raw":
             return RawECMWFModel()
+        if metadata.get("task") == operational.TASK:
+            path = permitted_file(metadata["artifact_path"], "ARTIFACT_ROOT", "artifacts")
+            if file_checksum(path) != metadata["checksum"]:
+                raise ValueError(
+                    "Bundle manifest changed after registration; register a new version"
+                )
+            return operational.OperationalModel(path)
         path = permitted_file(metadata["artifact_path"], "ARTIFACT_ROOT", "artifacts")
         if file_checksum(path) != metadata["checksum"]:
             raise ValueError("Model artifact changed after registration; register a new version")
@@ -87,6 +95,8 @@ class Platform:
 
     def calculate(self, selection: Selection) -> dict[str, Any]:
         self.observation(selection.observation)
+        if self.repo.get("model", selection.model).get("task") == operational.TASK:
+            self.model(selection.model).predict(None)
         self.model(selection.model)
         return self._calculate(selection.model_dump_json())
 

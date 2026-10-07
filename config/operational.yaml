@@ -1,0 +1,65 @@
+# Operational Week-2 inference on the authoritative ICPAC-11 domain.
+#
+# Values marked REQUIRED are deliberately null: they must be copied from the
+# frozen training code, never guessed. The pipeline refuses to run until they
+# are set, and names the missing key in its error.
+version: week2-operational-v1
+task: week2_precipitation_operational
+
+grid:
+  # Authoritative ML grid: 800 latitude x 700 longitude points at 0.05 degrees.
+  shape: [800, 700]
+  latitude: [-14.975, 24.975]
+  longitude: [19.025, 53.975]
+  domain_cells: 205999
+  # authoritative_icpac11_mask.npz (latitude, longitude, domain_mask,
+  # country_id, country_names). ICPAC_MASK_PATH overrides this value.
+  mask_path: null
+
+ecmwf:
+  member_dim: number
+  step_dim: step
+  level_dim: isobaricInhPa
+  rainfall:
+    variable: tp
+    # Days 8-14: accumulation between the 168 h and 336 h forecast points.
+    accumulation_steps_hours: [168, 336]
+    # REQUIRED only if the rainfall input is not already on the model grid:
+    # set to the regridding method used in training (bilinear is supported).
+    regrid: null
+  pressure:
+    # REQUIRED: the seven Week-2 step hours used to build the training features.
+    week2_steps_hours: null
+
+calendar:
+  # REQUIRED: which date selects the MBC calendar month and the doy features.
+  # One of: initialization, target_start (init + 8 d), target_mid (init + 11 d),
+  # target_end (init + 14 d).
+  mbc_month_basis: null
+  doy_basis: null
+
+mbc:
+  ratio_min: 0.05
+  ratio_max: 20.0
+  forecast_mean_floor: 0.1
+
+abc:
+  # Frozen on the 2020-2021 validation period: ABC = max(0, a*DPP + (1-a)*PPP).
+  alpha: 0.124
+
+feature_schemas:
+  hybrid7:
+    [X_mean, X_spread, latitude, longitude, doy_sin, doy_cos, MBC_forecast]
+  atmos37:
+    [
+      X_mean, X_spread, latitude, longitude, doy_sin, doy_cos,
+      q850_mean, q850_spread, q700_mean, q700_spread,
+      u850_mean, u850_spread, v850_mean, v850_spread,
+      wind850_mean, wind850_spread, qu850_mean, qu850_spread,
+      qv850_mean, qv850_spread, qwind850_mean, qwind850_spread,
+      t850_mean, t850_spread, t500_mean, t500_spread,
+      deltaT850_500_mean, deltaT850_500_spread, gh500_mean, gh500_spread,
+      u200_mean, u200_spread, v200_mean, v200_spread,
+      shear200_850_mean, shear200_850_spread,
+      MBC_forecast,
+    ]

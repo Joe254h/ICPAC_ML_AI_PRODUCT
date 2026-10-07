@@ -302,7 +302,11 @@ export default function Platform({ view }: { view: string }) {
                   label="Forecast model"
                   value={selection.model}
                   options={config.models
-                    .filter((m) => !["retired", "failed"].includes(m.status))
+                    .filter(
+                      (m) =>
+                        !["retired", "failed"].includes(m.status) &&
+                        m.task !== "week2_operational",
+                    )
                     .map((m) => ({ value: m.model_id, label: m.model_name }))}
                   change={(v) => set("model", v)}
                 />

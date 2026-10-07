@@ -13,7 +13,9 @@ if __name__ == "__main__":
     parser.add_argument("--name", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--artifact", required=True)
-    parser.add_argument("--type", required=True, choices=["catboost", "lightgbm", "xgboost", "abc"])
+    parser.add_argument(
+        "--type", required=True, choices=["catboost", "lightgbm", "xgboost", "random_forest", "abc"]
+    )
     parser.add_argument("--feature-schema", required=True)
     parser.add_argument("--training-period", default="not supplied")
     parser.add_argument("--validation-period", default="not supplied")

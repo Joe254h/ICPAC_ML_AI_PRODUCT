@@ -1,5 +1,10 @@
 # Models and artifact replacement
 
+> The real ICPAC Week-2 models (Hybrid7/Atmos37 residual learners with gridded MBC) run
+> through the operational path on the authoritative 205,999-cell domain. See
+> [operational_models.md](operational_models.md). This page covers the synthetic
+> demonstration grid used by the web pages.
+
 The frontend uses registry metadata and stable API responses. It never imports the model runtime. Built-in mock and raw models need no files. Native CatBoost (.cbm), LightGBM (.txt) and XGBoost (.json/.ubj) adapters load trusted artifacts. The ABC prototype adapter is a small analytical affine rainfall correction JSON, **not an implementation of a supplied operational ABC algorithm**. Random Forest, Hybrid7, Atmos37 and deep learning are interface-ready integrations requiring validated adapters.
 
 ## Exact supported contract

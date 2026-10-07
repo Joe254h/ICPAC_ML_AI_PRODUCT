@@ -16,3 +16,4 @@ artifacts/*
 !artifacts/README.md
 observations/*
 !observations/README.md
+catboost_info/
