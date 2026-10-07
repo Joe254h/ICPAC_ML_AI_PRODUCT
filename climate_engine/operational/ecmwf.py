@@ -2,22 +2,29 @@
 
 Training-time order is reproduced exactly:
 
-* rainfall: per member, Week-2 total = tp(336 h) - tp(168 h);
+* rainfall: per member, the Week-2 accumulation (168-336 h; see preprocessing.week2);
 * pressure fields: bilinear interpolation to the model grid, derived variables, then per
   member the mean over the seven Week-2 time points;
 * both: ensemble mean and population standard deviation (ddof=0) across members.
 
-Members are streamed through a running (Welford) mean/variance so a 100-member forecast
-never has to sit in memory at once. Units are read from file metadata, never assumed.
+Training used perturbed members only (HPC files ``*_pf_*``), so a control member
+(number 0) is excluded unless configured otherwise. Members are streamed through a running
+(Welford) mean/variance so a 100-member forecast never sits in memory at once. Units are
+read from file metadata, never assumed.
 """
-
-from typing import Any
 
 import numpy as np
 import xarray as xr
 
 from climate_engine.operational.grid import DomainGrid
 from climate_engine.operational.settings import required
+from climate_engine.preprocessing.week2 import (
+    normalise_unit,
+    rainfall_scale,
+    select_steps,
+    units_of,
+    week2_accumulation,
+)
 
 ATMOSPHERIC_VARIABLES = (
     "q850",
@@ -44,38 +51,6 @@ PRESSURE_UNITS = {
     "t": {"k"},
     "gh": {"gpm"},
 }
-RAINFALL_UNITS = {"kgm-2": 1.0, "kg/m2": 1.0, "mm": 1.0, "m": 1000.0}
-
-
-def _unit(value: Any) -> str:
-    return str(value).lower().replace("**", "").replace("^", "").replace(" ", "")
-
-
-def units_of(da: xr.DataArray) -> str:
-    unit = da.attrs.get("units") or da.attrs.get("GRIB_units")
-    if not unit:
-        raise ValueError(f"{da.name}: units missing from file metadata; refusing to assume")
-    return _unit(unit)
-
-
-def step_hours(ds: xr.Dataset | xr.DataArray, dim: str) -> np.ndarray:
-    step = ds[dim]
-    if np.issubdtype(step.dtype, np.timedelta64):
-        return step.values / np.timedelta64(1, "h")
-    if "hour" in str(step.attrs.get("units", "")).lower():
-        return np.asarray(step.values, dtype=float)
-    raise ValueError(f"Cannot interpret {dim} as forecast hours; add units or use timedelta")
-
-
-def select_steps(da: xr.DataArray, dim: str, hours: list[float]) -> xr.DataArray:
-    available = step_hours(da, dim)
-    index = []
-    for hour in hours:
-        match = np.flatnonzero(np.isclose(available, hour))
-        if not match.size:
-            raise ValueError(f"Forecast step {hour} h missing from {da.name}")
-        index.append(int(match[0]))
-    return da.isel({dim: index})
 
 
 class EnsembleStats:
@@ -99,6 +74,19 @@ class EnsembleStats:
         if self.mean is None or self.m2 is None:
             raise ValueError("No ensemble members")
         return self.mean, np.sqrt(self.m2 / self.count)
+
+
+def ensemble_members(ds: xr.Dataset | xr.DataArray, cfg: dict) -> np.ndarray:
+    """Members used for the features: perturbed only unless the control is configured in."""
+    dim = cfg["ecmwf"]["member_dim"]
+    if dim not in ds.dims:
+        raise ValueError(f"Ensemble dimension {dim!r} missing")
+    members = np.asarray(ds[dim].values)
+    if not cfg["ecmwf"].get("include_control_member", False):
+        members = members[members != cfg["ecmwf"].get("control_member_number", 0)]
+    if members.size < 2:
+        raise ValueError("At least two perturbed members are needed for ensemble spread")
+    return members
 
 
 def to_cells(da: xr.DataArray, grid: DomainGrid, regrid: str | None) -> xr.DataArray:
@@ -132,18 +120,24 @@ def rainfall_features(ds: xr.Dataset, grid: DomainGrid, cfg: dict) -> dict[str, 
     rain = ecmwf["rainfall"]
     member_dim, step_dim = ecmwf["member_dim"], ecmwf["step_dim"]
     tp = ds[rain["variable"]]
-    unit = units_of(tp)
-    if unit not in RAINFALL_UNITS:
-        raise ValueError(f"Unsupported rainfall units {unit!r}")
+    scale = rainfall_scale(tp)
     start, end = rain["accumulation_steps_hours"]
-    window = select_steps(tp, step_dim, [start, end])
     stats = EnsembleStats()
-    for member in window[member_dim].values:
-        pair = to_cells(window.sel({member_dim: member}), grid, rain["regrid"])
-        total = (pair.isel({step_dim: 1}) - pair.isel({step_dim: 0})).values
-        stats.add(_finite(total * RAINFALL_UNITS[unit], f"tp member {member}"))
+    negative = 0
+    for member in ensemble_members(tp, cfg):
+        week2 = week2_accumulation(
+            tp.sel({member_dim: member}), rain["accumulation"], step_dim, start, end
+        )
+        cells = _finite(to_cells(week2, grid, rain["regrid"]).values * scale, f"tp member {member}")
+        negative += int((cells < 0).sum())
+        stats.add(cells)
     mean, spread = stats.result()
-    return {"X_mean": mean, "X_spread": spread, "members": np.array(stats.count)}
+    return {
+        "X_mean": mean,
+        "X_spread": spread,
+        "members": np.array(stats.count),
+        "negative_member_totals": np.array(negative),
+    }
 
 
 def derived(fields: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
@@ -160,20 +154,23 @@ def derived(fields: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     return out
 
 
+def check_pressure_units(ds: xr.Dataset) -> None:
+    for name in PRESSURE_INPUTS:
+        if name not in ds:
+            raise ValueError(f"Pressure-level variable {name} missing")
+        if units_of(ds[name]) not in PRESSURE_UNITS[name]:
+            raise ValueError(f"{name}: unexpected units {units_of(ds[name])!r}")
+
+
 def atmospheric_features(ds: xr.Dataset, grid: DomainGrid, cfg: dict) -> dict[str, np.ndarray]:
     ecmwf = cfg["ecmwf"]
     member_dim, step_dim, level_dim = ecmwf["member_dim"], ecmwf["step_dim"], ecmwf["level_dim"]
     hours = list(required(cfg, "ecmwf.pressure.week2_steps_hours"))
     if len(hours) != 7:
         raise ValueError("ecmwf.pressure.week2_steps_hours must list exactly seven steps")
-    for name in PRESSURE_INPUTS:
-        if name not in ds:
-            raise ValueError(f"Pressure-level variable {name} missing")
-        if units_of(ds[name]) not in PRESSURE_UNITS[name]:
-            raise ValueError(f"{name}: unexpected units {units_of(ds[name])!r}")
-    members = ds[member_dim].values
+    check_pressure_units(ds)
     stats = EnsembleStats()
-    for member in members:
+    for member in ensemble_members(ds, cfg):
         fields: dict[str, np.ndarray] = {}
         for name, levels in PRESSURE_INPUTS.items():
             da = select_steps(ds[name].sel({member_dim: member}), step_dim, hours)
@@ -191,3 +188,16 @@ def atmospheric_features(ds: xr.Dataset, grid: DomainGrid, cfg: dict) -> dict[st
     for i, name in enumerate(ATMOSPHERIC_VARIABLES):
         out[f"{name}_mean"], out[f"{name}_spread"] = mean[i], spread[i]
     return out
+
+
+__all__ = [
+    "ATMOSPHERIC_VARIABLES",
+    "EnsembleStats",
+    "atmospheric_features",
+    "check_pressure_units",
+    "derived",
+    "ensemble_members",
+    "normalise_unit",
+    "rainfall_features",
+    "to_cells",
+]
