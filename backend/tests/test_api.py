@@ -33,6 +33,13 @@ def test_major_endpoints(client):
     assert client.get("/analysis?cycle=2026-09-21").status_code == 200
 
 
+def test_health_keeps_demonstration_checks_apart_from_the_operational_model(client):
+    components = client.get("/health").json()["components"]
+    assert components["Demonstration production artifact"] == "Healthy"
+    assert components["Operational model"] == "Unavailable · no operational model registered"
+    assert not [name for name in components if name.lower().startswith("production")]
+
+
 def test_selection_and_persistence(client):
     chirps = client.get("/analysis?country=Kenya").json()
     tamsat = client.get("/analysis?country=Kenya&observation=TAMSAT").json()

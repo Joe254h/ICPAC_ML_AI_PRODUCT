@@ -28,7 +28,7 @@ def system_health(platform) -> dict:
     production = [
         m for m in models if m["status"] == "production" and not operational.is_operational(m)
     ]
-    components["Model registry"] = (
+    components["Demonstration models"] = (
         "Healthy" if len(production) == 1 else "Warning · demonstration production model count"
     )
     in_use = [m for m in operational_models if m["status"] == "production"] or sorted(
@@ -75,9 +75,11 @@ def system_health(platform) -> dict:
     for model in production:
         try:
             healthy = platform.model(model["model_id"]).health_check()
-            components["Production artifact"] = "Healthy" if healthy else "Unavailable"
+            components["Demonstration production artifact"] = (
+                "Healthy" if healthy else "Unavailable"
+            )
         except (OSError, ValueError) as exc:
-            components["Production artifact"] = f"Unavailable · {exc}"
+            components["Demonstration production artifact"] = f"Unavailable · {exc}"
     try:
         llm = provider()
         if isinstance(llm, MockLLMProvider):
@@ -104,7 +106,7 @@ def system_health(platform) -> dict:
         "Healthy" if free > 500_000_000 else "Warning · low disk space"
     ) + f" · {free // 1_000_000} MB free"
     products = platform.repo.list("product_run")
-    components["Latest successful product run"] = (
+    components["Latest demonstration product run"] = (
         products[-1]["created_at"] if products else "Warning · no product run yet"
     )
     return {

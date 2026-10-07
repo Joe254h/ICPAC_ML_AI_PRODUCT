@@ -30,10 +30,10 @@ const GROUPS: Record<string, (name: string) => boolean> = {
     ].includes(n),
   models: (n) =>
     [
-      "Model registry",
+      "Demonstration models",
       "Operational model",
       "Model registration",
-      "Production artifact",
+      "Demonstration production artifact",
       "LLM",
     ].includes(n),
   processing: (n) =>
@@ -41,7 +41,7 @@ const GROUPS: Record<string, (name: string) => boolean> = {
       "API",
       "Local executor",
       "SLURM",
-      "Latest successful product run",
+      "Latest demonstration product run",
       "Operational forecasts",
     ].includes(n),
   all: () => true,
