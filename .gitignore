@@ -15,7 +15,7 @@ playwright-report/
 artifacts/*
 !artifacts/README.md
 # Verified HPC inference artifacts are versioned; other local artifacts stay ignored.
-!artifacts/SHA256SUMS.txt
+!artifacts/hpc_package/
 !artifacts/models/
 !artifacts/mbc/
 !artifacts/schema/
