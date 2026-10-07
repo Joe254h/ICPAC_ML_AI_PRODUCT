@@ -171,3 +171,22 @@ def test_startup_registers_the_committed_candidate_from_real_artifacts(tmp_path,
     assert ModelRegistry(platform).current()["role"] == "candidate"
     again = Platform(platform.repo, register_descriptors=True)
     assert len([m for m in again.repo.list("model") if operational.is_operational(m)]) == 1
+
+
+@pytest.mark.parametrize(
+    "descriptor",
+    [
+        "../../etc/model.yaml",
+        "config/model_registry/../../secrets.yaml",
+        "/etc/model.yaml",
+        "artifacts/model.yaml",
+    ],
+)
+def test_api_registration_reads_descriptors_from_the_registry_folder_only(tmp_path, descriptor):
+    from fastapi.testclient import TestClient
+
+    from backend.app.main import create_app
+
+    with TestClient(create_app(f"sqlite:///{tmp_path / 'db.sqlite'}")) as client:
+        response = client.post("/models/register", json={"descriptor": descriptor, "actor": "me"})
+    assert response.status_code == 422

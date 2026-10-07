@@ -146,7 +146,7 @@ def interpretation_inputs(
             f"Model {p['model_id']} is a {model.get('status')} model, not the production model"
         )
     if synthetic:
-        caveats.append("Input is a synthetic test fixture: this is not a forecast of real weather")
+        caveats.append("Input is a synthetic test fixture: not a forecast of real weather")
     caveats.append("Rainfall map colours follow a provisional style until the frozen one exists")
     countries = [
         {

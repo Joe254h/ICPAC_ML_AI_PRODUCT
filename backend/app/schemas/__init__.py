@@ -74,8 +74,17 @@ class RegisterRequest(BaseModel):
 class DescriptorRegisterRequest(BaseModel):
     """Register a model version from its reviewed descriptor (config/model_registry/*.yaml)."""
 
-    descriptor: str = Field(pattern=r"^[A-Za-z0-9_./-]+\.ya?ml$", max_length=200)
+    descriptor: str = Field(
+        pattern=r"^config/model_registry/[A-Za-z0-9_.-]+\.ya?ml$", max_length=200
+    )
     actor: str = Field(default="registry", min_length=2, max_length=80)
+
+    @field_validator("descriptor")
+    @classmethod
+    def inside_registry(cls, value: str) -> str:
+        if ".." in value:
+            raise ValueError("Descriptors are read from config/model_registry only")
+        return value
 
 
 class IndependentTestRequest(BaseModel):
