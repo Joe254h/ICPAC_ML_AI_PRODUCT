@@ -23,7 +23,11 @@ arrive), together with observation.nc, and the manifest records the change.
 import csv
 import io
 import json
+import os
 import shutil
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -38,6 +42,8 @@ from climate_engine.provenance import file_checksum
 
 PACKAGE_VERSION = "icpac-week2-package-v1"
 OBSERVATION_FILE = "observation.nc"  # added with the verification, when observations arrive
+VERIFICATION_CLAIM = ".verification.claim"  # held while a verification is being recorded
+CLAIM_STALE_SECONDS = 15 * 60
 MAP_LAYERS = ("hybrid", "mbc", "raw", "residual")
 FILES = (
     "forecast.nc",
@@ -89,7 +95,10 @@ MISSING_REFERENCES = {
 
 
 def _write_json(path: Path, data: Any) -> None:
-    path.write_text(json.dumps(data, indent=2, default=str) + "\n", encoding="utf-8")
+    """Write through a temporary file and rename, so readers never see a partial file."""
+    partial = path.with_name(f".{path.name}.partial")
+    partial.write_text(json.dumps(data, indent=2, default=str) + "\n", encoding="utf-8")
+    os.replace(partial, path)
 
 
 def model_role(status: str | None) -> str:
@@ -344,13 +353,23 @@ def load_run(directory: Path) -> ForecastRun:
     def read(name: str) -> Any:
         return json.loads((directory / name).read_text(encoding="utf-8"))
 
+    forecast_id = read_manifest(directory)["forecast_id"]
+    provenance = read("provenance.json")
     with xr.open_dataset(directory / "forecast.nc") as stored:
         dataset = stored.load()
+    named = {
+        "directory": directory.name,
+        "manifest": forecast_id,
+        "provenance": provenance.get("forecast_id"),
+        "forecast.nc": dataset.attrs.get("forecast_id"),
+    }
+    if len(set(named.values())) != 1:
+        raise ValueError(f"The package names different forecasts: {named}")
     verification = read("verification.json")
     return ForecastRun(
-        forecast_id=read_manifest(directory)["forecast_id"],
+        forecast_id=forecast_id,
         dataset=dataset,
-        provenance=read("provenance.json"),
+        provenance=provenance,
         countries=read("countries.json"),
         verification=verification if verification["status"] == "available" else None,
         notes=read("interpretation_inputs.json")["notes"],
@@ -361,25 +380,57 @@ def add_verification(
     directory: Path, verification: dict[str, Any], observed: xr.Dataset | None = None
 ) -> dict[str, Any]:
     """Store verification results (and the observed field, for verification maps) in a
-    published package and update its manifest."""
+    published package and update its manifest. Recorded once: the check and the update
+    happen under an exclusive claim on the package."""
     directory = Path(directory)
-    problems = check_package(directory)
-    if problems:
-        raise ValueError(f"Package failed its checks: {problems}")
-    data = read_manifest(directory)
-    if data["verification_status"] == "available":
-        raise ValueError("This forecast is already verified; verification is recorded once")
-    if observed is not None:
-        observed.to_netcdf(
-            directory / OBSERVATION_FILE,
-            engine="netcdf4",
-            format="NETCDF4",
-            encoding={name: {"zlib": True, "complevel": 4} for name in observed.data_vars},
-        )
-        data["files"][OBSERVATION_FILE] = file_checksum(directory / OBSERVATION_FILE)
-    _write_json(directory / "verification.json", verification)
-    data["files"]["verification.json"] = file_checksum(directory / "verification.json")
-    data["verification_status"] = verification["status"]
-    data["verification_added_at"] = datetime.now(timezone.utc).isoformat()
-    _write_json(directory / "manifest.json", data)
+    with _verification_claim(directory):
+        problems = check_package(directory)
+        if problems:
+            raise ValueError(f"Package failed its checks: {problems}")
+        data = read_manifest(directory)
+        if data["verification_status"] == "available":
+            raise ValueError("This forecast is already verified; verification is recorded once")
+        if observed is not None:
+            observed.to_netcdf(
+                directory / OBSERVATION_FILE,
+                engine="netcdf4",
+                format="NETCDF4",
+                encoding={name: {"zlib": True, "complevel": 4} for name in observed.data_vars},
+            )
+            data["files"][OBSERVATION_FILE] = file_checksum(directory / OBSERVATION_FILE)
+        _write_json(directory / "verification.json", verification)
+        data["files"]["verification.json"] = file_checksum(directory / "verification.json")
+        data["verification_status"] = verification["status"]
+        data["verification_added_at"] = datetime.now(timezone.utc).isoformat()
+        _write_json(directory / "manifest.json", data)
     return data
+
+
+@contextmanager
+def _verification_claim(directory: Path) -> Iterator[None]:
+    """Exclusive claim on a package's verification: an O_EXCL file in the package, so it
+    holds across threads, processes and instances sharing the storage. A claim left by a
+    crashed writer expires after CLAIM_STALE_SECONDS."""
+    path = directory / VERIFICATION_CLAIM
+    for _ in range(2):
+        try:
+            handle = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                stale = time.time() - path.stat().st_mtime > CLAIM_STALE_SECONDS
+            except FileNotFoundError:
+                continue
+            if not stale:
+                break
+            path.unlink(missing_ok=True)
+            continue
+        try:
+            os.write(handle, f"{os.getpid()} {datetime.now(timezone.utc).isoformat()}\n".encode())
+        finally:
+            os.close(handle)
+        try:
+            yield
+        finally:
+            path.unlink(missing_ok=True)
+        return
+    raise ValueError("Another verification of this forecast is in progress; retry shortly")

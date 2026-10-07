@@ -16,7 +16,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
-from climate_engine.core import ROOT
+from climate_engine.core import ROOT, checksum
 from climate_engine.forecasts import ForecastProvider
 from climate_engine.models.residual import InferenceResult, ResidualMBCModel
 from climate_engine.operational.grid import DomainGrid, country_selections, load_grid
@@ -130,6 +130,7 @@ def run_forecast(
         "mbc_artifact_checksum": record.get("artifact_checksums", {}).get("mbc"),
         "feature_schema": record.get("feature_schema", model.family),
         "feature_schema_checksum": record.get("artifact_checksums", {}).get("feature_names"),
+        "artifact_checksums": dict(record.get("artifact_checksums", {})),
         "forecast_initialization": cycle,
         "forecast_valid_start": start.isoformat(),
         "forecast_valid_end": end.isoformat(),
@@ -146,6 +147,8 @@ def run_forecast(
         "software_version": {"package": "0.1.0", "git_commit": code_version()},
         "pipeline_version": cfg["version"],
         "config_checksum": configuration_checksum(),
+        # The scientific settings actually used, overrides included.
+        "operational_config_checksum": checksum(cfg),
         "configuration_overrides": overrides or {},
         "pressure_steps_hours": cfg["ecmwf"]["pressure"].get("week2_steps_hours")
         if pressure is not None
@@ -189,6 +192,16 @@ def load_observed(path: Path, grid: DomainGrid, start: datetime, end: datetime) 
     return grid.to_cells(np.asarray(field.values, dtype=np.float64))
 
 
+def check_domain(run: ForecastRun, grid: DomainGrid) -> None:
+    """A forecast is verified only on the domain it was produced on."""
+    recorded = run.provenance["domain_definition"]["mask_sha256"]
+    if recorded != grid.checksum:
+        raise ValueError(
+            f"Forecast {run.forecast_id} was produced on domain mask {recorded[:12]}, but the "
+            f"platform's mask is now {grid.checksum[:12]}; verify it with its own domain"
+        )
+
+
 def verify(
     run: ForecastRun,
     observed_cells: np.ndarray,
@@ -201,6 +214,7 @@ def verify(
     Domain results carry sufficient statistics so that cases can be pooled exactly (for
     seasonal metrics) without keeping the observed fields.
     """
+    check_domain(run, grid)
     forecasts = {name: grid.to_cells(run.dataset[name].values) for name in ("raw", "mbc", "hybrid")}
     domain = {
         name: {

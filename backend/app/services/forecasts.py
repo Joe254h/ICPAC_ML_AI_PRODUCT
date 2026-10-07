@@ -23,13 +23,14 @@ import xarray as xr
 from backend.app.db import now
 from backend.app.schemas import ForecastRunRequest, PackageImportRequest, VerificationRequest
 from backend.app.services import operational
-from backend.app.services.registry import ModelRegistry
+from backend.app.services.registry import ModelRegistry, status_at
 from climate_engine.cartography import icpac_maps as maps
 from climate_engine.core import ROOT
 from climate_engine.forecasts import ECMWFS2SForecastProvider
 from climate_engine.forecasts.fixtures import FIXTURE_PRESSURE_STEPS_HOURS, write_fixture
 from climate_engine.operational.pipeline import (
     ForecastRun,
+    check_domain,
     default_run_root,
     load_observed,
     run_forecast,
@@ -194,26 +195,32 @@ class ForecastService:
             pass
         else:
             raise ValueError(f"Forecast {body.forecast_id} is already registered")
+        # load_run checks the manifest checksums and that the directory, manifest,
+        # provenance and NetCDF all name this forecast.
         run = packages.load_run(self.directory(body.forecast_id))
         p = run.provenance
         record = self.repo.get("model", str(p["model_id"]))
         if not operational.is_operational(record):
             raise ValueError("Packages must come from a registered operational model")
+        # Every pinned artifact (model, metrics, MBC, feature names, matrix manifest and
+        # domain) must be the registered one, and the domain the platform's own.
         if (
-            p["model_checksum"] != record["checksum"]
-            or p["mbc_artifact_checksum"] != record["artifact_checksums"]["mbc"]
+            p.get("artifact_checksums") != record["artifact_checksums"]
+            or p["model_checksum"] != record["checksum"]
+            or p["domain_definition"]["mask_sha256"] != record["artifact_checksums"]["domain"]
         ):
             raise ValueError(
                 "The package was produced by artifacts that differ from the registered model"
             )
-        # The status printed on the maps must be the registry's at generation time.
-        deployed = record.get("deployment_date")
-        promoted = bool(deployed) and str(deployed) <= str(p["generation_time"])
-        if (p["model_status"] == "production") != promoted:
+        check_domain(run, operational.authoritative_grid())
+        # The status printed on the maps must be the one the registry held for the model
+        # when the package was generated.
+        held = status_at(record, str(p["generation_time"]))
+        if p["model_status"] != held:
             raise ValueError(
-                f"The package labels {p['model_id']} {p['model_status']}, but the registry "
-                f"{'had' if promoted else 'had not'} promoted it when the package was "
-                "generated; rerun scripts/run_operational.py with the right --model-status"
+                f"The package labels {p['model_id']} {p['model_status']}, but the registry had "
+                f"it {held} when the package was generated; rerun scripts/run_operational.py "
+                "with the right --model-status"
             )
         return self._save(run, record, body.actor, "import")
 
@@ -280,8 +287,26 @@ class ForecastService:
             raise KeyError("no operational forecast run yet")
         return self.get((real or runs)[0]["forecast_id"])
 
+    def _path(self, forecast_id: str, name: str) -> Path:
+        """A package file, served only while it matches the checksum in the manifest."""
+        self.repo.get(KIND, forecast_id)
+        directory = self.directory(forecast_id)
+        manifest = packages.read_manifest(directory)
+        if name == "manifest.json":
+            if manifest.get("package_version") != packages.PACKAGE_VERSION:
+                raise ValueError(f"Package {forecast_id} has an unknown manifest version")
+            return directory / name
+        expected = manifest.get("files", {}).get(name)
+        path = directory / name
+        if expected is None or not path.is_file() or file_checksum(path) != expected:
+            raise ValueError(
+                f"Package {forecast_id}: {name} does not match its manifest; the package "
+                "was changed after publication"
+            )
+        return path
+
     def _read(self, forecast_id: str, name: str) -> Any:
-        return json.loads((self.directory(forecast_id) / name).read_text(encoding="utf-8"))
+        return json.loads(self._path(forecast_id, name).read_text(encoding="utf-8"))
 
     def get(self, forecast_id: str) -> dict[str, Any]:
         record = self.repo.get(KIND, forecast_id)
@@ -305,19 +330,17 @@ class ForecastService:
         }
 
     def countries(self, forecast_id: str) -> list[dict[str, Any]]:
-        self.repo.get(KIND, forecast_id)
         return self._read(forecast_id, "countries.json")
 
     def verification(self, forecast_id: str) -> dict[str, Any]:
-        self.repo.get(KIND, forecast_id)
         return self._read(forecast_id, "verification.json")
 
     def file(self, forecast_id: str, name: str) -> tuple[bytes, str]:
         """A package file by its stable name (no other paths are served)."""
-        self.repo.get(KIND, forecast_id)
         if name not in {"manifest.json", *packages.FILES}:
+            self.repo.get(KIND, forecast_id)
             raise KeyError(name)
-        path = self.directory(forecast_id) / name
+        path = self._path(forecast_id, name)
         return path.read_bytes(), MEDIA_TYPES[path.suffix]
 
     def map_png(self, forecast_id: str, layer: str) -> bytes:
@@ -327,7 +350,11 @@ class ForecastService:
 
     def bulletin(self, forecast_id: str) -> dict[str, Any]:
         self.repo.get(KIND, forecast_id)
-        inputs = BulletinInputs.from_package(self.directory(forecast_id))
+        directory = self.directory(forecast_id)
+        problems = packages.check_package(directory)
+        if problems:
+            raise ValueError(f"Package {forecast_id} failed its integrity checks: {problems}")
+        inputs = BulletinInputs.from_package(directory)
         base = f"/forecasts/{forecast_id}/package"
         return {
             "forecast_id": forecast_id,
@@ -348,6 +375,7 @@ class ForecastService:
         path = permitted_file(str(data_root / body.observation), "DATA_ROOT", "data/observations")
         run = packages.load_run(directory)
         grid = operational.authoritative_grid()
+        check_domain(run, grid)
         start = datetime.fromisoformat(run.provenance["forecast_valid_start"])
         end = datetime.fromisoformat(run.provenance["forecast_valid_end"])
         observed = load_observed(path, grid, start, end)
@@ -495,6 +523,7 @@ class ForecastService:
         method = ""
         for record in records:
             run = packages.load_run(self.directory(record["forecast_id"]))
+            check_domain(run, grid)
             method = packages.method_label(run.provenance)
             with xr.open_dataset(self.directory(record["forecast_id"]) / OBSERVATION) as obs:
                 observed = obs["precipitation_week2"].values.astype(np.float64)

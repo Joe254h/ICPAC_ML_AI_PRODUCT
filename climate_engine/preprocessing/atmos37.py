@@ -20,7 +20,11 @@ import numpy as np
 import xarray as xr
 
 from climate_engine.operational.corrections import MBCParameters
-from climate_engine.operational.ecmwf import atmospheric_features, rainfall_features
+from climate_engine.operational.ecmwf import (
+    atmospheric_features,
+    ensemble_members,
+    rainfall_features,
+)
 from climate_engine.operational.features import build_matrix
 from climate_engine.operational.grid import DomainGrid
 from climate_engine.operational.settings import basis_date
@@ -47,6 +51,17 @@ def needs_pressure(names: list[str]) -> bool:
     return any(name not in BASE_FEATURES and name != "MBC_forecast" for name in names)
 
 
+def check_same_members(rainfall: xr.Dataset, pressure: xr.Dataset, cfg: dict) -> None:
+    """Rainfall and atmospheric statistics must describe the same ensemble members."""
+    tp = rainfall[cfg["ecmwf"]["rainfall"]["variable"]]
+    rain, levels = (np.sort(ensemble_members(data, cfg)) for data in (tp, pressure))
+    if not np.array_equal(rain, levels):
+        raise ValueError(
+            f"Rainfall members {rain.tolist()} and pressure-level members {levels.tolist()} "
+            "differ; both files must hold the same perturbed members"
+        )
+
+
 def build_features(
     names: list[str],
     rainfall: xr.Dataset,
@@ -59,12 +74,14 @@ def build_features(
     """Build the predictors listed in ``names`` (a locked schema) in that exact order."""
     if names[-1] != "MBC_forecast":
         raise ValueError("The MBC schemas end with MBC_forecast; got " + names[-1])
-    columns = rainfall_features(rainfall, grid, cfg)
-    mbc_month = basis_date(cfg, "mbc_month_basis", initialization).month
-    columns["MBC_forecast"] = mbc.apply(columns["X_mean"], mbc_month)
     if needs_pressure(names):
         if pressure is None:
             raise ValueError("Pressure-level ECMWF fields are required for this schema")
+        check_same_members(rainfall, pressure, cfg)
+    columns = rainfall_features(rainfall, grid, cfg)
+    mbc_month = basis_date(cfg, "mbc_month_basis", initialization).month
+    columns["MBC_forecast"] = mbc.apply(columns["X_mean"], mbc_month)
+    if pressure is not None and needs_pressure(names):
         columns.update(atmospheric_features(pressure, grid, cfg))
     doy_date = basis_date(cfg, "doy_basis", initialization)
     matrix = build_matrix(names, grid, columns, doy_date, cfg)

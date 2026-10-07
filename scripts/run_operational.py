@@ -11,8 +11,8 @@ before the run; ARTIFACT_ROOT locates them. No database is needed. The package l
 RUN_ROOT/forecasts, register it there with POST /forecasts/import.
 
 --model-status is the model's registry status (default: the descriptor's declared status).
-The platform imports a package labelled production only if the registry had promoted the
-model when the package was generated, and refuses a non-production label after that.
+The platform imports a package only if its label is the status the registry held for the
+model when the package was generated (a production label needs a promotion in force then).
 """
 
 import argparse

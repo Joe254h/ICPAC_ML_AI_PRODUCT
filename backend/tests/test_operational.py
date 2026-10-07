@@ -1,5 +1,6 @@
 """Operational Week-2 path on a tiny grid that mirrors the authoritative layout."""
 
+import dataclasses
 import json
 from datetime import date
 from typing import Any
@@ -12,6 +13,7 @@ import xarray as xr
 from backend.tests.tiny import LAT, LON, MASK, STEPS, tiny_cfg, train_catboost, write_artifacts
 from backend.tests.tiny import write_mask as write_tiny_mask
 from backend.tests.tiny import write_mbc as write_tiny_mbc
+from climate_engine.core import checksum
 from climate_engine.forecasts import ECMWFS2SForecastProvider
 from climate_engine.forecasts.fixtures import rainfall_fixture, write_fixture
 from climate_engine.models.mbc_atmos37_catboost import MBCAtmos37CatBoost, combine
@@ -345,6 +347,30 @@ def test_atmos37_builder_places_mbc_last_and_validates(grid, mbc, cfg, tmp_path)
     assert np.isfinite(features.matrix).all()
 
 
+def test_rainfall_and_pressure_files_must_hold_the_same_members(grid, mbc, cfg, tmp_path):
+    rain, pressure = fixture_files(tmp_path, INIT)
+    levels = xr.open_dataset(pressure)
+    other = levels.assign_coords(number=levels["number"] + 10)
+    with pytest.raises(ValueError, match="differ"):
+        build_atmos37(
+            cfg["feature_schemas"]["atmos37"], xr.open_dataset(rain), other, INIT, grid, mbc, cfg
+        )
+
+
+def test_zarr_stores_are_read_like_netcdf_files(tmp_path, cfg):
+    rain, pressure = fixture_files(tmp_path, INIT)
+    xr.open_dataset(rain).to_zarr(tmp_path / "tp.zarr")
+    xr.open_dataset(pressure).to_zarr(tmp_path / "pl.zarr")
+    stores = ECMWFS2SForecastProvider(tmp_path / "tp.zarr", tmp_path / "pl.zarr", cfg)
+    files = ECMWFS2SForecastProvider(rain, pressure, cfg)
+    cycle = INIT.isoformat()
+    xr.testing.assert_allclose(stores.load(cycle)["tp"].load(), files.load(cycle)["tp"].load())
+    zarr_levels, file_levels = stores.load_pressure(cycle), files.load_pressure(cycle)
+    assert zarr_levels is not None and file_levels is not None
+    xr.testing.assert_allclose(zarr_levels["q"].load(), file_levels["q"].load())
+    assert all(len(i["listing_sha256"]) == 64 for i in stores.metadata()["inputs"])
+
+
 def test_inference_service_combines_residual_with_mbc_and_floors_at_zero(
     service, artifacts, grid, cfg, tmp_path
 ):
@@ -448,6 +474,7 @@ def test_end_to_end_week2_run_with_countries_and_verification(service, grid, cfg
         and p["input_label"] == "synthetic test fixture"
     )
     assert p["protected_test_period"] is False
+    assert p["operational_config_checksum"] == checksum(cfg)
     kenya = next(c for c in run.countries if c["country"] == "Kenya")
     cells = grid.to_cells(ds.hybrid.values)[
         grid.to_cells(np.where(np.arange(5) < 2, 1, 2) * np.ones((6, 1))) == 1
@@ -468,6 +495,8 @@ def test_end_to_end_week2_run_with_countries_and_verification(service, grid, cfg
     result = verify(run, obs, grid, cfg)
     assert result["domain"]["hybrid"]["bias"] == pytest.approx(-2.0, abs=1e-5)
     assert result["domain"]["hybrid"]["mae"] == pytest.approx(2.0, abs=1e-5)
+    with pytest.raises(ValueError, match="its own domain"):
+        verify(run, obs, dataclasses.replace(grid, checksum="0" * 64), cfg)
     with pytest.raises(ValueError, match="window"):
         load_observed(obs_path, grid, start.to_pydatetime(), start.to_pydatetime())
 

@@ -10,8 +10,8 @@ application never downloads data. A run for initialization `YYYY-MM-DD` (00 UTC)
 | `ecmwf_s2s_pl_YYYY-MM-DD.nc` (or `.zarr`) | pressure-level fields, all ensemble members | Atmos37 models |
 
 The HPC command `scripts/run_operational.py` takes the same files by path
-(`--rainfall`, `--pressure`). Every input is fingerprinted (SHA256) in the forecast's
-provenance.
+(`--rainfall`, `--pressure`). Every input is fingerprinted (SHA256; for a Zarr store, its
+file listing and metadata) in the forecast's provenance.
 
 ## Rainfall (`tp`)
 
@@ -45,6 +45,9 @@ population standard deviation (`X_spread`, ddof = 0) with a streaming algorithm.
   `ecmwf.pressure.week2_steps_hours`. **This setting is null on purpose**: it has not been
   supplied by the HPC team, and a guess would silently change the features. Real Atmos37
   runs stop at it with a message naming the key.
+* Members: the same perturbed members as the rainfall file. A run stops when the two
+  files hold different members, since rainfall and atmospheric statistics must describe
+  one ensemble.
 * Processing, as in training: bilinear interpolation to the model grid, derived fields
   (wind850, qu850, qv850, qwind850, deltaT850_500, shear200_850), mean over the seven
   steps per member, then ensemble mean and spread.

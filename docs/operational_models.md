@@ -61,9 +61,10 @@ Each version is described by a reviewed YAML descriptor in `config/model_registr
 names every artifact (model, metrics, MBC, feature names, matrix manifest, domain) by a
 path inside `ARTIFACT_ROOT` and pins its SHA256. Registration (startup, CLI or API) records
 the model only after every check passes: checksums, metadata agreement (baseline, family,
-algorithm, features, trees, periods, no test-period use), the MBC artifact against the
-mask, the feature schema against the locked one, the model load and a deterministic smoke
-prediction.
+algorithm, features, trees, periods, no test-period use), finite validation scores in
+`metrics.json` (`rainfall_MAE`, `rainfall_RMSE`, `rainfall_bias`, `rainfall_pearson_r`),
+the MBC artifact against the mask, the feature schema against the locked one, the model
+load and a deterministic smoke prediction.
 
 ```bash
 python -m scripts.register_model \
@@ -72,7 +73,10 @@ python -m scripts.register_model \
 ```
 
 Model IDs and artifacts are immutable: a changed file blocks validation and promotion, and
-the same artifact cannot be registered twice.
+the same artifact cannot be registered twice. Registration, the independent-test record and
+every status change are single database transactions, so concurrent requests cannot
+register a model twice or leave a test result without its approval. Each model keeps a
+status history (`status_history`), the basis for checking imported packages.
 
 ### Candidate and production
 
@@ -111,7 +115,10 @@ the same artifact cannot be registered twice.
   config/model_registry/<model>.yaml --rainfall <tp file> --pressure <pl file> --output
   <RUN_ROOT>/forecasts [--model-status candidate|production]`, then
   `POST /forecasts/import {"forecast_id": "...", "actor": "..."}`. Import checks the
-  package checksums, the producing model's artifacts and the truth of its status label.
+  package checksums; that the directory, manifest, provenance and NetCDF name the same
+  forecast; that all six artifacts recorded in its provenance are the registered model's;
+  that it was produced on the platform's domain; and that its status label is the status
+  the registry held for the model when the package was generated.
 
 ### Product package
 
@@ -120,7 +127,10 @@ SHA256 of every file), `forecast.nc` (raw, mbc, residual, hybrid in mm, domain m
 outside the domain), `provenance.json`, `model.json`, `countries.json`/`.csv`,
 `verification.json`, `interpretation_inputs.json`, `maps/{hybrid,mbc,raw,residual}.png`
 (ICPAC map standard; raw, MBC and hybrid share one colour scale) and, once verified,
-`observation.nc`. Packages are published atomically and never overwritten.
+`observation.nc`. Packages are published atomically and never overwritten; the API serves
+a package file only while it matches the manifest checksum. Provenance records every
+artifact checksum and `operational_config_checksum`, the SHA256 of the scientific settings
+actually used (overrides included).
 
 Country outputs: mean (cos-latitude weighted), median, minimum and maximum of raw, MBC and
 hybrid over the authoritative country cells. Anomaly and tercile category are reported as
@@ -129,7 +139,9 @@ unavailable: no climatology or thresholds are among the artifacts.
 ## Verification and leakage control
 
 * Per forecast: MAE, RMSE, bias, Pearson r and spatial means of raw, MBC and hybrid
-  against an observed CHIRPS Week-2 total, over the domain and per country.
+  against an observed CHIRPS Week-2 total, over the domain and per country. A forecast is
+  verified once, under an exclusive claim on its package, and only on the domain mask it
+  was produced on.
 * Seasonal: cases of one model pooled exactly through sufficient statistics
   (`/verification/seasonal`); gridded bias, MAE, RMSE, correlation (≥ 3 forecasts) and
   skill maps (`/verification/maps/{metric}`).

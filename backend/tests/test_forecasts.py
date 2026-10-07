@@ -1,7 +1,13 @@
 """Operational forecast runs, product packages and the forecast API on tiny artifacts."""
 
+import dataclasses
 import json
-from datetime import date, timedelta
+import os
+import shutil
+import time
+from collections.abc import Callable
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -29,6 +35,7 @@ from climate_engine.operational.grid import load_grid
 from climate_engine.operational.pipeline import run_forecast
 from climate_engine.operational.settings import touches_protected_test, valid_window
 from climate_engine.products import package as packages
+from climate_engine.provenance import file_checksum
 
 PNG = bytes([137, 80, 78, 71])
 PROVENANCE_FIELDS = {
@@ -47,6 +54,8 @@ PROVENANCE_FIELDS = {
     "domain_definition",
     "input_source",
     "software_version",
+    "artifact_checksums",
+    "operational_config_checksum",
 }
 
 
@@ -350,27 +359,133 @@ def hpc_package(env, status: str | None = None) -> str:
     return result.forecast_id
 
 
+def rewrite(directory: Path, name: str, change: Callable[[dict], None]) -> None:
+    """Edit a package JSON file and re-sign it in the manifest (a consistent forgery)."""
+    path = directory / name
+    data = json.loads(path.read_text())
+    change(data)
+    path.write_text(json.dumps(data))
+    manifest = packages.read_manifest(directory)
+    manifest["files"][name] = file_checksum(path)
+    (directory / "manifest.json").write_text(json.dumps(manifest))
+
+
+def import_package(env, fid: str):
+    return env.client.post("/forecasts/import", json={"forecast_id": fid, "actor": "Joe"})
+
+
 def test_hpc_packages_are_imported_only_when_intact_and_truthful(env, fast_maps):
     client = env.client
     fid = hpc_package(env)
-    imported = client.post("/forecasts/import", json={"forecast_id": fid, "actor": "Joe"})
+    imported = import_package(env, fid)
     assert imported.status_code == 201 and imported.json()["origin"] == "import"
     assert client.get(f"/forecasts/{fid}").status_code == 200
-    duplicate = client.post("/forecasts/import", json={"forecast_id": fid, "actor": "Joe"})
-    assert duplicate.status_code == 422
+    assert import_package(env, fid).status_code == 422
 
     tampered = hpc_package(env)
     (forecasts.package_root() / tampered / "maps" / "hybrid.png").write_bytes(b"edited")
-    refused = client.post("/forecasts/import", json={"forecast_id": tampered, "actor": "Joe"})
+    refused = import_package(env, tampered)
     assert refused.status_code == 422 and "checks" in refused.json()["detail"]
 
     claimed = hpc_package(env, status="production")
-    refused = client.post("/forecasts/import", json={"forecast_id": claimed, "actor": "Joe"})
-    assert refused.status_code == 422 and "had not promoted" in refused.json()["detail"]
-    missing = client.post(
-        "/forecasts/import", json={"forecast_id": "w2-2026-10-05-0badc0de", "actor": "Joe"}
+    refused = import_package(env, claimed)
+    assert refused.status_code == 422
+    assert "the registry had it candidate" in refused.json()["detail"]
+
+    # Every pinned artifact must be the registered one, not only the model and the MBC.
+    schema = hpc_package(env)
+    rewrite(
+        forecasts.package_root() / schema,
+        "provenance.json",
+        lambda p: p["artifact_checksums"].update(feature_names="0" * 64),
     )
+    refused = import_package(env, schema)
+    assert refused.status_code == 422 and "differ from the registered" in refused.json()["detail"]
+
+    # A package copied under another forecast ID is not that forecast.
+    copied = "w2-2026-10-05-feedface"
+    shutil.copytree(forecasts.package_root() / hpc_package(env), forecasts.package_root() / copied)
+    refused = import_package(env, copied)
+    assert refused.status_code == 422 and "different forecasts" in refused.json()["detail"]
+    assert client.get(f"/forecasts/{copied}").status_code == 404
+
+    missing = import_package(env, "w2-2026-10-05-0badc0de")
     assert missing.status_code == 503
+
+
+def test_imports_carry_the_status_the_registry_held_at_generation_time(env, fast_maps):
+    """A production label needs a promotion in force when the package was generated."""
+    repo = env.platform.repo
+    model_id = env.record["model_id"]
+    day = timedelta(days=1)
+    now = datetime.now(timezone.utc)
+
+    def history(*entries: tuple[str, datetime]) -> None:
+        record = repo.get("model", model_id)
+        record["status_history"] = [{"status": s, "since": t.isoformat()} for s, t in entries]
+        record["status"] = entries[-1][0]
+        repo.save("model", record, model_id)
+
+    produced = hpc_package(env, status="production")
+    history(("candidate", now - 60 * day), ("production", now - 30 * day))
+    assert import_package(env, produced).status_code == 201
+
+    late = hpc_package(env, status="production")  # generated after the retirement below
+    history(("candidate", now - 60 * day), ("production", now - 30 * day), ("retired", now - day))
+    refused = import_package(env, late)
+    assert refused.status_code == 422 and "had it retired" in refused.json()["detail"]
+    relabelled = hpc_package(env, status="candidate")
+    assert import_package(env, relabelled).status_code == 422
+
+
+def test_changed_package_files_are_never_served(env, fast_maps):
+    client = env.client
+    fid = run(env)["forecast_id"]
+    directory = forecasts.package_root() / fid
+    for name, url in (
+        ("countries.json", f"/forecasts/{fid}/countries"),
+        ("verification.json", f"/forecasts/{fid}/verification"),
+        ("maps/hybrid.png", f"/forecasts/{fid}/map?layer=hybrid"),
+        ("forecast.nc", f"/forecasts/{fid}/package/forecast.nc"),
+        ("countries.csv", f"/forecasts/{fid}/package/countries.csv"),
+    ):
+        assert client.get(url).status_code == 200, url
+        original = (directory / name).read_bytes()
+        (directory / name).write_bytes(original + b" ")
+        changed = client.get(url)
+        assert changed.status_code == 422 and "does not match" in changed.json()["detail"], url
+        (directory / name).write_bytes(original)
+    (directory / "interpretation_inputs.json").write_text("{}")
+    assert client.get(f"/forecasts/{fid}/bulletin").status_code == 422
+
+
+def test_verification_is_recorded_once_under_an_exclusive_claim(env, fast_maps):
+    client = env.client
+    record = run(env)
+    fid = record["forecast_id"]
+    directory = forecasts.package_root() / fid
+    body = {"observation": write_observation(env, record, "obs.nc"), "actor": "Joe"}
+    claim = directory / packages.VERIFICATION_CLAIM
+    claim.write_text("another worker")
+    busy = client.post(f"/forecasts/{fid}/verification", json=body)
+    assert busy.status_code == 422 and "in progress" in busy.json()["detail"]
+    assert packages.read_manifest(directory)["verification_status"] == "unavailable"
+
+    stale = time.time() - packages.CLAIM_STALE_SECONDS - 60
+    os.utime(claim, (stale, stale))
+    assert client.post(f"/forecasts/{fid}/verification", json=body).status_code == 200
+    assert not claim.exists(), "the claim is released after the verification"
+    again = client.post(f"/forecasts/{fid}/verification", json=body)
+    assert again.status_code == 422 and "recorded once" in again.json()["detail"]
+
+
+def test_forecasts_are_verified_only_on_their_own_domain(env, fast_maps, monkeypatch):
+    record = run(env)
+    body = {"observation": write_observation(env, record, "obs.nc"), "actor": "Joe"}
+    moved = dataclasses.replace(env.grid, checksum="0" * 64)
+    monkeypatch.setattr(operational, "authoritative_grid", lambda: moved)
+    refused = env.client.post(f"/forecasts/{record['forecast_id']}/verification", json=body)
+    assert refused.status_code == 422 and "its own domain" in refused.json()["detail"]
 
 
 def test_windows_touching_the_test_period_are_flagged(env):
