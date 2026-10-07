@@ -52,5 +52,7 @@ The largest file is the MBC parameter archive at 24.6 MB, under GitHub's 50 MB w
 size, so the package is committed with plain Git and no Git LFS: clones and CI checkouts
 need no extra tooling. A future artifact over 100 MB would go through Git LFS or object
 storage, with the choice recorded here. Tests use tiny synthetic fixtures; the artifact
-lane in CI additionally checks these files. The backend reads this directory at run time
-through `ARTIFACT_ROOT` (mounted read-only in Docker) rather than baking it into images.
+lane in CI additionally checks these files. The backend reads this directory through
+`ARTIFACT_ROOT`. The backend image carries a copy, so every image pins the model it
+serves; Docker Compose mounts the directory read-only over it, and a deployment can mount
+a bucket with newer registered versions the same way.
