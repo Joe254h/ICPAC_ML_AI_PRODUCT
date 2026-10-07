@@ -1,0 +1,20 @@
+{
+  "baseline": "MBC",
+  "family": "atmos37",
+  "model": "catboost",
+  "features": 37,
+  "train_rows": 442485852,
+  "validation_rows": 73747642,
+  "best_iteration_or_trees": 378,
+  "residual_MAE": 6.98316764831543,
+  "residual_RMSE": 14.046016815414477,
+  "residual_bias": -0.3027200996875763,
+  "residual_pearson_r": 0.7922998070716858,
+  "rainfall_MAE": 6.97012186050415,
+  "rainfall_RMSE": 14.04585114716236,
+  "rainfall_bias": -0.2896742820739746,
+  "rainfall_pearson_r": 0.9299558401107788,
+  "train_seconds": 45387.97020030022,
+  "test_2022_2024_used": false,
+  "host": "node08"
+}
