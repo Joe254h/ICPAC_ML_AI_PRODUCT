@@ -1,0 +1,38 @@
+ICPAC_ML_AI_PRODUCT
+====================
+
+Upload these directories/files into the GitHub repository:
+
+artifacts/
+    models/
+    mbc/
+    schema/
+    domain/
+
+cartography/
+    east_africa_11_adm0.geojson
+    IGAD-CPAC-01.jpg
+    121b_final_atmospheric_maps_icpac_standard.py
+
+fixtures/
+    references/
+
+Recommended repository structure:
+
+artifacts/models/atmos37_mbc_catboost_20261005/model.cbm
+artifacts/models/atmos37_mbc_catboost_20261005/metrics.json
+
+artifacts/mbc/final_mbc_params_2005_2021_full_corrected_domain.npz
+
+artifacts/schema/feature_names_37_MBC.npy
+artifacts/schema/mbc_ml_matrix_manifest.json
+
+artifacts/domain/authoritative_icpac11_mask.npz
+
+cartography/east_africa_11_adm0.geojson
+cartography/IGAD-CPAC-01.jpg
+cartography/121b_final_atmospheric_maps_icpac_standard.py
+
+fixtures/references/hybrid_Correlation_FINAL.png
+fixtures/references/hybrid_RMSE_FINAL.png
+fixtures/references/PANEL_RMSE_RAW_HYBRID_CATBOOST.png
