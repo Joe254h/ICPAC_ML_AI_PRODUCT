@@ -1,3 +1,10 @@
+"""Forecast providers.
+
+ForecastProvider
+    ├── MockForecastProvider      synthetic demonstration grid (CI, demos)
+    └── ECMWFS2SForecastProvider  ECMWF S2S ensemble files (operational inference)
+"""
+
 from abc import ABC, abstractmethod
 from datetime import date, timedelta
 
@@ -10,10 +17,15 @@ from climate_engine.observations import synthetic
 
 class ForecastProvider(ABC):
     @abstractmethod
-    def load(self, cycle: str) -> xr.Dataset: ...
+    def load(self, cycle: str) -> xr.Dataset:
+        """Rainfall for one forecast initialization (cycle = ISO date)."""
 
     @abstractmethod
     def metadata(self) -> dict: ...
+
+    def load_pressure(self, cycle: str) -> xr.Dataset | None:
+        """Pressure-level fields, when the provider supplies them."""
+        return None
 
 
 class MockForecastProvider(ForecastProvider):
@@ -36,3 +48,8 @@ class MockForecastProvider(ForecastProvider):
 
     def metadata(self) -> dict:
         return {"source": self.source, "mode": "synthetic", "lead_days": [1, 14]}
+
+
+from climate_engine.forecasts.ecmwf_s2s import ECMWFS2SForecastProvider  # noqa: E402
+
+__all__ = ["ECMWFS2SForecastProvider", "ForecastProvider", "MockForecastProvider"]
