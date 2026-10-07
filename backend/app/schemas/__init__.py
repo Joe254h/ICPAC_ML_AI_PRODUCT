@@ -70,6 +70,34 @@ class RegisterRequest(BaseModel):
     notes: str = ""
 
 
+class DescriptorRegisterRequest(BaseModel):
+    """Register a model version from its reviewed descriptor (config/model_registry/*.yaml)."""
+
+    descriptor: str = Field(pattern=r"^[A-Za-z0-9_./-]+\.ya?ml$", max_length=200)
+    actor: str = Field(default="registry", min_length=2, max_length=80)
+
+
+class IndependentTestRequest(BaseModel):
+    """Outcome of the independent test, run on the HPC and recorded once per model."""
+
+    status: Literal["passed", "failed"]
+    period: str = Field(pattern=r"^\d{4}-\d{4}$")
+    report: str = Field(min_length=3, max_length=300)
+    report_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    metrics: dict[str, float] = Field(default_factory=dict)
+    actor: str = Field(min_length=2, max_length=80)
+    confirmed: bool = False
+    comment: str = Field(default="", max_length=1000)
+
+    @field_validator("actor")
+    @classmethod
+    def named_reviewer(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("A named reviewer is required")
+        return value
+
+
 class IngestRequest(BaseModel):
     source: Literal["CHIRPS", "TAMSAT", "RFE2"]
     path: str

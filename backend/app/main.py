@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
@@ -40,7 +41,10 @@ logging.getLogger("icpac").setLevel(logging.INFO)
 def create_app(database_url: str | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.platform = Platform(Repository(database_url))
+        app.state.platform = Platform(
+            Repository(database_url),
+            register_descriptors=os.getenv("AUTO_REGISTER_MODELS", "true") == "true",
+        )
         for job in app.state.platform.repo.list("job"):
             if job["executor"] == "local" and job["status"] in {"queued", "running"}:
                 job.update(
@@ -116,6 +120,13 @@ def create_app(database_url: str | None = None) -> FastAPI:
     @app.get("/models")
     def models(p: Platform = Depends(platform)) -> list[dict]:
         return p.repo.list("model")
+
+    @app.get("/models/current")
+    def current_model(p: Platform = Depends(platform)) -> dict:
+        """The operational model forecasts use: production, else the newest candidate."""
+        from backend.app.services.registry import ModelRegistry
+
+        return ModelRegistry(p).current()
 
     @app.get("/models/{model_id}")
     def model(model_id: str, p: Platform = Depends(platform)) -> dict:

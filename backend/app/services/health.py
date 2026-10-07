@@ -3,6 +3,7 @@ import shutil
 
 import httpx
 
+from backend.app.services import operational
 from chatbot.providers import MockLLMProvider, provider
 from climate_engine.core import ROOT, config
 
@@ -10,10 +11,34 @@ from climate_engine.core import ROOT, config
 def system_health(platform) -> dict:
     components = {"API": "Healthy", "Database": "Healthy"}
     models = platform.repo.list("model")
-    production = [model for model in models if model["status"] == "production"]
+    operational_models = [m for m in models if operational.is_operational(m)]
+    production = [
+        m for m in models if m["status"] == "production" and not operational.is_operational(m)
+    ]
     components["Model registry"] = (
-        "Healthy" if len(production) == 1 else "Warning · production model count"
+        "Healthy" if len(production) == 1 else "Warning · demonstration production model count"
     )
+    in_use = [m for m in operational_models if m["status"] == "production"] or sorted(
+        (m for m in operational_models if m["status"] == "candidate"),
+        key=lambda m: m["created_at"],
+    )[-1:]
+    if not in_use:
+        components["Operational model"] = "Unavailable · no operational model registered"
+    else:
+        model = in_use[-1]
+        healthy = platform.model(model["model_id"]).health_check()
+        role = "production" if model["status"] == "production" else "candidate, no production yet"
+        components["Operational model"] = (
+            f"{'Healthy' if role == 'production' else 'Warning'} · {model['model_id']} ({role}; "
+            f"independent test {model.get('test_status')})"
+            if healthy
+            else f"Unavailable · {model['model_id']} artifacts changed since registration"
+        )
+    issues = [i for i in platform.repo.list("registration_issue") if i.get("current")]
+    if issues:
+        components["Model registration"] = (
+            f"Unavailable · {issues[-1]['model_id']}: {issues[-1]['error']}"
+        )
     for source in config("observations")["sources"]:
         try:
             platform.observation(source).validate()
