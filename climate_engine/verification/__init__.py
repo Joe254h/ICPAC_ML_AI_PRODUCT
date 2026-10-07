@@ -1,8 +1,18 @@
-from collections.abc import Callable
+from collections import defaultdict
+from collections.abc import Callable, Iterable
+from datetime import date
 
 import numpy as np
 
 Metric = Callable[[np.ndarray, np.ndarray], float | None]
+
+# Meteorological seasons; ICPAC seasons such as OND or MAM can be added by name.
+SEASONS = {
+    "DJF": (12, 1, 2),
+    "MAM": (3, 4, 5),
+    "JJA": (6, 7, 8),
+    "SON": (9, 10, 11),
+}
 
 
 def metrics(forecast: np.ndarray, observed: np.ndarray) -> dict[str, float | int | None]:
@@ -22,6 +32,35 @@ def metrics(forecast: np.ndarray, observed: np.ndarray) -> dict[str, float | int
         "correlation": corr,
         "sample_count": int(f.size),
     }
+
+
+def continuous_metrics(forecast: np.ndarray, observed: np.ndarray) -> dict[str, float | int | None]:
+    """MAE, RMSE, bias, Pearson r and the spatial means of forecast and observation."""
+    out = metrics(forecast, observed)
+    f, o = np.asarray(forecast, dtype=float), np.asarray(observed, dtype=float)
+    valid = np.isfinite(f) & np.isfinite(o)
+    out["forecast_mean"] = float(f[valid].mean())
+    out["observed_mean"] = float(o[valid].mean())
+    return out
+
+
+def season_of(day: date) -> str:
+    return next(name for name, months in SEASONS.items() if day.month in months)
+
+
+def seasonal_metrics(
+    cases: Iterable[tuple[date, np.ndarray, np.ndarray]],
+) -> dict[str, dict[str, float | int | None]]:
+    """Metrics pooled over every case of each season (cases: initialization, forecast, obs)."""
+    pooled: dict[str, list[tuple[np.ndarray, np.ndarray]]] = defaultdict(list)
+    for day, forecast, observed in cases:
+        pooled[season_of(day)].append((np.ravel(forecast), np.ravel(observed)))
+    out = {}
+    for season, pairs in pooled.items():
+        f = np.concatenate([p[0] for p in pairs])
+        o = np.concatenate([p[1] for p in pairs])
+        out[season] = {**continuous_metrics(f, o), "cases": len(pairs)}
+    return out
 
 
 class MetricRegistry:
