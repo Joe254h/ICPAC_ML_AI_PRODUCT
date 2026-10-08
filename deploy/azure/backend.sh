@@ -133,13 +133,19 @@ stored = {s["name"]: s.get("value") for s in json.loads(e["CURRENT_SECRETS"] or 
 for setting in json.loads(e["CURRENT_ENV"] or "[]") or []:
     if not setting.get("name", "").startswith("LLM_"):
         continue
-    reference = setting.get("secretRef")
-    if reference and not stored.get(reference):
-        print(f"Skipping {setting['name']}: its secret {reference} has no stored value")
-        continue
-    env.append({k: setting[k] for k in ("name", "value", "secretRef") if setting.get(k)})
-    if reference and reference not in {s["name"] for s in secrets}:
-        secrets.append({"name": reference, "value": stored[reference]})
+    reference, value = setting.get("secretRef"), setting.get("value")
+    if reference:
+        if not stored.get(reference):
+            print(f"Skipping {setting['name']}: its secret {reference} has no stored value")
+            continue
+        env.append({"name": setting["name"], "secretRef": reference})
+        if reference not in {s["name"] for s in secrets}:
+            secrets.append({"name": reference, "value": stored[reference]})
+    elif value:
+        env.append({"name": setting["name"], "value": value})
+    else:
+        # Azure refuses a variable without a value; for the app an empty one means unset.
+        print(f"Skipping {setting['name']}: it is empty, which the backend treats as unset")
 definition = {
     "location": e["LOCATION"],
     "properties": {
