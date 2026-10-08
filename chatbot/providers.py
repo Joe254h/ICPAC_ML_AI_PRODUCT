@@ -31,6 +31,9 @@ class OpenAICompatibleProvider(LLMProvider):
         base_url = os.getenv("LLM_BASE_URL", cfg["base_url"]).rstrip("/")
         key = os.getenv("LLM_API_KEY")
         headers = {"Authorization": f"Bearer {key}"} if key else {}
+        options = {}
+        if effort := os.getenv("LLM_REASONING_EFFORT"):
+            options["reasoning_effort"] = effort
         response = httpx.post(
             base_url + "/chat/completions",
             headers=headers,
@@ -39,6 +42,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 "model": os.getenv("LLM_MODEL", cfg["model"]),
                 "temperature": 0,
                 "max_tokens": 300,
+                **options,
                 "response_format": {"type": "json_object"},
                 "messages": [
                     {

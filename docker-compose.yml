@@ -12,6 +12,7 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-mock}
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:8001/v1}
       LLM_MODEL: ${LLM_MODEL:-qwen-prototype}
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
       ARTIFACT_ROOT: /app/artifacts
       DATA_ROOT: /app/observations
       RUN_ROOT: /app/data/runs

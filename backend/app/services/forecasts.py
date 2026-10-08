@@ -323,7 +323,13 @@ class ForecastService:
             "countries": self._read(forecast_id, "countries.json"),
             "verification": self._read(forecast_id, "verification.json"),
             "interpretation": self._read(forecast_id, "interpretation_inputs.json"),
-            "maps": {layer: f"{base}/map?layer={layer}" for layer in packages.MAP_LAYERS},
+            "map_style": "weekly-v1",
+            "bulletin_generator": WordTemplateGenerator().status(),
+            "maps": {
+                layer: f"{base}/map?layer={layer}"
+                + ("&style=weekly-v1" if layer != "residual" else "")
+                for layer in packages.MAP_LAYERS
+            },
             "files": {
                 name: f"{base}/package/{name}" for name in ("manifest.json", *packages.FILES)
             },
@@ -343,10 +349,33 @@ class ForecastService:
         path = self._path(forecast_id, name)
         return path.read_bytes(), MEDIA_TYPES[path.suffix]
 
-    def map_png(self, forecast_id: str, layer: str) -> bytes:
+    def map_png(
+        self, forecast_id: str, layer: str, style: str = "package", country: str | None = None
+    ) -> bytes:
         if layer not in packages.MAP_LAYERS:
             raise ValueError(f"Map layers: {', '.join(packages.MAP_LAYERS)}")
-        return self.file(forecast_id, f"maps/{layer}.png")[0]
+        if style == "package":
+            if country is not None:
+                raise ValueError("Country views require the weekly-v1 style")
+            return self.file(forecast_id, f"maps/{layer}.png")[0]
+        from climate_engine.products import weekly_bulletin as weekly
+
+        if style != "weekly-v1" or layer == "residual":
+            raise ValueError("Weekly style supports rainfall layers only")
+        inputs = BulletinInputs.from_package(self.directory(forecast_id))
+        cache = package_root().parent / "map-previews" / forecast_id
+        cache.mkdir(parents=True, exist_ok=True)
+        path = cache / f"{weekly.FORMAT_VERSION}-{layer}-{country or 'region'}.png"
+        if not path.exists():
+            from uuid import uuid4
+
+            partial = path.with_name(f".{path.name}.{uuid4().hex}.partial")
+            try:
+                partial.write_bytes(weekly.rainfall_png(inputs, layer, country))
+                partial.replace(path)
+            finally:
+                partial.unlink(missing_ok=True)
+        return path.read_bytes()
 
     def bulletin(self, forecast_id: str) -> dict[str, Any]:
         self.repo.get(KIND, forecast_id)
@@ -356,15 +385,32 @@ class ForecastService:
             raise ValueError(f"Package {forecast_id} failed its integrity checks: {problems}")
         inputs = BulletinInputs.from_package(directory)
         base = f"/forecasts/{forecast_id}/package"
+        from climate_engine.products import weekly_bulletin as weekly
+
+        sections = weekly.sections(inputs)
+        for section in sections:
+            if section.get("map_layer"):
+                section["map"] = (
+                    f"/forecasts/{forecast_id}/map?layer={section['map_layer']}&style=weekly-v1"
+                )
+                if section.get("map_country"):
+                    section["map"] += f"&country={section['map_country']}"
         return {
             "forecast_id": forecast_id,
             "generator": WordTemplateGenerator().status(),
+            "sections": sections,
+            "export": f"/forecasts/{forecast_id}/bulletin/export",
             "inputs": {
                 "interpretation": f"{base}/interpretation_inputs.json",
                 "countries": f"{base}/countries.csv",
                 "maps": {layer: f"{base}/maps/{layer}.png" for layer in inputs.maps},
             },
         }
+
+    def export_bulletin(self, forecast_id: str) -> bytes:
+        self.repo.get(KIND, forecast_id)
+        inputs = BulletinInputs.from_package(self.directory(forecast_id))
+        return WordTemplateGenerator().render_bytes(inputs)
 
     # ------------------------------------------------------------------ verification
 

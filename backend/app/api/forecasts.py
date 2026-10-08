@@ -1,6 +1,6 @@
 """Operational forecast endpoints: runs, packages, maps, countries and verification."""
 
-from fastapi import Depends, FastAPI, Path, Query
+from fastapi import Depends, FastAPI, HTTPException, Path, Query
 from fastapi.responses import Response
 
 from backend.app.schemas import (
@@ -10,6 +10,7 @@ from backend.app.schemas import (
     VerificationRequest,
 )
 from backend.app.services.forecasts import ForecastService
+from climate_engine.products.bulletin import MissingDependency
 from climate_engine.products.package import countries_csv
 
 ForecastId = Path(pattern=FORECAST_ID)
@@ -44,9 +45,11 @@ def install(app: FastAPI, dependency) -> None:
     def forecast_map(
         forecast_id: str = ForecastId,
         layer: str = Query("hybrid", pattern=r"^[a-z]+$"),
+        style: str = Query("package", pattern=r"^(package|weekly-v1)$"),
+        country: str | None = Query(None, pattern=r"^Somalia$"),
         platform=Depends(dependency),
     ):
-        png = ForecastService(platform).map_png(forecast_id, layer)
+        png = ForecastService(platform).map_png(forecast_id, layer, style, country)
         return Response(png, media_type="image/png", headers=IMMUTABLE)
 
     @app.get("/forecasts/{forecast_id}/countries")
@@ -78,8 +81,23 @@ def install(app: FastAPI, dependency) -> None:
 
     @app.get("/forecasts/{forecast_id}/bulletin")
     def forecast_bulletin(forecast_id: str = ForecastId, platform=Depends(dependency)) -> dict:
-        """Bulletin inputs and the generator's status (the Word template is not supplied)."""
+        """Reference-format draft sections, maps and generator status."""
         return ForecastService(platform).bulletin(forecast_id)
+
+    @app.get("/forecasts/{forecast_id}/bulletin/export")
+    def export_bulletin(forecast_id: str = ForecastId, platform=Depends(dependency)):
+        try:
+            content = ForecastService(platform).export_bulletin(forecast_id)
+        except MissingDependency as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return Response(
+            content,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f'attachment; filename="{forecast_id}-draft-bulletin.docx"',
+                "Cache-Control": "no-store",
+            },
+        )
 
     @app.get("/forecasts/{forecast_id}/package/{name:path}")
     def package_file(name: str, forecast_id: str = ForecastId, platform=Depends(dependency)):

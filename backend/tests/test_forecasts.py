@@ -137,7 +137,7 @@ def test_run_publishes_a_complete_package(env):
     manifest = packages.read_manifest(directory)
     assert manifest["labels"][0] == "Model status: candidate (not production)"
     assert "SYNTHETIC TEST INPUT: not a forecast of real weather" in manifest["labels"]
-    assert set(manifest["missing_dependencies"]) == {"anomaly", "category", "bulletin"}
+    assert set(manifest["missing_dependencies"]) == {"anomaly", "category"}
     inputs = json.loads((directory / "interpretation_inputs.json").read_text())
     assert inputs["model"]["role"] == "candidate (not production)"
     assert inputs["input"]["synthetic"] and inputs["anomaly"]["status"] == "unavailable"
@@ -164,7 +164,7 @@ def test_forecast_endpoints(env, fast_maps):
     detail = client.get(f"/forecasts/{fid}").json()
     assert detail["model"]["status"] == "candidate" and detail["model"]["feature_count"] == 37
     assert detail["provenance"]["forecast_id"] == fid
-    assert detail["maps"]["hybrid"] == f"/forecasts/{fid}/map?layer=hybrid"
+    assert detail["maps"]["hybrid"] == f"/forecasts/{fid}/map?layer=hybrid&style=weekly-v1"
     for layer in packages.MAP_LAYERS:
         response = client.get(f"/forecasts/{fid}/map?layer={layer}")
         assert response.status_code == 200 and response.headers["content-type"] == "image/png"
@@ -174,8 +174,22 @@ def test_forecast_endpoints(env, fast_maps):
     assert table.headers["content-type"].startswith("text/csv") and "Somalia" in table.text
     assert client.get(f"/forecasts/{fid}/verification").json()["status"] == "unavailable"
     bulletin = client.get(f"/forecasts/{fid}/bulletin").json()
-    assert bulletin["generator"]["status"] == "unavailable"
-    assert "template" in bulletin["generator"]["missing_dependency"]
+    assert bulletin["generator"]["status"] == "ready"
+    assert bulletin["generator"]["review"] == "DRAFT - human review required before release"
+    assert any(s["key"] == "exceptional" and s["missing_dependency"] for s in bulletin["sections"])
+    assert client.get(f"/forecasts/{fid}/map?layer=hybrid&style=weekly-v1").status_code == 200
+    assert (
+        client.get(f"/forecasts/{fid}/map?layer=hybrid&style=weekly-v1&country=Somalia").status_code
+        == 200
+    )
+    assert (
+        client.get(
+            f"/forecasts/{fid}/map?layer=hybrid&style=weekly-v1&country=../../secret"
+        ).status_code
+        == 422
+    )
+    assert client.get(f"/forecasts/{fid}/map?layer=residual&style=weekly-v1").status_code == 422
+    assert packages.check_package(forecasts.package_root() / fid) == []
     assert client.get(f"/forecasts/{fid}/package/manifest.json").json()["forecast_id"] == fid
     assert client.get(f"/forecasts/{fid}/package/forecast.nc").content[:4] == b"\x89HDF"
     assert client.get(f"/forecasts/{fid}/package/secrets.env").status_code == 404
@@ -496,3 +510,14 @@ def test_windows_touching_the_test_period_are_flagged(env):
     )
     assert touches_protected_test(env.cfg, start, end)
     assert not touches_protected_test(env.cfg, *valid_window(env.cfg, date(2025, 1, 6)))
+
+
+def test_word_export_reports_missing_template_as_configuration_error(env, fast_maps, monkeypatch):
+    fid = run(env)["forecast_id"]
+    monkeypatch.setenv("BULLETIN_TEMPLATE_PATH", str(env.tmp / "missing.docx"))
+    assert (
+        env.client.get(f"/forecasts/{fid}/bulletin").json()["generator"]["status"] == "unavailable"
+    )
+    response = env.client.get(f"/forecasts/{fid}/bulletin/export")
+    assert response.status_code == 503
+    assert "template" in response.json()["detail"]

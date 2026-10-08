@@ -156,6 +156,8 @@ export type Provenance = Record<string, unknown> & {
 };
 
 export type ForecastDetail = ForecastRun & {
+  map_style?: string;
+  bulletin_generator?: BulletinStatus["generator"];
   manifest: {
     labels: string[];
     files: Record<string, string>;
@@ -195,9 +197,20 @@ export type BulletinStatus = {
   forecast_id: string;
   generator: {
     status: string;
-    missing_dependency: string;
-    how_to_supply: string;
+    missing_dependency?: string;
+    how_to_supply?: string;
+    template?: string;
+    review?: string;
+    layout_validation?: string;
   };
+  export?: string;
+  sections?: {
+    key: string;
+    title: string;
+    text: string[];
+    map?: string;
+    missing_dependency?: string;
+  }[];
   inputs: {
     interpretation: string;
     countries: string;

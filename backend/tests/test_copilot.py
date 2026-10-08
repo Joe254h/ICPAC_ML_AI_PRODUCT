@@ -70,3 +70,29 @@ def test_references_distinguish_categories_and_unavailable_dates(tmp_path):
     )
     assert "unavailable" in result["text"]
     assert "No statistics have been inferred" in result["text"]
+
+
+def test_groq_nonthinking_outline_keeps_backend_facts(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.setenv("LLM_MODEL", "qwen/qwen3.8-27b")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "none")
+    monkeypatch.setenv("LLM_API_KEY", "unit-test-key")
+    calls = []
+
+    def endpoint(url, **kwargs):
+        calls.append((url, kwargs))
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={"choices": [{"message": {"content": '{"sentence_ids":["scope","rainfall"]}'}}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", endpoint)
+    result = render_grounded("Summarize", {"rainfall": "Rainfall 64.3 mm.", "scope": "Kenya."}, [])
+    assert result["text"] == "Kenya.\n\nRainfall 64.3 mm."
+    assert result["provider"] == "openai_compatible"
+    url, request = calls[0]
+    assert url == "https://api.groq.com/openai/v1/chat/completions"
+    assert request["json"]["reasoning_effort"] == "none"
+    assert request["headers"]["Authorization"] == "Bearer unit-test-key"

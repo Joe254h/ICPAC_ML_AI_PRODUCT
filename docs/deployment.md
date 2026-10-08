@@ -52,6 +52,32 @@ demonstration runs (`ALLOW_SYNTHETIC_FORECASTS=true`).
    of an older failed commit will still use its old files. Production deploys follow
    the protected branch; preview deploys follow pull requests.
 
+## Free Copilot model and weekly bulletin
+
+Follow [the Groq setup steps](groq-setup.md) to enable the free Qwen endpoint on
+the Azure backend. Its key stays in an Azure Container Apps secret.
+
+The supplied `Weekly Forecast for -06 -13October 2026.docx` is retained unchanged
+as `templates/icpac_weekly_reference.docx`. Word drafts patch its identified text
+slots and figure payloads while retaining the other package parts. The known
+reference SHA256 is checked before export; an alternative `BULLETIN_TEMPLATE_PATH`
+needs its own validated mapping. The backend image includes the reference.
+
+The Weekly product page previews the same sections and offers **Download Word
+draft**. Historical forecast text and images are replaced. Missing anomaly,
+95th-percentile exceedance, temperature and heat-stress products are explicitly
+unavailable; rainfall totals cannot supply those fields. Drafts are marked for
+human review, including the candidate and synthetic-input warnings.
+
+Rainfall maps use the reference's fixed classes at 1, 10, 30, 50, 100 and 200 mm,
+with grey/orange/yellow/green colours. New product packages use that style.
+Existing packages and their checksums stay intact; `style=weekly-v1` on the map
+endpoint provides a cached derived view, including the Somalia view. Original
+package images remain downloadable. The Somalia logo is placed offshore as in
+the reference. Only national boundaries are currently supplied; its internal
+administrative boundaries require an approved boundary dataset. Word page rendering was unavailable on the
+local Windows runtime; check the draft's pagination in Word before release.
+
 ## Backend: Azure Container Apps (Azure for Students)
 
 Azure for Students (GitHub Student Developer Pack, no credit card) runs the backend on

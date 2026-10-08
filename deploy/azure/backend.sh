@@ -83,8 +83,11 @@ ENVIRONMENT_ID=$(az containerapp env show --name "$ENVIRONMENT" --resource-group
 step "Container app $APP from $IMAGE"
 APP_EXISTS=false
 KEEP_DATABASE=false
+CURRENT_APP_ENV='[]'
 if az containerapp show --name "$APP" --resource-group "$GROUP" --output none 2>/dev/null; then
   APP_EXISTS=true
+  CURRENT_APP_ENV=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
+    --query 'properties.template.containers[0].env' --output json)
   # A rerun without DATABASE_URL keeps the database connection stored earlier.
   if [ -z "$DATABASE_URL" ] && [ -n "$(az containerapp secret list --name "$APP" \
     --resource-group "$GROUP" --query "[?name=='database-url'].name" --output tsv)" ]; then
@@ -96,7 +99,7 @@ trap 'rm -f "$DEFINITION"' EXIT
 # JSON is valid YAML; python writes it so passwords need no escaping.
 APP="$APP" LOCATION="$LOCATION" ENVIRONMENT_ID="$ENVIRONMENT_ID" IMAGE="$IMAGE" \
   SYNTHETIC="$SYNTHETIC" DATABASE_URL="$DATABASE_URL" KEEP_DATABASE="$KEEP_DATABASE" \
-  STORAGE_LINK="$STORAGE_LINK" MOUNT="$MOUNT" python3 - "$DEFINITION" <<'PY'
+  STORAGE_LINK="$STORAGE_LINK" MOUNT="$MOUNT" CURRENT_APP_ENV="$CURRENT_APP_ENV" python3 - "$DEFINITION" <<'PY'
 import json
 import os
 import sys
@@ -119,6 +122,12 @@ elif e["KEEP_DATABASE"] == "true":
     secrets.append({"name": "database-url"})  # the update keeps the stored value
 if secrets:
     env.append({"name": "DATABASE_URL", "secretRef": "database-url"})
+for setting in json.loads(e["CURRENT_APP_ENV"]) or []:
+    if setting.get("name", "").startswith("LLM_"):
+        env.append(setting)
+        secret_name = setting.get("secretRef")
+        if secret_name and secret_name not in {s["name"] for s in secrets}:
+            secrets.append({"name": secret_name})  # preserve the existing stored key
 definition = {
     "location": e["LOCATION"],
     "properties": {

@@ -156,7 +156,9 @@ def interpretation_inputs(
         )
     if synthetic:
         caveats.append("Input is a synthetic test fixture: not a forecast of real weather")
-    caveats.append("Rainfall map colours follow a provisional style until the frozen one exists")
+    caveats.append(
+        "Rainfall colours use the supplied ICPAC weekly bulletin's fixed rainfall classes"
+    )
     countries = [
         {
             "country": row["country"],
@@ -291,6 +293,8 @@ def write_package(
 
 
 def manifest(run: ForecastRun, directory: Path, model: dict[str, Any]) -> dict[str, Any]:
+    from climate_engine.products.bulletin import WordTemplateGenerator
+
     p = run.provenance
     synthetic = p["input_label"] != "ECMWF S2S files"
     labels = [f"Model status: {model_role(model.get('status'))}"]
@@ -312,7 +316,11 @@ def manifest(run: ForecastRun, directory: Path, model: dict[str, Any]) -> dict[s
         "input_label": p["input_label"],
         "synthetic": synthetic,
         "labels": labels,
-        "missing_dependencies": MISSING_REFERENCES,
+        "missing_dependencies": {
+            key: value
+            for key, value in MISSING_REFERENCES.items()
+            if key != "bulletin" or WordTemplateGenerator().status()["status"] != "ready"
+        },
         "verification_status": (run.verification or NO_VERIFICATION)["status"],
         "files": {name: file_checksum(directory / name) for name in FILES},
     }

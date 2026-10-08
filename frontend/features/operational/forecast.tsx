@@ -44,7 +44,13 @@ export default function Forecast({ id }: PageProps) {
   const caveats = [
     ...detail.interpretation.caveats,
     ...detail.notes.filter((n) => !detail.interpretation.caveats.includes(n)),
-  ];
+  ].filter(
+    (text) =>
+      !(
+        detail.map_style === "weekly-v1" &&
+        text.startsWith("Rainfall map colours follow a provisional style")
+      ),
+  );
   return (
     <>
       <PageHeader
@@ -101,16 +107,20 @@ export default function Forecast({ id }: PageProps) {
                 ))}
               </ul>
               <div className="grid gap-1 border-t border-border pt-3 text-[0.9rem] text-muted-foreground">
-                {Object.entries(detail.manifest.missing_dependencies).map(
-                  ([product, needs]) => (
+                {Object.entries(detail.manifest.missing_dependencies)
+                  .filter(
+                    ([product]) =>
+                      product !== "bulletin" ||
+                      detail.bulletin_generator?.status !== "ready",
+                  )
+                  .map(([product, needs]) => (
                     <span key={product}>
                       <strong className="text-foreground">
                         {product[0].toUpperCase() + product.slice(1)}:
                       </strong>{" "}
                       unavailable · needs {needs}
                     </span>
-                  ),
-                )}
+                  ))}
               </div>
             </CardContent>
           </Card>

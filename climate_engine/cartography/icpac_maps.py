@@ -48,6 +48,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure as MplFigure
 from matplotlib.path import Path as MplPath
+from matplotlib.ticker import FuncFormatter
 from matplotlib.transforms import Bbox
 
 from climate_engine.core import ROOT
@@ -87,6 +88,9 @@ class Style:
     vmax: float | None = None
     extend: str = "neither"
     provisional: bool = False  # not confirmed by a reference map or the HPC driver
+    levels: tuple[float, ...] | None = None
+    palette: tuple[str, ...] | None = None
+    geographic_ticks: bool = False
 
 
 STYLES: dict[str, Style] = {
@@ -112,7 +116,14 @@ STYLES: dict[str, Style] = {
     "mae": Style("YlOrRd", "MAE (mm/week)", "continuous", vmin=0.0, provisional=True),
     "bias": Style("BrBG", "Bias: forecast − CHIRPS (mm/week)", "diverging", provisional=True),
     "rainfall": Style(
-        "YlGnBu", "Week-2 rainfall (mm/week)", "continuous", 0.0, None, "max", provisional=True
+        "YlGnBu",
+        "Total rainfall (mm/week)",
+        "discrete",
+        0.0,
+        500.0,
+        levels=(0.0, 1.0, 10.0, 30.0, 50.0, 100.0, 200.0, 500.0),
+        palette=("#d9d9d9", "#ffa500", "#ffff00", "#caff70", "#00ff00", "#66cd00", "#228b22"),
+        geographic_ticks=True,
     ),
     "residual": Style(
         "BrBG", "CatBoost residual: CHIRPS − MBC (mm/week)", "diverging", provisional=True
@@ -263,9 +274,21 @@ class Canvas:
         boundaries: Path = BOUNDARIES,
         logo: Path = LOGO,
         mask: Path | DomainGrid = DOMAIN_MASK,
+        country: str | None = None,
     ):
         self.countries = load_boundaries(boundaries)
+        if country is not None:
+            self.countries = tuple(c for c in self.countries if c.name == country)
+            if not self.countries:
+                raise ValueError(f"Unknown map country: {country}")
         self.extent = frozen_extent(self.countries)
+        self.logo_box = LOGO_BOX
+        self.tick_spacing = TICK_SPACING_DEG
+        if country is not None:
+            west, south, east, north = self.countries[0].bounds
+            self.extent = (west - 0.25, east + 0.25, south - 0.25, north + 0.25)
+            self.logo_box = (0.82, 0.02, 0.15, 0.12)  # offshore, as in the Somalia reference
+            self.tick_spacing = 2
         self.clip = union_path(self.countries)
         self.logo = logo_image(logo)
         self.valid: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
@@ -316,16 +339,21 @@ class Canvas:
         dy = abs(lat[1] - lat[0]) / 2 if lat.size > 1 else 0.025
         dx = abs(lon[1] - lon[0]) / 2 if lon.size > 1 else 0.025
         vmin, vmax = bounds
+        cmap = colors.ListedColormap(style.palette) if style.palette else style.cmap
         norm = (
-            colors.TwoSlopeNorm(vcenter=0.0, vmin=vmin, vmax=vmax)
-            if style.kind == "diverging" and vmin < 0 < vmax
-            else colors.Normalize(vmin=vmin, vmax=vmax)
+            colors.BoundaryNorm(style.levels, len(style.palette))
+            if style.levels and style.palette
+            else (
+                colors.TwoSlopeNorm(vcenter=0.0, vmin=vmin, vmax=vmax)
+                if style.kind == "diverging" and vmin < 0 < vmax
+                else colors.Normalize(vmin=vmin, vmax=vmax)
+            )
         )
         image = ax.imshow(
             np.ma.masked_invalid(values),
             origin="lower",
             extent=(lon[0] - dx, lon[-1] + dx, lat[0] - dy, lat[-1] + dy),
-            cmap=style.cmap,
+            cmap=cmap,
             norm=norm,
             interpolation="nearest",
         )
@@ -342,16 +370,29 @@ class Canvas:
         ax.set_xlim(west, east)
         ax.set_ylim(south, north)
         ax.set_aspect(self.aspect)
-        step = TICK_SPACING_DEG
+        step = self.tick_spacing
         ax.set_xticks(np.arange(math.ceil(west / step), math.floor(east / step) + 1) * step)
         ax.set_yticks(np.arange(math.ceil(south / step), math.floor(north / step) + 1) * step)
         ax.set_xlabel("Longitude (°E)", fontsize=LABEL_SIZE)
         ax.set_ylabel("Latitude (°)", fontsize=LABEL_SIZE)
+        if style.geographic_ticks:
+            ax.xaxis.set_major_formatter(
+                FuncFormatter(lambda v, _: f"{abs(v):g}°{'E' if v >= 0 else 'W'}")
+            )
+            ax.yaxis.set_major_formatter(
+                FuncFormatter(
+                    lambda v, _: "0°" if v == 0 else f"{abs(v):g}°{'N' if v > 0 else 'S'}"
+                )
+            )
+            ax.set_xlabel("")
+            ax.set_ylabel("")
         ax.grid(True, **GRID_STYLE)
         ax.set_title(layer.title, fontsize=TITLE_SIZE, fontweight="bold", pad=TITLE_PAD)
         bar = ax.figure.colorbar(image, cax=cax, extend=style.extend)
         bar.set_label(style.label)
-        logo = ax.inset_axes(LOGO_BOX, zorder=5)
+        if style.levels:
+            bar.set_ticks(style.levels[1:-1])
+        logo = ax.inset_axes(self.logo_box, zorder=5)
         logo.imshow(self.logo)
         logo.set_axis_off()
         return image
