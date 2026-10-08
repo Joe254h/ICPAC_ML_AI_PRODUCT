@@ -1,0 +1,44 @@
+# Registration descriptor: the current web-application test model.
+#
+# A descriptor is the reviewed, versioned statement of what a model is. Registration
+# verifies every artifact against these checksums, loads and inspects the model, checks
+# the MBC artifact and the 37-feature schema, runs a smoke prediction, and only then
+# records the model. Descriptors never declare a production status.
+model_id: mbc_atmos37_catboost_candidate_v1
+model_name: MBC + Atmos37 CatBoost
+version: 1.0.0-candidate.1
+experiment: MBC_EXPERIMENT_20261005
+baseline: MBC
+family: atmos37
+algorithm: catboost
+feature_schema: atmos37
+feature_count: 37
+expected_trees: 378
+training_period: "2008-2019"
+validation_period: "2020-2021"
+test_period: "2022-2024"
+test_status: untested
+declared_status: candidate
+declared_by: Joe254h
+notes: >-
+  Validation-period candidate used to test the web application. It is not the final
+  production model: the 2008-2021 refit, independently tested on 2022-2024, will be
+  registered as a new version (mbc_atmos37_catboost_final_v1) without replacing this one.
+
+# Paths are relative to ARTIFACT_ROOT (the repository's artifacts/ by default).
+artifacts:
+  model: models/atmos37_mbc_catboost_20261005/model.cbm
+  metrics: models/atmos37_mbc_catboost_20261005/metrics.json
+  mbc: mbc/final_mbc_params_2005_2021_full_corrected_domain.npz
+  feature_names: schema/feature_names_37_MBC.npy
+  matrix_manifest: schema/mbc_ml_matrix_manifest.json
+  domain: domain/authoritative_icpac11_mask.npz
+
+# SHA256 copied from artifacts/hpc_package/SHA256SUMS.txt (generated on the HPC).
+checksums:
+  model: ce1d14e9b6e29f141e4cfa9f55edefb175aa9d015a0a2bc0be53427b236739a2
+  metrics: aae046a68f48c04beac2d4a36c3722bd57676c6d78c4205b62bb178744b84ca2
+  mbc: c73c49dc452e94e7a554dbe15fe1d4443429da819482a8abe031fcf3b51db31e
+  feature_names: 5cc79894922f68661e0d7fe50a707d9f2380ef5519b3467e2de7531b789d9efe
+  matrix_manifest: e5a8a3e85cb76b65c1d766261474d16e213e72d58ca91a18273cbda82fed0c7f
+  domain: 3906541fd4bbd368095340c43e649acd9e319aea3936144192fe921d9f786ed9

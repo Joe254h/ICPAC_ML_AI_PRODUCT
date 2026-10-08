@@ -3,6 +3,8 @@ from fastapi.responses import Response
 
 from backend.app.schemas import (
     ChatRequest,
+    DescriptorRegisterRequest,
+    IndependentTestRequest,
     IngestRequest,
     RegisterRequest,
     ReviewRequest,
@@ -47,8 +49,19 @@ def install(app: FastAPI, dependency):
         return Jobs(platform).cancel(id)
 
     @app.post("/models/register")
-    def register_model(body: RegisterRequest, platform=Depends(dependency)) -> dict:
+    def register_model(
+        body: DescriptorRegisterRequest | RegisterRequest, platform=Depends(dependency)
+    ) -> dict:
+        """Operational models register from a reviewed descriptor; demo models directly."""
+        if isinstance(body, DescriptorRegisterRequest):
+            return ModelRegistry(platform).register_descriptor(body.descriptor, body.actor)
         return ModelRegistry(platform).register(body)
+
+    @app.post("/models/{id}/independent-test")
+    def independent_test(
+        id: str, body: IndependentTestRequest, platform=Depends(dependency)
+    ) -> dict:
+        return ModelRegistry(platform).record_independent_test(id, body)
 
     @app.post("/models/{id}/validate")
     def validate_model(id: str, body: Selection, platform=Depends(dependency)) -> dict:

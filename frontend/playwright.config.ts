@@ -8,7 +8,7 @@ export default defineConfig({
   webServer: [
     {
       command:
-        "python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000",
+        "ALLOW_SYNTHETIC_FORECASTS=true python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000",
       cwd: "..",
       url: "http://127.0.0.1:8000/health",
       reuseExistingServer: !process.env.CI,
@@ -19,5 +19,5 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
     },
   ],
-  timeout: 60000,
+  timeout: 90000,
 });

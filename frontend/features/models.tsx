@@ -47,10 +47,10 @@ export default function Models({
       <section className="panel">
         <div className="panel-head">
           <div>
-            <h2>Model registry</h2>
+            <h2>Demonstration models</h2>
             <p>
-              Versioned artifacts · explicit validation · confirmed deployment
-              changes
+              Synthetic grid · versioned artifacts · explicit validation ·
+              confirmed deployment changes
             </p>
           </div>
           <span className="badge green">

@@ -29,7 +29,7 @@ logger = logging.getLogger("icpac.pipeline")
 
 
 class Platform:
-    def __init__(self, repository: Repository):
+    def __init__(self, repository: Repository, register_descriptors: bool = False):
         self.repo = repository
         for model in config("models")["models"]:
             try:
@@ -65,6 +65,34 @@ class Platform:
                 self.repo.save("dataset", MockObservationProvider(source).metadata(), source)
         for cycle in config("forecasts")["cycles"]:
             self.repo.save("forecast_cycle", {"cycle": str(cycle), "mode": "synthetic"}, str(cycle))
+        if register_descriptors:
+            self.register_descriptors()
+
+    def register_descriptors(self) -> list[dict]:
+        """Register reviewed descriptors not yet in the registry; failures are recorded,
+        never skipped silently, and nothing is registered unless every check passes."""
+        from backend.app.services.registry import ModelRegistry
+        from climate_engine.models.descriptor import descriptors
+
+        issues = []
+        known = {m["model_id"] for m in self.repo.list("model")}
+        for issue in self.repo.list("registration_issue"):
+            self.repo.save("registration_issue", {**issue, "current": False}, issue["id"])
+        for descriptor in descriptors():
+            if descriptor.model_id in known:
+                continue
+            try:
+                ModelRegistry(self).register_descriptor(str(descriptor.path), "startup")
+            except (ImportError, OSError, ValueError, KeyError) as exc:
+                logger.error("model_registration_failed", extra={"model": descriptor.model_id})
+                issue = {
+                    "model_id": descriptor.model_id,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "timestamp": now(),
+                    "current": True,
+                }
+                issues.append(self.repo.save("registration_issue", issue))
+        return issues
 
     def observation(self, source: str):
         metadata = self.repo.get("dataset", source)
@@ -81,13 +109,8 @@ class Platform:
             return MockForecastModel()
         if metadata["model_type"] == "raw":
             return RawECMWFModel()
-        if metadata.get("task") == operational.TASK:
-            path = permitted_file(metadata["artifact_path"], "ARTIFACT_ROOT", "artifacts")
-            if file_checksum(path) != metadata["checksum"]:
-                raise ValueError(
-                    "Bundle manifest changed after registration; register a new version"
-                )
-            return operational.OperationalModel(path)
+        if operational.is_operational(metadata):
+            return operational.OperationalModel(metadata)
         path = permitted_file(metadata["artifact_path"], "ARTIFACT_ROOT", "artifacts")
         if file_checksum(path) != metadata["checksum"]:
             raise ValueError("Model artifact changed after registration; register a new version")
@@ -95,7 +118,7 @@ class Platform:
 
     def calculate(self, selection: Selection) -> dict[str, Any]:
         self.observation(selection.observation)
-        if self.repo.get("model", selection.model).get("task") == operational.TASK:
+        if operational.is_operational(self.repo.get("model", selection.model)):
             self.model(selection.model).predict(None)
         self.model(selection.model)
         return self._calculate(selection.model_dump_json())

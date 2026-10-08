@@ -14,8 +14,15 @@ services:
       LLM_MODEL: ${LLM_MODEL:-qwen-prototype}
       ARTIFACT_ROOT: /app/artifacts
       DATA_ROOT: /app/observations
+      RUN_ROOT: /app/data/runs
+      FORECAST_INPUT_ROOT: /app/forecasts
+      ALLOW_SYNTHETIC_FORECASTS: ${ALLOW_SYNTHETIC_FORECASTS:-true}
       LLM_API_KEY: ${LLM_API_KEY:-}
-    volumes: ["climate-data:/app/data", "./artifacts:/app/artifacts:ro", "./observations:/app/observations:ro"]
+    volumes:
+      - climate-data:/app/data
+      - ./artifacts:/app/artifacts:ro
+      - ./observations:/app/observations:ro
+      - ./forecasts:/app/forecasts:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s

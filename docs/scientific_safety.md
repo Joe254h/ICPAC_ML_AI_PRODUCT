@@ -1,16 +1,32 @@
 # Scientific safety
 
-This prototype is not an operational forecast. All shipped forecast/observation fields are synthetic; metrics cannot establish real ICPAC model skill. UI, exports and narratives carry demonstration labels.
+The platform reproduces the HPC inference chain; it does not do science the HPC has not
+validated.
 
-- The chatbot does not calculate scientific metrics. Tools provide deterministic, traceable structured results.
-- Models and configuration are versioned. Artifacts must retain checksums, training/inference feature contracts and independent validation evidence.
-- QC is mandatory. Missing variables, bad units, corrupt NetCDF, invalid coordinates, missing periods/leads and excessive missing data stop processing.
-- Forecast/observation alignment is exact. Incomplete accumulated cells remain missing rather than becoming zero.
-- Source data and provenance identify cycle, model, observation version, code/config versions, domain/grid and dates.
-- Human review is mandatory for bulletin approval, model promotion and publication. Narratives remain drafts and are never disseminated automatically.
-- Model changes require independent validation and confirmed promotion. Previous production model metadata must support rollback.
-- One synthetic accumulated case supports spatial error summaries and pattern correlation, not temporal skill claims. Single-cell RMSE for one case is absolute error.
-- Synthetic anomalies use an artificial reference, not an approved climatology. SPI, calibrated terciles and probability scores remain unavailable.
-- Country boundaries and cell masks are approximate demo fixtures. They do not reproduce ICPAC's operational 205,999-cell mask.
-
-Production prerequisites: trusted actual data, authoritative masks, validated preprocessing/hindcasts/climatology, authentication and role-based approval, immutable audits, approved bulletins/SOPs and validated model adapters. Prototype actor names are self-reported local-demo identities.
+* **No invented science.** Settings the artifacts do not determine are `null` and stop the
+  run with the key's name (the Week-2 pressure steps, rainfall regridding). Anomalies,
+  tercile categories and the Word bulletin are reported as unavailable with the missing
+  dependency, never synthesised.
+* **Frozen artifacts.** Every model version is a descriptor that pins each artifact by
+  SHA256; files are re-verified before inference, validation and promotion. Model IDs are
+  immutable; a refit is a new version.
+* **Exact feature contract.** 37 features in the HPC order, checked against
+  `feature_names_37_MBC.npy`; matrices with missing, extra, reordered or non-finite values
+  are rejected. MBC is applied from the locked ratios, never refitted.
+* **Candidate is not production.** The candidate is labelled on every page, map and
+  package. Production needs a passed independent 2022–2024 test recorded from the HPC, an
+  inference test and a named reviewer.
+* **Leakage control.** 2022–2024 is the protected independent test period. The platform
+  never fits, tunes or selects models; forecasts valid in that period are verified for
+  display only and left out of pooled metrics unless explicitly requested.
+* **Every number from the backend.** The interface computes nothing scientific; values
+  come from the API with their scope (validation period, verified forecasts, cases).
+* **Synthetic data is labelled.** Fixture inputs, demonstration pages and their outputs say
+  so in the data, the maps, the manifest and the interface; synthetic runs are disabled
+  unless `ALLOW_SYNTHETIC_FORECASTS=true`.
+* **Provenance.** Each forecast records model, version and checksums, MBC and schema
+  checksums, initialization and valid window, grid and domain, input fingerprints,
+  configuration checksum and overrides, and the software revision.
+* **Human review.** Promotion, independent-test records and bulletin approval need a named
+  reviewer and an explicit confirmation. Names are self-reported until authentication is
+  added (see [deployment](deployment.md)).

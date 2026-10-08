@@ -33,6 +33,8 @@ export type Config = {
   forecasts: { cycles: string[]; sources: string[] };
   observations: string[];
   models: Model[];
+  /** What this deployment can do (synthetic runs, configured inputs, countries). */
+  operational?: import("@/types/operational").Capabilities;
   label: string;
 };
 export type Country = {

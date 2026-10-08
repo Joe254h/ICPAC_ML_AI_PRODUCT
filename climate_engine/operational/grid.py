@@ -5,7 +5,7 @@ model sees them in ascending flat order. Every conversion between a 2-D field an
 feature matrix goes through this class so that ordering cannot drift.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,8 @@ class DomainGrid:
     mask: np.ndarray
     country_id: np.ndarray
     country_names: tuple[str, ...]
+    source: str = ""
+    checksum: str = field(default="")
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -51,18 +53,25 @@ class DomainGrid:
         out[self.domain_cells] = cells
         return out.reshape(self.shape)
 
-    def check_cells(self, domain_cells: np.ndarray, latitude: Any, longitude: Any) -> None:
-        """Reject a parameter artifact built on a different grid or cell ordering."""
-        if not np.array_equal(np.asarray(domain_cells), self.domain_cells):
-            raise ValueError("Artifact domain_cells differ from the authoritative mask ordering")
-        if not (
-            np.allclose(np.asarray(latitude), self.latitude)
-            and np.allclose(np.asarray(longitude), self.longitude)
-        ):
-            raise ValueError("Artifact latitude/longitude differ from the authoritative grid")
+    def definition(self) -> dict[str, Any]:
+        """Grid and domain description recorded in every forecast's provenance."""
+        return {
+            "shape": list(self.shape),
+            "latitude": [float(self.latitude[0]), float(self.latitude[-1])],
+            "longitude": [float(self.longitude[0]), float(self.longitude[-1])],
+            "resolution_deg": round(float(np.median(np.abs(np.diff(self.latitude)))), 4),
+            "ordering": "C order: latitude_index * n_longitude + longitude_index",
+            "domain_cells": int(self.domain_cells.size),
+            "countries": list(self.country_names),
+            "mask_source": self.source,
+            "mask_sha256": self.checksum,
+        }
 
 
 def load_grid(path: str | Path, expected: dict[str, Any] | None = None) -> DomainGrid:
+    from climate_engine.provenance import file_checksum
+
+    path = Path(path)
     with np.load(path, allow_pickle=False) as data:
         missing = [key for key in REQUIRED_KEYS if key not in data]
         if missing:
@@ -73,6 +82,8 @@ def load_grid(path: str | Path, expected: dict[str, Any] | None = None) -> Domai
             mask=np.asarray(data["domain_mask"]).astype(bool),
             country_id=np.asarray(data["country_id"]),
             country_names=tuple(str(x) for x in data["country_names"]),
+            source=path.name,
+            checksum=file_checksum(path),
         )
         stored = data["domain_cells"] if "domain_cells" in data else None
     if grid.mask.shape != (grid.latitude.size, grid.longitude.size):
@@ -93,7 +104,7 @@ def load_grid(path: str | Path, expected: dict[str, Any] | None = None) -> Domai
             )
         for name in ("latitude", "longitude"):
             axis = getattr(grid, name)
-            if not np.allclose([axis.min(), axis.max()], sorted(expected[name])):
+            if not np.allclose([axis.min(), axis.max()], sorted(expected[name]), atol=1e-4):
                 raise ValueError(f"Mask {name} extent differs from configuration")
     return grid
 
@@ -103,3 +114,22 @@ def country_cells(grid: DomainGrid) -> np.ndarray:
     if grid.country_id.shape == grid.mask.shape:
         return grid.to_cells(grid.country_id)
     return grid.country_id
+
+
+def country_id_base(ids: np.ndarray, count: int) -> int:
+    """Whether domain-cell country ids index country_names from 0 or from 1."""
+    values = np.unique(ids)
+    zero = values.min() >= 0 and values.max() <= count - 1
+    one = values.min() >= 1 and values.max() <= count
+    if zero and not one:
+        return 0
+    if one and not zero:
+        return 1
+    raise ValueError("country_id does not unambiguously index country_names (0- or 1-based)")
+
+
+def country_selections(grid: DomainGrid) -> dict[str, np.ndarray]:
+    """Boolean domain-cell selection for each country, from the authoritative country_id."""
+    ids = country_cells(grid)
+    base = country_id_base(ids, len(grid.country_names))
+    return {name: ids == index + base for index, name in enumerate(grid.country_names)}

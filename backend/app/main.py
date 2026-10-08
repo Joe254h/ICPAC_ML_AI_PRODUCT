@@ -2,13 +2,16 @@ import csv
 import io
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
+from backend.app.api.forecasts import install as install_forecasts
 from backend.app.db import Repository
 from backend.app.schemas import ForecastResponse, Selection
+from backend.app.services.forecasts import RunInProgress, Unavailable, capabilities
 from backend.app.services.health import system_health
 from backend.app.services.platform import Platform
 from climate_engine.core import DEMO_LABEL, config
@@ -40,7 +43,10 @@ logging.getLogger("icpac").setLevel(logging.INFO)
 def create_app(database_url: str | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.platform = Platform(Repository(database_url))
+        app.state.platform = Platform(
+            Repository(database_url),
+            register_descriptors=os.getenv("AUTO_REGISTER_MODELS", "true") == "true",
+        )
         for job in app.state.platform.repo.list("job"):
             if job["executor"] == "local" and job["status"] in {"queued", "running"}:
                 job.update(
@@ -66,6 +72,14 @@ def create_app(database_url: str | None = None) -> FastAPI:
     async def missing_artifact(request: Request, exc: FileNotFoundError):
         return JSONResponse(status_code=503, content={"detail": str(exc)})
 
+    @app.exception_handler(Unavailable)
+    async def unavailable(request: Request, exc: Unavailable):
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(RunInProgress)
+    async def busy(request: Request, exc: RunInProgress):
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
     @app.exception_handler(ImportError)
     async def missing_runtime(request: Request, exc: ImportError):
         return JSONResponse(
@@ -86,20 +100,16 @@ def create_app(database_url: str | None = None) -> FastAPI:
             "forecasts": config("forecasts"),
             "observations": list(config("observations")["sources"]),
             "models": p.repo.list("model"),
+            "operational": capabilities(),
             "label": DEMO_LABEL,
         }
 
-    @app.get("/forecasts")
-    def forecasts(p: Platform = Depends(platform)) -> list[dict]:
-        return p.repo.list("forecast_cycle")
-
     @app.get("/analysis", response_model=ForecastResponse)
     def analysis(selection: Selection = Depends(), p: Platform = Depends(platform)):
+        """Demonstration case on the synthetic grid (cycles listed by /config)."""
         return p.calculate(selection)
 
-    @app.get("/forecasts/{cycle}", response_model=ForecastResponse)
-    def forecast(cycle: str, selection: Selection = Depends(), p: Platform = Depends(platform)):
-        return p.calculate(selection.model_copy(update={"cycle": cycle}))
+    install_forecasts(app, platform)
 
     @app.get("/observations")
     def observations(p: Platform = Depends(platform)) -> list[dict]:
@@ -116,6 +126,13 @@ def create_app(database_url: str | None = None) -> FastAPI:
     @app.get("/models")
     def models(p: Platform = Depends(platform)) -> list[dict]:
         return p.repo.list("model")
+
+    @app.get("/models/current")
+    def current_model(p: Platform = Depends(platform)) -> dict:
+        """The operational model forecasts use: production, else the newest candidate."""
+        from backend.app.services.registry import ModelRegistry
+
+        return ModelRegistry(p).current()
 
     @app.get("/models/{model_id}")
     def model(model_id: str, p: Platform = Depends(platform)) -> dict:

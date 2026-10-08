@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .venv/
 __pycache__/
 .pytest_cache/
@@ -14,6 +16,14 @@ playwright-report/
 
 artifacts/*
 !artifacts/README.md
+# Verified HPC inference artifacts are versioned; other local artifacts stay ignored.
+!artifacts/hpc_package/
+!artifacts/models/
+!artifacts/mbc/
+!artifacts/schema/
+!artifacts/domain/
 observations/*
 !observations/README.md
+forecasts/*
+!forecasts/README.md
 catboost_info/

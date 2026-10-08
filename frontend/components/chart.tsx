@@ -4,9 +4,11 @@ import * as echarts from "echarts";
 export default function Chart({
   option,
   height = 230,
+  label = "Computed synthetic climate comparison chart",
 }: {
   option: echarts.EChartsOption;
   height?: number;
+  label?: string;
 }) {
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -25,7 +27,7 @@ export default function Chart({
       ref={container}
       style={{ height, width: "100%" }}
       role="img"
-      aria-label="Computed synthetic climate comparison chart"
+      aria-label={label}
     />
   );
 }
