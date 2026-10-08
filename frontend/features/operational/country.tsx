@@ -168,13 +168,13 @@ export default function Country({ route, id }: PageProps) {
       </Card>
       <Card>
         <CardHeader
-          title="MBC + AI across the region"
-          description="Regional map in the ICPAC standard"
+          title={`MBC + AI over ${name}`}
+          description="Total rainfall in the ICPAC weekly bulletin's map style"
         />
         <CardContent>
           <MapImage
-            src={mapUrl(detail, "hybrid")}
-            alt="MBC + AI Week-2 rainfall"
+            src={mapUrl(detail, "hybrid", name)}
+            alt={`MBC + AI Week-2 rainfall over ${name}`}
             className="mx-auto max-w-3xl"
           />
         </CardContent>

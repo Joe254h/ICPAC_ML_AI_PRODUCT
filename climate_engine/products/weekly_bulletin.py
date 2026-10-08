@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from climate_engine.products.bulletin import BulletinInputs
 
 FORMAT_VERSION = "icpac-weekly-v2"
+MAP_STYLE = "weekly-v2"  # the map endpoint's style name; a new name busts browser caches
 REGION = "the region"
 # The reference's classes for the week's total rainfall (mm): name, lower, upper bound.
 CLASSES = (
@@ -442,36 +443,59 @@ def map_title(inputs: BulletinInputs, key: str, layer: str = "hybrid") -> str:
     return title + LAYER_NAMES.get(layer, "")
 
 
-def map_note(inputs: BulletinInputs, method: str | None = None) -> str:
+def map_label(
+    model_id: str, status: str | None, synthetic: bool, forecast_id: str, method: str | None = None
+) -> str:
     """The one-line label under a map: draft, input, model status, method and forecast."""
-    facts = inputs.interpretation
-    model = facts["model"]
-    status = model.get("status") or "unregistered"
+    status = status or "unregistered"
     parts = ["DRAFT"]
-    if facts["input"]["synthetic"]:
+    if synthetic:
         parts.append("SYNTHETIC TEST INPUT - NOT REAL WEATHER")
-    parts.append(
-        f"{model['model_id']} ({status}" + (", not production)" if status != "production" else ")")
-    )
+    parts.append(f"{model_id} ({status}" + (", not production)" if status != "production" else ")"))
     if method:
         parts.append(method)
-    parts.append(inputs.forecast_id)
+    parts.append(forecast_id)
     return " · ".join(parts)
+
+
+def map_note(inputs: BulletinInputs, method: str | None = None) -> str:
+    facts = inputs.interpretation
+    return map_label(
+        facts["model"]["model_id"],
+        facts["model"].get("status"),
+        facts["input"]["synthetic"],
+        inputs.forecast_id,
+        method,
+    )
+
+
+def rainfall_map(
+    field: maps.Field,
+    valid_start: str,
+    valid_end: str,
+    layer: str,
+    note: str,
+    country: str | None = None,
+) -> bytes:
+    """A Week-2 rainfall layer (raw, MBC or hybrid) as a reference-style map."""
+    if layer not in LAYER_NAMES:
+        raise ValueError("Weekly rainfall maps support hybrid, mbc and raw")
+    period = period_label(valid_start, valid_end, "%b")
+    title = MAP_TITLES["rainfall"].format(period=period) + LAYER_NAMES[layer]
+    return weekly_maps.render(title, field, country=country, note=note)
 
 
 def rainfall_png(
     inputs: BulletinInputs, layer: str = "hybrid", country: str | None = None
 ) -> bytes:
-    if layer not in {"hybrid", "mbc", "raw"}:
+    if layer not in LAYER_NAMES:
         raise ValueError("Weekly rainfall maps support hybrid, mbc and raw")
     grid = read_layer(inputs, layer)
     field = maps.Field(layer, grid.values, grid.latitude, grid.longitude)
     method = inputs.interpretation["method"]["label"] if layer == "hybrid" else layer.upper()
-    return weekly_maps.render(
-        map_title(inputs, "somalia" if country else "rainfall", layer),
-        field,
-        country=country,
-        note=map_note(inputs, method),
+    facts = inputs.interpretation
+    return rainfall_map(
+        field, facts["valid_start"], facts["valid_end"], layer, map_note(inputs, method), country
     )
 
 

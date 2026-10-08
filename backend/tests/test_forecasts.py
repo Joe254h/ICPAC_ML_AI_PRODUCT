@@ -164,7 +164,9 @@ def test_forecast_endpoints(env, fast_maps):
     detail = client.get(f"/forecasts/{fid}").json()
     assert detail["model"]["status"] == "candidate" and detail["model"]["feature_count"] == 37
     assert detail["provenance"]["forecast_id"] == fid
-    assert detail["maps"]["hybrid"] == f"/forecasts/{fid}/map?layer=hybrid&style=weekly-v1"
+    # Map URLs name the current style, so a new style never reuses a cached image.
+    assert detail["maps"]["hybrid"] == f"/forecasts/{fid}/map?layer=hybrid&style=weekly-v2"
+    assert detail["maps"]["residual"] == f"/forecasts/{fid}/map?layer=residual"
     for layer in packages.MAP_LAYERS:
         response = client.get(f"/forecasts/{fid}/map?layer={layer}")
         assert response.status_code == 200 and response.headers["content-type"] == "image/png"
@@ -186,6 +188,17 @@ def test_forecast_endpoints(env, fast_maps):
         client.get(
             f"/forecasts/{fid}/map?layer=hybrid&style=weekly-v1&country=../../secret"
         ).status_code
+        == 422
+    )
+    # Every country has its own bulletin-style map; unknown names never reach the disk.
+    assert client.get(f"/forecasts/{fid}/map?layer=mbc&country=Kenya").status_code == 200
+    assert client.get(f"/forecasts/{fid}/map?layer=hybrid&country=Atlantis").status_code == 422
+    assert not list((forecasts.package_root().parent / "map-previews").rglob("*Atlantis*"))
+    # The packaged image stays available, but only for the whole region.
+    packaged = client.get(f"/forecasts/{fid}/map?layer=hybrid&style=package")
+    assert packaged.content == client.get(f"/forecasts/{fid}/package/maps/hybrid.png").content
+    assert (
+        client.get(f"/forecasts/{fid}/map?layer=hybrid&style=package&country=Kenya").status_code
         == 422
     )
     assert client.get(f"/forecasts/{fid}/map?layer=residual&style=weekly-v1").status_code == 422

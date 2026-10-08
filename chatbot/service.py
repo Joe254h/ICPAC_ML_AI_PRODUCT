@@ -191,7 +191,8 @@ class Copilot:
                 "unavailable": f"Selected data are unavailable: {exc}. No statistics have been inferred."
             }
         references = self.references.search(body.message)
-        rendered = render_grounded(body.message, sentences, references, history)
+        required = [key for key in ("scope", "limitations", "caution") if key in sentences]
+        rendered = render_grounded(body.message, sentences, references, history, required)
         response = {
             **rendered,
             "sources": references,

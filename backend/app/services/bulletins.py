@@ -1,5 +1,6 @@
 """Frozen deterministic facts, consistency checks, and audited human review."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,7 +16,22 @@ from chatbot.retrieval import ReferenceIndex
 from chatbot.service import forecast_sentences
 from chatbot.tools import ClimateTools
 from climate_engine.core import ROOT, checksum
+from climate_engine.products.store import package_store
 from climate_engine.provenance import file_checksum
+
+LOST_MAP = (
+    "This draft's frozen map was kept on a server disk that has since been reset (the "
+    "backend restarted or was redeployed), so the draft can no longer be reviewed. Generate "
+    "a new draft: new drafts keep their map in storage."
+)
+
+
+def checksum_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def map_key(identifier: str) -> str:
+    return f"bulletins/{identifier}/map.png"
 
 
 def check_consistency(bulletin: dict) -> dict:
@@ -49,14 +65,21 @@ class BulletinService:
         facts = ClimateTools(self.platform).call("get_bulletin_context", selection)
         references = ReferenceIndex().search("rainfall verification bulletin review")
         sentences = forecast_sentences(facts)
+        # A draft states every approved sentence: the language model may only order them.
         rendered = render_grounded(
-            "Draft a technical Week-2 rainfall summary", sentences, references
+            "Draft a technical Week-2 rainfall summary",
+            sentences,
+            references,
+            required=list(sentences),
         )
         identifier = str(uuid4())
         output = Path(os.getenv("RUN_ROOT", str(ROOT / "data" / "runs"))) / "bulletins" / identifier
         output.mkdir(parents=True, exist_ok=True)
         image = output / "map.png"
         image.write_bytes(self.platform.png(selection))
+        store = package_store()
+        if store is not None:  # hosts without a persistent disk keep the map in Blob Storage
+            store.put(map_key(identifier), image.read_bytes())
         bulletin = {
             "title": f"Week-2 rainfall summary · {selection.country}",
             "status": "draft",
@@ -158,11 +181,40 @@ class BulletinService:
     def map(self, bulletin: dict) -> bytes:
         root = Path(os.getenv("RUN_ROOT", str(ROOT / "data" / "runs"))).resolve()
         path = Path(bulletin["map_path"]).resolve()
-        if not path.is_relative_to(root) or not path.is_file():
+        if not path.is_relative_to(root):
             raise FileNotFoundError("Frozen bulletin map unavailable")
+        if not path.is_file():
+            self._restore_map(bulletin, path)
         if file_checksum(path) != bulletin["map_checksum"]:
             raise ValueError("Bulletin map changed")
         return path.read_bytes()
+
+    def _restore_map(self, bulletin: dict, path: Path) -> None:
+        """Bring back a frozen map lost with the server disk, only if it is the same image.
+
+        The map comes from Blob Storage when configured, otherwise it is rendered again
+        from the frozen selection; either copy is accepted only when its checksum equals
+        the one recorded at generation, so a draft is never reviewed with a different map.
+        """
+        candidates = []
+        store = package_store()
+        identifier = path.parent.name
+        if store is not None:
+            stored = store.get(map_key(identifier))
+            if stored is not None:
+                candidates.append(stored)
+        try:
+            candidates.append(self.platform.png(Selection.model_validate(bulletin["selection"])))
+        except (ValueError, KeyError, FileNotFoundError, OSError):
+            pass
+        for image in candidates:
+            if checksum_bytes(image) == bulletin["map_checksum"]:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(image)
+                if store is not None:
+                    store.put(map_key(identifier), image)
+                return
+        raise FileNotFoundError(LOST_MAP)
 
     def compare(self, left_id: str, right_id: str) -> dict:
         left, right = self.repo.get("bulletin", left_id), self.repo.get("bulletin", right_id)

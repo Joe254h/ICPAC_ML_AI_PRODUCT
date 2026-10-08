@@ -126,8 +126,19 @@ export function ForecastFacts({ detail }: { detail: ForecastDetail }) {
   );
 }
 
-export function mapUrl(detail: ForecastDetail, layer: string) {
-  return `/api/forecasts/${detail.forecast_id}/map?layer=${layer}`;
+/** A forecast map. The API's map URLs name the current style, so a new style gives new
+ * URLs and browsers never show an image cached under an older one. */
+export function mapUrl(
+  detail: ForecastDetail,
+  layer: string,
+  country?: string,
+) {
+  const path =
+    detail.maps?.[layer] ??
+    `/forecasts/${detail.forecast_id}/map?layer=${layer}`;
+  return (
+    "/api" + path + (country ? `&country=${encodeURIComponent(country)}` : "")
+  );
 }
 
 export function CountryTable({ rows }: { rows: CountryRow[] }) {

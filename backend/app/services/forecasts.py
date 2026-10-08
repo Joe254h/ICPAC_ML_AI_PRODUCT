@@ -39,6 +39,7 @@ from climate_engine.operational.pipeline import (
 from climate_engine.operational.settings import settings
 from climate_engine.preprocessing.atmos37 import needs_pressure
 from climate_engine.products import package as packages
+from climate_engine.products import weekly_bulletin as weekly
 from climate_engine.products.bulletin import BulletinInputs, WordTemplateGenerator
 from climate_engine.products.store import package_store
 from climate_engine.provenance import file_checksum, permitted_file
@@ -335,11 +336,11 @@ class ForecastService:
             "countries": self._read(forecast_id, "countries.json"),
             "verification": self._read(forecast_id, "verification.json"),
             "interpretation": self._read(forecast_id, "interpretation_inputs.json"),
-            "map_style": "weekly-v1",
+            "map_style": weekly.MAP_STYLE,
             "bulletin_generator": WordTemplateGenerator().status(),
             "maps": {
                 layer: f"{base}/map?layer={layer}"
-                + ("&style=weekly-v1" if layer != "residual" else "")
+                + (f"&style={weekly.MAP_STYLE}" if layer != "residual" else "")
                 for layer in packages.MAP_LAYERS
             },
             "files": {
@@ -362,18 +363,23 @@ class ForecastService:
         return path.read_bytes(), MEDIA_TYPES[path.suffix]
 
     def map_png(
-        self, forecast_id: str, layer: str, style: str = "package", country: str | None = None
+        self, forecast_id: str, layer: str, style: str | None = None, country: str | None = None
     ) -> bytes:
+        """Rainfall layers in the weekly bulletin's layout by default; the residual, and any
+        layer with style="package", as the image frozen in the package."""
         if layer not in packages.MAP_LAYERS:
             raise ValueError(f"Map layers: {', '.join(packages.MAP_LAYERS)}")
+        style = style or ("package" if layer == "residual" else weekly.MAP_STYLE)
         if style == "package":
             if country is not None:
-                raise ValueError("Country views require the weekly-v1 style")
+                raise ValueError("Country views use the weekly bulletin style")
             return self.file(forecast_id, f"maps/{layer}.png")[0]
-        from climate_engine.products import weekly_bulletin as weekly
-
-        if style != "weekly-v1" or layer == "residual":
-            raise ValueError("Weekly style supports rainfall layers only")
+        if layer == "residual":
+            raise ValueError("The weekly bulletin style covers the rainfall layers only")
+        if country is not None and country not in {
+            c.name for c in maps.load_boundaries(maps.BOUNDARIES)
+        }:
+            raise ValueError(f"Unknown map country: {country}")
         inputs = BulletinInputs.from_package(self.directory(forecast_id))
         cache = package_root().parent / "map-previews" / forecast_id
         cache.mkdir(parents=True, exist_ok=True)
@@ -397,13 +403,12 @@ class ForecastService:
             raise ValueError(f"Package {forecast_id} failed its integrity checks: {problems}")
         inputs = BulletinInputs.from_package(directory)
         base = f"/forecasts/{forecast_id}/package"
-        from climate_engine.products import weekly_bulletin as weekly
-
         sections = weekly.sections(inputs)
         for section in sections:
             if section.get("map_layer"):
                 section["map"] = (
-                    f"/forecasts/{forecast_id}/map?layer={section['map_layer']}&style=weekly-v1"
+                    f"/forecasts/{forecast_id}/map?layer={section['map_layer']}"
+                    f"&style={weekly.MAP_STYLE}"
                 )
                 if section.get("map_country"):
                     section["map"] += f"&country={section['map_country']}"

@@ -11,7 +11,7 @@ Layout of ``<root>/<forecast_id>/`` (file names are fixed for downstream tools):
     verification.json           metrics against observations, or why none are available
     observation.nc              the observed Week-2 total, once the forecast is verified
     interpretation_inputs.json  technical inputs for a bulletin writer (no narrative)
-    maps/raw.png, maps/mbc.png, maps/hybrid.png
+    maps/raw.png, maps/mbc.png, maps/hybrid.png   in the ICPAC weekly bulletin's map layout
                                 ICPAC map standard; the three share one colour scale
     maps/residual.png           the CatBoost residual (CHIRPS - MBC), diverging scale
 
@@ -248,6 +248,35 @@ def map_figures(run: ForecastRun, model: dict[str, Any]) -> dict[str, maps.Figur
     }
 
 
+def rainfall_maps(run: ForecastRun, grid: DomainGrid, model: dict[str, Any]) -> dict[str, bytes]:
+    """Raw, MBC and hybrid rainfall in the ICPAC weekly bulletin's map layout."""
+    from climate_engine.products import weekly_bulletin as weekly
+
+    p = run.provenance
+    lat = run.dataset["latitude"].values
+    lon = run.dataset["longitude"].values
+    note_args = (
+        p["model_id"],
+        model.get("status"),
+        p["input_label"] != "ECMWF S2S files",
+        run.forecast_id,
+    )
+    result = {}
+    for name in ("raw", "mbc", "hybrid"):
+        values = run.dataset[name].values.astype(float)
+        if values.shape == grid.mask.shape:
+            values = np.where(grid.mask, values, np.nan)
+        method = method_label(p) if name == "hybrid" else name.upper()
+        result[name] = weekly.rainfall_map(
+            maps.Field(name, values, lat, lon),
+            p["forecast_valid_start"],
+            p["forecast_valid_end"],
+            name,
+            weekly.map_label(*note_args, method),
+        )
+    return result
+
+
 def write_package(
     run: ForecastRun,
     root: Path,
@@ -282,8 +311,10 @@ def write_package(
         _write_json(staging / "verification.json", run.verification or NO_VERIFICATION)
         _write_json(staging / "interpretation_inputs.json", interpretation_inputs(run, grid, model))
         canvas = canvas or maps.Canvas(mask=grid)
-        for name, figure in map_figures(run, model).items():
-            (staging / "maps" / f"{name}.png").write_bytes(maps.render_png(figure, canvas))
+        for name, png in rainfall_maps(run, grid, model).items():
+            (staging / "maps" / f"{name}.png").write_bytes(png)
+        residual = map_figures(run, model)["residual"]
+        (staging / "maps" / "residual.png").write_bytes(maps.render_png(residual, canvas))
         _write_json(staging / "manifest.json", manifest(run, staging, model))
         staging.rename(directory)
     except BaseException:

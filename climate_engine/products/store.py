@@ -8,7 +8,8 @@ HPC can be uploaded to the container and imported. Without the setting, packages
 disk only (Docker Compose, a mounted volume).
 
 Blob names are ``<forecast_id>/<file>``. The manifest is uploaded last and checked after a
-fetch, so a reader never trusts a partial copy.
+fetch, so a reader never trusts a partial copy. Draft bulletins keep their frozen map as
+``bulletins/<id>/map.png`` in the same container.
 """
 
 import os
@@ -51,6 +52,16 @@ class PackageStore:
         for path in files:
             name = f"{directory.name}/{path.relative_to(directory).as_posix()}"
             self.container.upload_blob(name, path.read_bytes(), overwrite=True)
+
+    def put(self, name: str, data: bytes) -> None:
+        """Store one object, e.g. a draft bulletin's frozen map (``bulletins/<id>/map.png``)."""
+        self.container.upload_blob(name, data, overwrite=True)
+
+    def get(self, name: str) -> bytes | None:
+        """One stored object, or None when the store does not hold it."""
+        if name not in {blob.name for blob in self.container.list_blobs(name_starts_with=name)}:
+            return None
+        return self.container.download_blob(name).readall()
 
     def fetch(self, forecast_id: str, root: Path) -> bool:
         """Download a package into ``root/forecast_id``; False when the store lacks it."""

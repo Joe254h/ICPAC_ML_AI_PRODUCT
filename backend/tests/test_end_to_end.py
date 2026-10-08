@@ -15,10 +15,12 @@ import numpy as np
 import pytest
 import xarray as xr
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from backend.app.main import create_app
 from backend.app.services import operational
 from backend.tests.map_geometry import measure
+from climate_engine.cartography import weekly_maps
 from climate_engine.core import ROOT
 from climate_engine.forecasts.fixtures import FIXTURE_PRESSURE_STEPS_HOURS, write_fixture
 from climate_engine.operational.grid import load_grid
@@ -103,9 +105,35 @@ def test_synthetic_forecast_runs_end_to_end_through_the_api(client, tmp_path):
     for row in countries:
         assert 0 <= row["hybrid"]["min_mm"] <= row["hybrid"]["mean_mm"] <= row["hybrid"]["max_mm"]
 
-    png = client.get(f"/forecasts/{fid}/map?layer=hybrid").content
-    (tmp_path / "hybrid.png").write_bytes(png)
-    [frame] = measure(tmp_path / "hybrid.png")
+    # Rainfall maps (served and packaged) follow the ICPAC weekly bulletin's layout.
+    for url in (f"/forecasts/{fid}/map?layer=hybrid", f"/forecasts/{fid}/package/maps/hybrid.png"):
+        (tmp_path / "hybrid.png").write_bytes(client.get(url).content)
+        [frame] = measure(tmp_path / "hybrid.png")
+        left, top, right, bottom = (v * weekly_maps.SCALE for v in weekly_maps.REGION.frame)
+        box = frame.frame
+        assert (
+            max(
+                abs(box.left - left),
+                abs(box.top - top),
+                abs(box.right - right),
+                abs(box.bottom - bottom),
+            )
+            <= 3
+        ), url
+        # The colour bar's boxes carry the reference's seven rainfall classes, in order.
+        pixels = np.asarray(Image.open(tmp_path / "hybrid.png").convert("RGB"))
+        bar_left, bar_top, bar_right, bar_bottom = (
+            int(v * weekly_maps.SCALE) for v in weekly_maps.REGION.bar
+        )
+        column = pixels[bar_top:bar_bottom, (bar_left + bar_right) // 2]
+        colours = list(dict.fromkeys("#%02x%02x%02x" % tuple(p) for p in column[::-1]))
+        assert [c for c in colours if c in weekly_maps.RAINFALL.colors] == list(
+            weekly_maps.RAINFALL.colors
+        ), url
+    # The residual keeps the HPC driver's verification-map standard.
+    png = client.get(f"/forecasts/{fid}/map?layer=residual").content
+    (tmp_path / "residual.png").write_bytes(png)
+    [frame] = measure(tmp_path / "residual.png")
     assert abs(frame.frame.height - 1420) <= 3 and abs(frame.frame.width - 1243) <= 3
     assert np.allclose(frame.extent, (20.83, 52.40, -12.72, 23.19), atol=0.06)
     assert frame.colourbar is not None and frame.logo is not None

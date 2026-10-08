@@ -47,7 +47,7 @@ export default function Forecast({ id }: PageProps) {
   ].filter(
     (text) =>
       !(
-        detail.map_style === "weekly-v1" &&
+        detail.map_style?.startsWith("weekly") &&
         text.startsWith("Rainfall map colours follow a provisional style")
       ),
   );
@@ -64,7 +64,7 @@ export default function Forecast({ id }: PageProps) {
       <Card>
         <CardHeader
           title="Raw ECMWF, MBC and MBC + AI"
-          description="One colour scale across the three maps; the hybrid is the residual-corrected forecast"
+          description="The ICPAC weekly bulletin's rainfall classes on all three maps; the hybrid is the residual-corrected forecast"
         />
         <CardContent className="grid gap-4 lg:grid-cols-3">
           {VARIANTS.map((variant) => (

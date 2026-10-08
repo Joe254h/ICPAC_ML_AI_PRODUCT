@@ -45,8 +45,10 @@ def install(app: FastAPI, dependency) -> None:
     def forecast_map(
         forecast_id: str = ForecastId,
         layer: str = Query("hybrid", pattern=r"^[a-z]+$"),
-        style: str = Query("package", pattern=r"^(package|weekly-v1)$"),
-        country: str | None = Query(None, pattern=r"^Somalia$"),
+        # Default: rainfall in the weekly bulletin style, the residual as packaged. Older
+        # style names stay valid and give the current bulletin style.
+        style: str | None = Query(None, pattern=r"^(package|weekly-v1|weekly-v2)$"),
+        country: str | None = Query(None, min_length=4, max_length=40),
         platform=Depends(dependency),
     ):
         png = ForecastService(platform).map_png(forecast_id, layer, style, country)

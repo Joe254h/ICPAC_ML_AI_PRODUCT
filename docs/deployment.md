@@ -81,8 +81,19 @@ shores, Somalia's regions on the Somalia map, and the IGAD seal
 (`cartography/igad_seal.png`) inside the frame. Products this forecast lacks are drawn
 as the same frame with a "not available" note. The extra lines come from Natural Earth
 (public domain) through `scripts/build_weekly_map_layers.py`. The backend image installs
-Liberation Sans, which has Helvetica's metrics. Existing packages and their checksums
-stay intact; `style=weekly-v1` on the map endpoint renders the weekly view on demand.
+Liberation Sans, which has Helvetica's metrics.
+
+Every raw, MBC and hybrid rainfall map follows that layout: new packages store them so,
+and `/forecasts/{id}/map` renders it by default for any package (`country=` gives one
+of the 11 countries; `style=package` returns the image frozen in the package). The
+website requests versioned URLs (`style=weekly-v2`), so a style change is never hidden
+by a cached image. The CatBoost residual and the verification maps keep the HPC
+driver's map standard.
+
+Draft bulletins (Bulletin drafts) keep their frozen map in Blob Storage too
+(`bulletins/<id>/map.png`), so a draft can still be reviewed after the backend restarts.
+A draft made before that, whose map was lost with the disk, is rendered again from its
+frozen selection and accepted only when the image is identical to the recorded checksum.
 
 ## Backend: Azure Container Apps (Azure for Students)
 

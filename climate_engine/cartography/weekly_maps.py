@@ -125,14 +125,47 @@ def country_layout(country: icpac_maps.Country) -> Layout:
     left = CENTRE_PX - (width + gap + bar_width) / 2
     right, bottom = left + width, top + height
     step = 1 if max(east - west, north - south) < 6 else 2
-    logo = 101.0
+    size, margin = 101.0, 15.0
+    corners = [  # top right as on the regional map, then bottom right as on Somalia's
+        (right - margin - size, top + margin),
+        (right - margin - size, bottom - margin - size),
+        (left + margin, top + margin),
+        (left + margin, bottom - margin - size),
+    ]
+    extent = (west, east, south, north)
+    frame = (left, top, right, bottom)
+    x0, y0 = min(corners, key=lambda c: _overlap(country, extent, frame, c, size))
     return Layout(
-        extent=(west, east, south, north),
-        frame=(left, top, right, bottom),
+        extent=extent,
+        frame=frame,
         bar=(right + gap, top + 7, right + gap + bar_width, bottom - 6),
-        logo=(right - 14 - logo, bottom - 16 - logo, right - 14, bottom - 16),
+        logo=(x0, y0, x0 + size, y0 + size),
         tick_step=step,
     )
+
+
+def _overlap(
+    country: icpac_maps.Country,
+    extent: tuple[float, float, float, float],
+    frame: tuple[float, float, float, float],
+    corner: tuple[float, float],
+    size: float,
+) -> float:
+    """Share of a logo box (reference pixels) that would cover the country's field."""
+    west, east, south, north = extent
+    left, top, right, bottom = frame
+    low, high = float(mercator(south)), float(mercator(north))
+    xs = np.linspace(corner[0], corner[0] + size, 7)
+    ys = np.linspace(corner[1], corner[1] + size, 7)
+    px, py = np.meshgrid(xs, ys)
+    lon = west + (px - left) / (right - left) * (east - west)
+    merc = high - (py - top) / (bottom - top) * (high - low)
+    lat = np.degrees(2 * np.arctan(np.exp(np.radians(merc))) - np.pi / 2)
+    points = np.column_stack([lon.ravel(), lat.ravel()])
+    inside = np.zeros(len(points), dtype=int)
+    for ring in country.rings:
+        inside += MplPath(ring).contains_points(points)
+    return float((inside % 2 == 1).mean())
 
 
 @cache

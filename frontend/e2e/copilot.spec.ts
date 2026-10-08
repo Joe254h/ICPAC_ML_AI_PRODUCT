@@ -140,11 +140,14 @@ test("continuous chat sends on Enter, restores history, collapses evidence and r
     .toBeLessThan(20);
   failRestore = true;
   await page.reload();
+  // The composer is also disabled while restoring, so wait for the failure itself.
+  const retry = page.getByRole("button", {
+    name: "Retry loading conversation",
+  });
+  await expect(retry).toBeVisible();
   await expect(input).toBeDisabled();
   failRestore = false;
-  await page
-    .getByRole("button", { name: "Retry loading conversation" })
-    .click();
+  await retry.click();
   await expect(page.locator(".chat-message.assistant")).toHaveCount(2);
   await expect(page.getByLabel("Conversation country")).toHaveValue("Somalia");
   failNext = true;
