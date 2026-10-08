@@ -53,7 +53,7 @@ export default function Workflow({
   }, [view]);
   if (view === "models")
     return <Models config={config} selection={selection} refresh={refresh} />;
-  if (view === "copilot") return <Copilot selection={selection} />;
+  if (view === "copilot") return <Copilot />;
   if (view === "bulletins") return <Bulletins selection={selection} />;
   if (view === "jobs")
     return (

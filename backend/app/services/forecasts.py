@@ -411,6 +411,7 @@ class ForecastService:
             "forecast_id": forecast_id,
             "generator": WordTemplateGenerator().status(),
             "sections": sections,
+            "title": "Weekly Forecast for " + weekly.valid_period(inputs),
             "export": f"/forecasts/{forecast_id}/bulletin/export",
             "inputs": {
                 "interpretation": f"{base}/interpretation_inputs.json",

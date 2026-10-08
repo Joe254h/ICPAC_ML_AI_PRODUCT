@@ -195,6 +195,7 @@ export type MapsStatus = {
 
 export type BulletinStatus = {
   forecast_id: string;
+  title?: string;
   generator: {
     status: string;
     missing_dependency?: string;

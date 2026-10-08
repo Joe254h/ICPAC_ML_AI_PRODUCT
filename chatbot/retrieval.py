@@ -3,6 +3,7 @@
 import json
 import re
 from abc import ABC, abstractmethod
+from functools import cache
 from pathlib import Path
 
 from climate_engine.core import ROOT
@@ -93,3 +94,9 @@ class ReferenceIndex:
             if document["id"] == identifier:
                 return document
         raise KeyError(identifier)
+
+
+@cache
+def approved_glossary() -> dict[str, dict]:
+    """The approved glossary by lower-case alias (fixtures/references/glossary.md)."""
+    return ReferenceIndex().glossary()

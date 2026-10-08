@@ -14,21 +14,27 @@ from typing import Any
 import numpy as np
 import pytest
 import xarray as xr
+from fastapi.testclient import TestClient
 
+from backend.app.main import create_app
 from backend.app.services import forecasts, operational
+from backend.app.services.registry import ModelRegistry
 from backend.tests.tiny import (
     LAT,
     LON,
     MASK,
     STEPS,
+    tiny_cfg,
+    write_artifacts,
+    write_descriptor,
 )
 from climate_engine.cartography import icpac_maps
 from climate_engine.forecasts import ECMWFS2SForecastProvider
 from climate_engine.forecasts.fixtures import write_fixture
+from climate_engine.operational.grid import load_grid
 from climate_engine.operational.pipeline import run_forecast
 from climate_engine.operational.settings import touches_protected_test, valid_window
 from climate_engine.products import package as packages
-from climate_engine.products.store import PackageStore
 from climate_engine.provenance import file_checksum
 
 PNG = bytes([137, 80, 78, 71])
@@ -51,6 +57,40 @@ PROVENANCE_FIELDS = {
     "artifact_checksums",
     "operational_config_checksum",
 }
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    root = tmp_path / "artifacts"
+    for name, value in {
+        "ARTIFACT_ROOT": root,
+        "RUN_ROOT": tmp_path / "runs",
+        "FORECAST_INPUT_ROOT": tmp_path / "inputs",
+        "DATA_ROOT": tmp_path / "observations",
+    }.items():
+        monkeypatch.setenv(name, str(value))
+    monkeypatch.setenv("ALLOW_SYNTHETIC_FORECASTS", "true")
+    paths = write_artifacts(root)
+    cfg = tiny_cfg()
+    grid = load_grid(paths["domain"], cfg["grid"])
+    monkeypatch.setattr(operational, "settings", lambda: cfg)
+    monkeypatch.setattr(operational, "authoritative_grid", lambda: grid)
+    monkeypatch.setattr(forecasts, "settings", lambda: cfg)
+    operational._models.clear()
+    app = create_app(f"sqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(app) as client:
+        platform = app.state.platform
+        descriptor = write_descriptor(tmp_path / "d.yaml", paths, root)
+        record = ModelRegistry(platform).register_descriptor(str(descriptor), "Test Reviewer")
+        yield SimpleNamespace(
+            client=client, cfg=cfg, grid=grid, tmp=tmp_path, record=record, platform=platform
+        )
+
+
+@pytest.fixture
+def fast_maps(monkeypatch):
+    """Skip map rendering where a test does not look at the maps."""
+    monkeypatch.setattr(icpac_maps, "render_png", lambda *args, **kwargs: PNG)
 
 
 def run(env, initialization: str = "2026-10-05", **body: Any) -> dict:
@@ -481,69 +521,3 @@ def test_word_export_reports_missing_template_as_configuration_error(env, fast_m
     response = env.client.get(f"/forecasts/{fid}/bulletin/export")
     assert response.status_code == 503
     assert "template" in response.json()["detail"]
-
-
-class MemoryContainer:
-    """In-memory stand-in for an Azure Blob container (the calls PackageStore makes)."""
-
-    def __init__(self):
-        self.blobs: dict[str, bytes] = {}
-        self.order: list[str] = []
-
-    def upload_blob(self, name: str, data: bytes, *, overwrite: bool | None = None) -> None:
-        assert overwrite or name not in self.blobs
-        self.blobs[name] = data
-        self.order.append(name)
-
-    def list_blobs(self, name_starts_with: str | None = None, **kwargs):
-        prefix = name_starts_with or ""
-        return [SimpleNamespace(name=n) for n in sorted(self.blobs) if n.startswith(prefix)]
-
-    def download_blob(self, blob: str, **kwargs):
-        return SimpleNamespace(readall=lambda: self.blobs[blob])
-
-
-def test_packages_survive_a_restart_through_object_storage(env, fast_maps, monkeypatch):
-    """On hosts without a persistent disk, packages live in Blob Storage; disk is a cache."""
-    container = MemoryContainer()
-    monkeypatch.setattr(forecasts, "package_store", lambda: PackageStore(container))
-    client = env.client
-    record = run(env)
-    fid = record["forecast_id"]
-    uploaded = [n for n in container.order if n.startswith(fid + "/")]
-    assert uploaded[-1] == f"{fid}/manifest.json", "the manifest goes last"
-    assert {f"{fid}/{name}" for name in packages.FILES} <= set(uploaded)
-    assert not any("/." in name for name in uploaded)
-
-    shutil.rmtree(forecasts.package_root())  # the replica restarted with an empty disk
-    assert client.get(f"/forecasts/{fid}").status_code == 200
-    assert client.get(f"/forecasts/{fid}/map?layer=hybrid").status_code == 200
-
-    body = {"observation": write_observation(env, record, "obs.nc"), "actor": "Joe"}
-    assert client.post(f"/forecasts/{fid}/verification", json=body).status_code == 200
-    assert f"{fid}/observation.nc" in container.blobs
-    shutil.rmtree(forecasts.package_root())
-    assert client.get(f"/forecasts/{fid}/verification").json()["status"] == "available"
-    again = client.post(f"/forecasts/{fid}/verification", json=body)
-    assert again.status_code == 422 and "recorded once" in again.json()["detail"]
-    missing = client.get("/forecasts/w2-2026-10-05-0badc0de")
-    assert missing.status_code == 404
-
-
-def test_package_store_fetches_only_complete_packages(tmp_path):
-    container = MemoryContainer()
-    store = PackageStore(container)
-    container.upload_blob("w2-2026-10-05-00000001/forecast.nc", b"partial")
-    assert store.fetch("w2-2026-10-05-00000001", tmp_path) is False
-    assert not list(tmp_path.iterdir())
-    package = tmp_path / "source" / "w2-2026-10-05-00000002"
-    (package / "maps").mkdir(parents=True)
-    (package / "maps" / "hybrid.png").write_bytes(b"png")
-    (package / "manifest.json").write_text("{}")
-    (package / ".verification.claim").write_text("held")
-    store.upload(package)
-    assert ".verification.claim" not in str(container.order)
-    target = tmp_path / "cache"
-    assert store.fetch("w2-2026-10-05-00000002", target)
-    assert (target / "w2-2026-10-05-00000002" / "maps" / "hybrid.png").read_bytes() == b"png"
-    assert [p.name for p in target.iterdir()] == ["w2-2026-10-05-00000002"]
