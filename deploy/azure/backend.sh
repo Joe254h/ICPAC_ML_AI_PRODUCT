@@ -12,7 +12,9 @@
 #
 # Settings (environment variables, all optional):
 #   LOCATION      Azure region (default southafricanorth). Azure for Students allows a fixed
-#                 list of regions; if this one is refused, rerun with an allowed one.
+#                 list of regions; if this one is refused, rerun with an allowed one. List them:
+#                 az policy assignment list --disable-scope-strict-match \
+#                   --query "[].parameters.listOfAllowedLocations.value" -o tsv
 #   DATABASE_URL  PostgreSQL connection string, e.g. Supabase's (paste it as Supabase shows
 #                 it, with your password). Without it the database lives inside the
 #                 container and is emptied whenever the app restarts or scales to zero.
@@ -44,9 +46,13 @@ for namespace in Microsoft.App Microsoft.OperationalInsights Microsoft.Storage; 
 done
 
 step "Resource group $GROUP in $LOCATION"
-if ! az group create --name "$GROUP" --location "$LOCATION" --output none; then
-  echo "The region $LOCATION was refused. Azure for Students allows a fixed list of regions;"
-  echo "rerun with one of them, for example: LOCATION=westeurope bash backend.sh"
+if az group show --name "$GROUP" --output none 2>/dev/null; then
+  echo "Using the existing resource group $GROUP"
+elif ! az group create --name "$GROUP" --location "$LOCATION" --output none; then
+  echo "The region $LOCATION was refused. Azure for Students allows a fixed list of regions:"
+  az policy assignment list --disable-scope-strict-match \
+    --query "[].parameters.listOfAllowedLocations.value" --output tsv || true
+  echo "Rerun with one of them, for example: LOCATION=switzerlandnorth bash backend.sh"
   exit 1
 fi
 
@@ -69,9 +75,25 @@ KEY=$(az storage account keys list --resource-group "$GROUP" --account-name "$ST
   --query "[0].value" --output tsv)
 
 step "Container Apps environment $ENVIRONMENT"
+# The app mounts an Azure Files share, which needs a workload-profiles environment (the
+# app runs on its serverless Consumption profile). Express environments, which Azure may
+# create by default, cannot mount Azure Files: replace one that holds no apps.
+if az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" --output none 2>/dev/null; then
+  if [ -z "$(az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" \
+    --query "properties.workloadProfiles[0].name" --output tsv)" ]; then
+    if [ -n "$(az containerapp list --resource-group "$GROUP" --environment "$ENVIRONMENT" \
+      --query "[].name" --output tsv)" ]; then
+      echo "Environment $ENVIRONMENT has no workload profiles and already runs apps;"
+      echo "rerun with another name, for example: ENVIRONMENT=icpac-standard bash backend.sh"
+      exit 1
+    fi
+    echo "Replacing $ENVIRONMENT, which cannot mount Azure Files"
+    az containerapp env delete --name "$ENVIRONMENT" --resource-group "$GROUP" --yes --output none
+  fi
+fi
 if ! az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" --output none 2>/dev/null; then
   az containerapp env create --name "$ENVIRONMENT" --resource-group "$GROUP" \
-    --location "$LOCATION" --output none
+    --location "$LOCATION" --enable-workload-profiles true --output none
 fi
 az containerapp env storage set --name "$ENVIRONMENT" --resource-group "$GROUP" \
   --storage-name "$STORAGE_LINK" --azure-file-account-name "$STORAGE" \
@@ -123,6 +145,8 @@ definition = {
     "location": e["LOCATION"],
     "properties": {
         "managedEnvironmentId": e["ENVIRONMENT_ID"],
+        # Serverless profile of the workload-profiles environment: scales to zero.
+        "workloadProfileName": "Consumption",
         "configuration": {
             "activeRevisionsMode": "Single",
             "ingress": {"external": True, "targetPort": 8000, "transport": "auto"},

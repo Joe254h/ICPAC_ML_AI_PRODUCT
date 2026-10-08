@@ -66,8 +66,12 @@ scales to zero when idle.
    replica). It prints the backend URL for `API_URL`. Run it again to deploy the latest
    image; the stored database connection is kept.
 3. Settings: `LOCATION` (default `southafricanorth`; Azure for Students allows a fixed
-   list of regions, so rerun with an allowed one if it is refused), `SYNTHETIC=false` once
-   real ECMWF input arrives, `IMAGE` for another image.
+   list of regions, shown by `az policy assignment list --disable-scope-strict-match
+   --query "[].parameters.listOfAllowedLocations.value" -o tsv`; choose the one nearest the
+   database), `SYNTHETIC=false` once real ECMWF input arrives, `IMAGE` for another image.
+   The environment has workload profiles and the app runs on its serverless Consumption
+   profile: express environments, which Azure may create by default, cannot mount Azure
+   Files, so the script replaces an empty one.
 
 Without `DATABASE_URL` the database lives in the container and is emptied whenever the
 app scales to zero; use Supabase (below) for a lasting deployment. The first request after
