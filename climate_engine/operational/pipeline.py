@@ -26,7 +26,7 @@ from climate_engine.operational.settings import (
     touches_protected_test,
     valid_window,
 )
-from climate_engine.preprocessing.atmos37 import build_features
+from climate_engine.preprocessing.atmos37 import build_features, build_rainfall, needs_pressure
 from climate_engine.provenance import code_version, configuration_checksum
 from climate_engine.verification import continuous_metrics, season_of, sufficient_statistics
 
@@ -36,6 +36,38 @@ FIELDS = {
     "residual": "Predicted residual (CHIRPS - MBC)",
     "hybrid": "Hybrid Week-2 rainfall: max(MBC + residual, 0)",
 }
+
+
+RAINFALL_LAYERS = ("raw", "mbc", "hybrid")
+OPEN_DATA_LABEL = "ECMWF ENS (Open Data)"
+
+
+def present(dataset: xr.Dataset, names=RAINFALL_LAYERS) -> list[str]:
+    """The layers a forecast holds, in the given order (old packages hold all four)."""
+    return [name for name in names if name in dataset.data_vars]
+
+
+def primary_layer(provenance: dict[str, Any]) -> str:
+    """The layer a forecast is issued from: the hybrid when it was produced, else MBC."""
+    return str(provenance.get("primary_layer", "hybrid"))
+
+
+def is_synthetic(provenance: dict[str, Any]) -> bool:
+    return bool(
+        provenance.get("synthetic", provenance.get("input_label") == "synthetic test fixture")
+    )
+
+
+def hybrid_blocker(model: ResidualMBCModel, cfg: dict) -> str | None:
+    """Why the model's AI/ML (hybrid) layer cannot be produced yet, or None when it can."""
+    if not needs_pressure(model.names):
+        return None
+    if cfg["ecmwf"]["pressure"].get("week2_steps_hours") is None:
+        return (
+            "the seven Week-2 pressure-level forecast steps of the training code "
+            "(ecmwf.pressure.week2_steps_hours) have not been supplied"
+        )
+    return None
 
 
 def grid_from_config(cfg: dict) -> DomainGrid:
@@ -69,6 +101,7 @@ def build_dataset(result: InferenceResult, grid: DomainGrid) -> xr.Dataset:
     data = {
         name: (dims, fields[name].astype(np.float32), {"units": "mm", "long_name": label})
         for name, label in FIELDS.items()
+        if name in fields
     }
     data["domain_mask"] = (dims, grid.mask.astype(np.int8), {"long_name": "ICPAC-11 domain"})
     return xr.Dataset(data, coords={"latitude": grid.latitude, "longitude": grid.longitude})
@@ -86,7 +119,7 @@ def country_summary(dataset: xr.Dataset, grid: DomainGrid) -> list[dict[str, Any
         if not selected.any():
             continue
         row: dict[str, Any] = {"country": name, "cell_count": int(selected.sum())}
-        for variable in ("raw", "mbc", "hybrid"):
+        for variable in present(dataset):
             values = grid.to_cells(dataset[variable].values)[selected].astype(np.float64)
             row[variable] = {
                 "mean_mm": round(float(np.average(values, weights=weights[selected])), 3),
@@ -112,15 +145,49 @@ def run_forecast(
     """One forecast; ``overrides`` records any configuration a caller replaced (provenance)."""
     initialization = date.fromisoformat(cycle)
     rainfall = provider.load(cycle)
-    pressure = provider.load_pressure(cycle)
-    features = build_features(model.names, rainfall, initialization, grid, model.mbc, cfg, pressure)
-    result = model.run(features)
+    blocker = hybrid_blocker(model, cfg)
+    pressure = provider.load_pressure(cycle) if blocker is None else None
+    if blocker is None and needs_pressure(model.names) and pressure is None:
+        blocker = f"no ECMWF pressure-level input for {cycle}"
+    if blocker is None:
+        features = build_features(
+            model.names, rainfall, initialization, grid, model.mbc, cfg, pressure
+        )
+        result = model.run(features)
+    else:
+        # Rainfall alone gives the raw ensemble mean and the MBC forecast; the residual
+        # (AI/ML) layer is left out, never approximated.
+        rain = build_rainfall(rainfall, initialization, grid, model.mbc, cfg)
+        result = InferenceResult(
+            raw=rain.columns["X_mean"],
+            mbc=rain.columns["MBC_forecast"],
+            residual=None,
+            hybrid=None,
+            metadata={
+                "algorithm": "monthly ratio",
+                "family": "MBC",
+                "baseline": "raw ECMWF",
+                "trees": None,
+                "members": rain.members,
+                "mbc_month": rain.mbc_month,
+                "doy_date": rain.doy_date.isoformat(),
+                "notes": rain.notes,
+            },
+        )
     dataset = build_dataset(result, grid)
     start, end = valid_window(cfg, initialization)
     record = model_record or {}
     forecast_id = f"w2-{cycle}-{uuid.uuid4().hex[:8]}"
     source = provider.metadata()
     synthetic = "fixture" in rainfall.attrs or "fixture" in (pressure.attrs if pressure else {})
+    open_data = "Open Data" in str(rainfall.attrs.get("source", ""))
+    products: dict[str, dict[str, Any]] = {
+        "raw": {"status": "available"},
+        "mbc": {"status": "available"},
+        "hybrid": {"status": "available"}
+        if blocker is None
+        else {"status": "in_progress", "reason": blocker},
+    }
     provenance = {
         "forecast_id": forecast_id,
         "model_id": record.get("model_id"),
@@ -143,7 +210,18 @@ def run_forecast(
             "mask_sha256": grid.checksum,
         },
         "input_source": source,
-        "input_label": "synthetic test fixture" if synthetic else "ECMWF S2S files",
+        "input_label": "synthetic test fixture"
+        if synthetic
+        else (OPEN_DATA_LABEL if open_data else "ECMWF S2S files"),
+        "synthetic": synthetic,
+        "layers": result.layers,
+        "primary_layer": "hybrid" if result.hybrid is not None else "mbc",
+        "products": products,
+        "input_attributes": {
+            key: str(value)
+            for key, value in rainfall.attrs.items()
+            if key in {"source", "mirror", "grib_sha256", "licence"}
+        },
         "software_version": {"package": "0.1.0", "git_commit": code_version()},
         "pipeline_version": cfg["version"],
         "config_checksum": configuration_checksum(),
@@ -168,6 +246,13 @@ def run_forecast(
         input_label=provenance["input_label"],
     )
     notes = list(result.metadata["notes"])
+    if blocker is not None:
+        notes.append(f"MBC + AI/ML (hybrid) forecast in progress: {blocker}")
+    if open_data:
+        notes.append(
+            "ECMWF Open Data rainfall (0.25 degree) averaged to 1.5 degree and interpolated "
+            "bilinearly to the 0.05 degree grid (operational choice)"
+        )
     if synthetic:
         notes.append("Input is a synthetic test fixture: not a forecast of real weather")
     return ForecastRun(
@@ -209,13 +294,14 @@ def verify(
     cfg: dict,
     observation: dict[str, Any] | None = None,
 ) -> dict:
-    """MAE, RMSE, bias and spatial correlation of raw, MBC and hybrid against observations.
+    """MAE, RMSE, bias and spatial correlation of each rainfall layer (raw, MBC and, when
+    produced, hybrid) against observations.
 
     Domain results carry sufficient statistics so that cases can be pooled exactly (for
     seasonal metrics) without keeping the observed fields.
     """
     check_domain(run, grid)
-    forecasts = {name: grid.to_cells(run.dataset[name].values) for name in ("raw", "mbc", "hybrid")}
+    forecasts = {name: grid.to_cells(run.dataset[name].values) for name in present(run.dataset)}
     domain = {
         name: {
             **continuous_metrics(values, observed_cells),

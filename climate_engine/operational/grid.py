@@ -12,6 +12,20 @@ from typing import Any
 import numpy as np
 
 REQUIRED_KEYS = ("latitude", "longitude", "domain_mask", "country_id", "country_names")
+# The eleven ICPAC member states of the authoritative domain, in alphabetical order.
+ICPAC_COUNTRIES = (
+    "Burundi",
+    "Djibouti",
+    "Eritrea",
+    "Ethiopia",
+    "Kenya",
+    "Rwanda",
+    "Somalia",
+    "South Sudan",
+    "Sudan",
+    "Tanzania",
+    "Uganda",
+)
 
 
 @dataclass(frozen=True)

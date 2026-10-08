@@ -1,4 +1,5 @@
-"""Operational forecast endpoints: runs, packages, maps, countries and verification."""
+"""Operational forecast endpoints: input data, background operations, runs, packages,
+maps, countries and verification."""
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query
 from fastapi.responses import Response
@@ -6,10 +7,13 @@ from fastapi.responses import Response
 from backend.app.schemas import (
     FORECAST_ID,
     ForecastRunRequest,
+    OperationRequest,
     PackageImportRequest,
     VerificationRequest,
 )
 from backend.app.services.forecasts import ForecastService
+from backend.app.services.operations import OperationService
+from climate_engine.inputs import sources
 from climate_engine.products.bulletin import MissingDependency
 from climate_engine.products.package import countries_csv
 
@@ -19,6 +23,42 @@ IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
 def install(app: FastAPI, dependency) -> None:
+    @app.get("/data/sources")
+    def data_sources(platform=Depends(dependency)) -> list[dict]:
+        """Observation and forecast sources: active ones with what has been fetched,
+        planned ones as listed for later."""
+        service = ForecastService(platform)
+        fetched = {"ecmwf": service.ecmwf_inputs(), "chirps": service.chirps_inputs()}
+        return [
+            {
+                **source,
+                "fetched": len(fetched.get(source["id"], [])),
+                "latest": next(iter(fetched.get(source["id"], [])), None),
+            }
+            for source in sources()
+        ]
+
+    @app.get("/data/ecmwf")
+    def ecmwf_inputs(platform=Depends(dependency)) -> list[dict]:
+        return ForecastService(platform).ecmwf_inputs()
+
+    @app.get("/data/chirps")
+    def chirps_inputs(platform=Depends(dependency)) -> list[dict]:
+        return ForecastService(platform).chirps_inputs()
+
+    @app.get("/operations")
+    def operations(platform=Depends(dependency)) -> list[dict]:
+        return OperationService(platform).list()
+
+    @app.post("/operations", status_code=202)
+    def start_operation(body: OperationRequest, platform=Depends(dependency)) -> dict:
+        """Start a background task (download, run, verify or the weekly cycle)."""
+        return OperationService(platform).start(body)
+
+    @app.get("/operations/{operation_id}")
+    def operation(operation_id: str, platform=Depends(dependency)) -> dict:
+        return OperationService(platform).get(operation_id)
+
     @app.get("/forecasts")
     def forecasts(platform=Depends(dependency)) -> list[dict]:
         """Operational forecast runs, newest initialization first."""
@@ -131,7 +171,7 @@ def install(app: FastAPI, dependency) -> None:
     @app.get("/verification/maps/{metric}")
     def verification_map(
         metric: str = Path(pattern=r"^[a-z]+$"),
-        variant: str = Query("hybrid", pattern=r"^[a-z]+$"),
+        variant: str | None = Query(None, pattern=r"^[a-z]+$"),
         model_id: str | None = Query(None, pattern=MODEL_ID),
         include_protected: bool = False,
         platform=Depends(dependency),

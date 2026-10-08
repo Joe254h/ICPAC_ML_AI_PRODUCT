@@ -95,6 +95,44 @@ def build_features(
     )
 
 
+@dataclass
+class RainfallSet:
+    """The rainfall-only part of the features: what the MBC forecast needs."""
+
+    columns: dict[str, np.ndarray]
+    initialization: date
+    mbc_month: int
+    doy_date: date
+    members: int
+    notes: list[str] = field(default_factory=list)
+
+
+def build_rainfall(
+    rainfall: xr.Dataset,
+    initialization: date,
+    grid: DomainGrid,
+    mbc: MBCParameters,
+    cfg: dict,
+) -> RainfallSet:
+    """Ensemble mean and spread of Week-2 rainfall and the locked MBC forecast."""
+    columns = rainfall_features(rainfall, grid, cfg)
+    mbc_month = basis_date(cfg, "mbc_month_basis", initialization).month
+    columns["MBC_forecast"] = mbc.apply(columns["X_mean"], mbc_month)
+    notes = []
+    negative = int(columns.pop("negative_member_totals"))
+    if negative:
+        notes.append(f"{negative} member Week-2 totals below zero (encoding noise), kept as is")
+    members = int(columns.pop("members"))
+    return RainfallSet(
+        columns,
+        initialization,
+        mbc_month,
+        basis_date(cfg, "doy_basis", initialization),
+        members,
+        notes,
+    )
+
+
 def build_atmos37(
     schema_names: list[str],
     rainfall: xr.Dataset,

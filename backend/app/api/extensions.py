@@ -4,18 +4,14 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Query
 from fastapi.responses import Response
 
 from backend.app.schemas import (
+    BulletinRequest,
     ChatRequest,
     DescriptorRegisterRequest,
     IndependentTestRequest,
-    IngestRequest,
-    RegisterRequest,
     ReviewRequest,
-    Selection,
 )
-from backend.app.services.bulletin_export import HTMLBulletinExporter, WeeklyHTMLExporter
-from backend.app.services.bulletins import WEEKLY, BulletinService
-from backend.app.services.ingestion import ObservationIngestion
-from backend.app.services.jobs import Jobs
+from backend.app.services.bulletin_export import WeeklyHTMLExporter
+from backend.app.services.bulletins import WEEKLY, BulletinService, review_label
 from backend.app.services.registry import ModelRegistry
 from chatbot.providers import warm_up
 from chatbot.retrieval import ReferenceIndex
@@ -25,42 +21,10 @@ DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 def install(app: FastAPI, dependency):
-    @app.post("/observations/register")
-    def register_observations(body: IngestRequest, platform=Depends(dependency)) -> dict:
-        return ObservationIngestion(platform).register(body.source, body.path, body.actor)
-
-    @app.get("/jobs")
-    def jobs(platform=Depends(dependency)) -> list[dict]:
-        return Jobs(platform).list()
-
-    @app.get("/jobs/{id}")
-    def job(id: str, platform=Depends(dependency)) -> dict:
-        Jobs(platform).list()
-        return platform.repo.get("job", id)
-
-    @app.post("/jobs")
-    def submit(
-        selection: Selection, executor: str = "mock_slurm", platform=Depends(dependency)
-    ) -> list[dict]:
-        return Jobs(platform).submit(selection, executor)
-
-    @app.get("/jobs/{id}/logs")
-    def logs(id: str, platform=Depends(dependency)) -> dict:
-        Jobs(platform).list()
-        return {"log": platform.repo.get("job", id)["log"]}
-
-    @app.post("/jobs/{id}/cancel")
-    def cancel_job(id: str, platform=Depends(dependency)) -> dict:
-        return Jobs(platform).cancel(id)
-
     @app.post("/models/register")
-    def register_model(
-        body: DescriptorRegisterRequest | RegisterRequest, platform=Depends(dependency)
-    ) -> dict:
-        """Operational models register from a reviewed descriptor; demo models directly."""
-        if isinstance(body, DescriptorRegisterRequest):
-            return ModelRegistry(platform).register_descriptor(body.descriptor, body.actor)
-        return ModelRegistry(platform).register(body)
+    def register_model(body: DescriptorRegisterRequest, platform=Depends(dependency)) -> dict:
+        """Operational models register from a reviewed descriptor."""
+        return ModelRegistry(platform).register_descriptor(body.descriptor, body.actor)
 
     @app.post("/models/{id}/independent-test")
     def independent_test(
@@ -69,8 +33,9 @@ def install(app: FastAPI, dependency):
         return ModelRegistry(platform).record_independent_test(id, body)
 
     @app.post("/models/{id}/validate")
-    def validate_model(id: str, body: Selection, platform=Depends(dependency)) -> dict:
-        return ModelRegistry(platform).validate(id, body)
+    def validate_model(id: str, platform=Depends(dependency)) -> dict:
+        """Re-verify the model's artifacts and rerun its inference check."""
+        return ModelRegistry(platform).validate(id)
 
     @app.post("/models/{id}/{action}")
     def model_action(
@@ -112,18 +77,15 @@ def install(app: FastAPI, dependency):
 
     @app.get("/bulletins")
     def bulletins(platform=Depends(dependency)) -> list[dict]:
-        return list(reversed(platform.repo.list("bulletin")))
+        """Weekly bulletin drafts (drafts of the retired demonstration are not listed)."""
+        return [b for b in reversed(platform.repo.list("bulletin")) if b.get("kind") == WEEKLY]
 
     @app.post("/bulletins/generate")
     def generate_bulletin(
-        body: Selection,
-        parent_id: str | None = None,
-        forecast_id: str | None = Query(None, pattern=r"^w2-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}$"),
-        platform=Depends(dependency),
+        body: BulletinRequest, parent_id: str | None = None, platform=Depends(dependency)
     ) -> dict:
-        """The weekly bulletin of a forecast (the latest by default); before the first
-        forecast, a demonstration summary of the selection."""
-        return BulletinService(platform).generate(body, parent_id, forecast_id)
+        """The weekly bulletin draft of a forecast (the latest by default)."""
+        return BulletinService(platform).generate(body.forecast_id, parent_id, body.actor)
 
     @app.get("/bulletins/compare")
     def compare_bulletins(left: str, right: str, platform=Depends(dependency)) -> dict:
@@ -146,25 +108,23 @@ def install(app: FastAPI, dependency):
         inline: bool = False,
         platform=Depends(dependency),
     ):
-        """A weekly draft as its frozen Word document (docx) or that document as a web page
-        (html); a demonstration draft as its HTML summary."""
+        """A weekly draft as its frozen Word document (docx) or as a web page (html) with the
+        same words and maps."""
         bulletin = platform.repo.get("bulletin", id)
+        if bulletin.get("kind") != WEEKLY:
+            raise KeyError(id)
         service = BulletinService(platform)
-        if bulletin.get("kind") == WEEKLY:
-            document = service.released(bulletin)
-            if format == "docx":
-                name = re.sub(r"[^A-Za-z0-9-]+", "_", bulletin["title"]).strip("_")
-                return Response(
-                    document,
-                    media_type=DOCX,
-                    headers={"Content-Disposition": f'attachment; filename="{name}.docx"'},
-                )
-            content = WeeklyHTMLExporter().export({**bulletin, "id": id}, document)
-        elif format == "docx":
-            raise ValueError("Demonstration drafts have no Word document")
-        else:
-            content = HTMLBulletinExporter().export(bulletin, service.map(bulletin))
-        disposition = "inline" if inline else f'attachment; filename="icpac-bulletin-{id}.html"'
+        document = service.released(bulletin)
+        name = re.sub(r"[^A-Za-z0-9-]+", "_", bulletin["title"]).strip("_")
+        if format == "docx":
+            return Response(
+                document,
+                media_type=DOCX,
+                headers={"Content-Disposition": f'attachment; filename="{name}.docx"'},
+            )
+        label = review_label(bulletin) or bulletin["facts"]["label"]
+        content = WeeklyHTMLExporter().export({**bulletin, "id": id, "page_label": label}, document)
+        disposition = "inline" if inline else f'attachment; filename="{name}.html"'
         return Response(
             content, media_type="text/html", headers={"Content-Disposition": disposition}
         )

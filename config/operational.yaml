@@ -33,8 +33,13 @@ ecmwf:
     accumulation: cumulative
     # Days 8-14: the accumulation between the 168 h and 336 h forecast points.
     accumulation_steps_hours: [168, 336]
-    # REQUIRED only when the rainfall input is not already on the model grid.
-    regrid: null
+    # Rainfall not already on the 0.05 degree model grid (ECMWF Open Data is 0.25 degree)
+    # is first averaged to the 1.5 degree grid of the ECMWF S2S forecasts the model was
+    # trained on, then interpolated bilinearly to the cell centres, the method training
+    # used for the pressure-level fields. OPERATIONAL CHOICE: replace both values with
+    # the rainfall regridding of the frozen training code once it is supplied.
+    regrid: bilinear
+    training_resolution_degrees: 1.5
   pressure:
     # REQUIRED: the seven Week-2 step hours used for the atmospheric training features.
     week2_steps_hours: null

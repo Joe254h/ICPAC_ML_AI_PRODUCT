@@ -4,55 +4,12 @@ import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
-import httpx
 import pytest
 
-from backend.app.db import Repository
-from backend.app.schemas import ReviewRequest, Selection
+from backend.app.schemas import ReviewRequest
 from backend.app.services import bulletins
-from backend.app.services.bulletin_export import HTMLBulletinExporter
 from backend.app.services.bulletins import BulletinService, check_consistency
-from backend.app.services.platform import Platform
 from climate_engine.products.store import PackageStore
-
-
-def test_bulletin_requires_review_and_preserves_facts(tmp_path, monkeypatch):
-    monkeypatch.setenv("RUN_ROOT", str(tmp_path / "runs"))
-    platform = Platform(Repository(f"sqlite:///{tmp_path / 'test.db'}"))
-    service = BulletinService(platform)
-    bulletin = service.generate(Selection(country="Kenya"))
-    review = ReviewRequest(
-        actor="Reviewer", confirmed=True, comment="Checked sources, QC and units"
-    )
-    with pytest.raises(ValueError, match="status approved"):
-        service.transition(bulletin["id"], "publish", review)
-    with pytest.raises(ValueError, match="confirmation"):
-        service.transition(bulletin["id"], "submit", review.model_copy(update={"confirmed": False}))
-    service.transition(bulletin["id"], "submit", review)
-    approved = service.transition(bulletin["id"], "approve", review)
-    assert approved["facts_checksum"] == bulletin["facts_checksum"]
-    published = service.transition(bulletin["id"], "publish", review)
-    assert published["status"] == "published"
-    assert len(platform.repo.list("approval")) == 3
-    output = HTMLBulletinExporter().export(published, service.map(published))
-    assert b"data:image/png;base64," in output
-    assert b"NOT FOR OPERATIONAL USE" in output
-    changed = {**bulletin, "text": "Rainfall is 999999 mm."}
-    assert check_consistency(changed)["status"] == "FAIL"
-
-
-def test_rejected_draft_and_comparison(tmp_path, monkeypatch):
-    monkeypatch.setenv("RUN_ROOT", str(tmp_path / "runs"))
-    platform = Platform(Repository(f"sqlite:///{tmp_path / 'test.db'}"))
-    service = BulletinService(platform)
-    a = service.generate(Selection(country="Kenya"))
-    b = service.generate(Selection(country="Somalia"), a["id"])
-    assert service.compare(a["id"], b["id"])["changed_selection"] == ["country"]
-    review = ReviewRequest(actor="Reviewer", confirmed=True, comment="Needs revision")
-    service.transition(a["id"], "submit", review)
-    assert service.transition(a["id"], "reject", review)["status"] == "rejected"
-    with pytest.raises(ValueError):
-        service.transition(a["id"], "approve", review)
 
 
 class Blobs:
@@ -70,47 +27,6 @@ class Blobs:
 
     def download_blob(self, blob, **kwargs):
         return SimpleNamespace(readall=lambda: self.blobs[blob])
-
-
-def test_frozen_map_survives_a_reset_disk(tmp_path, monkeypatch):
-    """A restarted container loses RUN_ROOT; review must still find the same frozen map."""
-    monkeypatch.setenv("RUN_ROOT", str(tmp_path / "runs"))
-    blobs = Blobs()
-    monkeypatch.setattr(bulletins, "package_store", lambda: PackageStore(blobs))
-    platform = Platform(Repository(f"sqlite:///{tmp_path / 'test.db'}"))
-    service = BulletinService(platform)
-    draft = service.generate(Selection(country="Kenya"))
-    assert f"bulletins/{draft['id']}/map.png" in blobs.blobs
-    shutil.rmtree(tmp_path / "runs")
-    review = ReviewRequest(actor="Reviewer", confirmed=True, comment="Checked")
-    assert service.transition(draft["id"], "submit", review)["status"] == "under_review"
-    assert Path(draft["map_path"]).is_file()
-
-    # Without a store, the map is rendered again from the frozen selection and accepted
-    # only when it is byte-identical; a different image never replaces the frozen one.
-    monkeypatch.setattr(bulletins, "package_store", lambda: None)
-    shutil.rmtree(tmp_path / "runs")
-    assert service.map(platform.repo.get("bulletin", draft["id"]))[:4] == bytes([137, 80, 78, 71])
-    shutil.rmtree(tmp_path / "runs")
-    monkeypatch.setattr(platform, "png", lambda selection: b"another image")
-    with pytest.raises(FileNotFoundError, match="Generate a new draft"):
-        service.transition(draft["id"], "approve", review)
-
-
-def test_drafts_keep_every_sentence_without_asking_the_language_model(tmp_path, monkeypatch):
-    monkeypatch.setenv("RUN_ROOT", str(tmp_path / "runs"))
-    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
-    calls = []
-    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: calls.append(args))
-    platform = Platform(Repository(f"sqlite:///{tmp_path / 'test.db'}"))
-    draft = BulletinService(platform).generate(Selection(country="Kenya"))
-    # A draft states every approved sentence, so there is nothing for a model to choose.
-    assert calls == [] and draft["provider"] == "deterministic"
-    assert draft["sentence_ids"] == list(draft["sentences"])
-    assert check_consistency(draft)["status"] == "PASS"
-    monkeypatch.setenv("LLM_PROVIDER", "mock")
-    draft = BulletinService(platform).generate(Selection(country="Kenya"))
-    assert draft["provider"] == "deterministic" and draft["fallback"] is None
 
 
 # ---------------------------------------------------------------- weekly bulletin drafts
@@ -140,13 +56,18 @@ def test_drafts_are_the_weekly_bulletin_of_the_latest_forecast(env, fast_maps, m
     page = client.get(f"/bulletins/{draft['id']}/export?inline=true")
     assert page.headers["content-disposition"] == "inline"
     text = page.text
-    # The page is the Word document: its title, bold leads, bullets and every picture.
-    assert "Weekly Forecast for 12-19 October 2026" in text
+    # The page carries the draft's words with their bold leads and the document's maps;
+    # products still in progress are short notes, not empty maps.
+    assert "<h1>Weekly Forecast for 12-19 October 2026</h1>" in text
     assert "<strong>Decision-Support Note:</strong>" in text
     assert "<li><strong>Heavy rainfall (above 200 mm)</strong>" in text
-    assert "95</strong><strong><sup>th</sup></strong>" in text
-    assert text.count("data:image/png;base64,") == 7 and text.count("data:image/gif") == 1
-    assert "DRAFT - NOT APPROVED" in text and "SYNTHETIC TEST INPUT" in text
+    assert text.count('<figure><img alt="') == 2  # the regional and the Somalia rainfall maps
+    assert text.count('<span class="tag">In progress</span>') == 6
+    assert "Requires approved climatological 95th-percentile thresholds." in text
+    assert "DRAFT - NOT APPROVED" in text and "SYNTHETIC" not in text
+    assert 'class="chip draft"' in text and "IGAD Climate Prediction and Applications" in text
+    attachment = client.get(f"/bulletins/{draft['id']}/export").headers["content-disposition"]
+    assert attachment == 'attachment; filename="Weekly_Forecast_for_12-19_October_2026.html"'
 
     review = {"actor": "Reviewer", "confirmed": True, "comment": "Checked"}
     assert client.post(f"/bulletins/{draft['id']}/submit", json=review).json()["status"] == (
@@ -166,11 +87,11 @@ def test_drafts_are_the_weekly_bulletin_of_the_latest_forecast(env, fast_maps, m
     assert part(approved, "word/document.xml") == part(word.content, "word/document.xml")
     header = part(approved, "word/header1.xml")
     assert "APPROVED by Reviewer on 20" in header and "DRAFT - NOT APPROVED" not in header
-    assert "forecaster review required" not in header and "SYNTHETIC TEST INPUT" in header
+    assert "forecaster review required" not in header
     published = client.post(f"/bulletins/{draft['id']}/publish", json=review).json()
     assert published["status"] == "published"
     page = client.get(f"/bulletins/{draft['id']}/export").text
-    assert "PUBLISHED (local demonstration record) by Reviewer" in page
+    assert "PUBLISHED by Reviewer" in page and 'class="chip approved">' in page
 
     revision = client.post(f"/bulletins/generate?parent_id={draft['id']}", json={}).json()
     assert revision["forecast_id"] == record["forecast_id"]
@@ -184,10 +105,28 @@ def part(document: bytes, name: str) -> str:
         return archive.read(name).decode("utf-8")
 
 
-def test_demonstration_drafts_have_no_word_document(tmp_path, monkeypatch):
-    monkeypatch.setenv("RUN_ROOT", str(tmp_path / "runs"))
-    platform = Platform(Repository(f"sqlite:///{tmp_path / 'test.db'}"))
-    draft = BulletinService(platform).generate(Selection(country="Kenya"))
-    assert "kind" not in draft
-    with pytest.raises(ValueError, match="Only weekly"):
-        BulletinService(platform).document(draft)
+def test_rejected_drafts_and_changed_facts_are_refused(env, fast_maps):
+    run(env)
+    service = BulletinService(env.platform)
+    draft = service.generate(actor="Joe N")
+    review = ReviewRequest(actor="Reviewer", confirmed=True, comment="Needs revision")
+    with pytest.raises(ValueError, match="status approved"):
+        service.transition(draft["id"], "publish", review)
+    with pytest.raises(ValueError, match="confirmation"):
+        service.transition(draft["id"], "submit", review.model_copy(update={"confirmed": False}))
+    service.transition(draft["id"], "submit", review)
+    assert service.transition(draft["id"], "reject", review)["status"] == "rejected"
+    with pytest.raises(ValueError):
+        service.transition(draft["id"], "approve", review)
+    assert [
+        a["action"] for a in env.platform.repo.list("approval") if a["entity"] == draft["id"]
+    ] == [
+        "submit",
+        "reject",
+    ]
+    changed = {**draft, "text": "Rainfall is 999999 mm."}
+    assert check_consistency(changed)["status"] == "FAIL"
+    # Drafts of the retired demonstration stay in old databases but are never listed.
+    env.platform.repo.save("bulletin", {"title": "demo", "status": "draft"}, "old-demo")
+    assert [b["id"] for b in env.client.get("/bulletins").json()] == [draft["id"]]
+    assert env.client.get("/bulletins/old-demo/export").status_code == 404

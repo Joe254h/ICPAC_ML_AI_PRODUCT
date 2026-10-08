@@ -45,9 +45,4 @@ def code_version() -> str:
 
 
 def configuration_checksum() -> str:
-    return checksum(
-        {
-            name: config(name)
-            for name in ("science", "observations", "forecasts", "models", "runtime")
-        }
-    )
+    return checksum({name: config(name) for name in ("operational", "data_sources", "runtime")})

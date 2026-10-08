@@ -1,25 +1,17 @@
 [
   {
     "id": "verification-guide",
-    "title": "Prototype verification guide",
+    "title": "Verification guide",
     "category": "scientific_reference",
     "path": "verification.md",
     "approved": true
   },
   {
     "id": "review-sop",
-    "title": "Prototype forecaster review procedure",
+    "title": "Forecaster review procedure",
     "category": "operational_documentation",
     "path": "review.md",
     "approved": true
-  },
-  {
-    "id": "sample-bulletin",
-    "title": "Synthetic historical bulletin example",
-    "category": "historical_bulletin",
-    "path": "sample.md",
-    "approved": true,
-    "synthetic": true
   },
   {
     "id": "glossary",

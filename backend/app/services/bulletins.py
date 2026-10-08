@@ -3,8 +3,7 @@
 Once an operational forecast exists, a draft is the ICPAC weekly bulletin of that forecast
 (templates/icpac_weekly_reference.docx): its sections, the Word document and the regional
 rainfall map are frozen with checksums when the draft is made, and the review steps check
-them before every transition. Before the first forecast, drafts summarise the synthetic
-demonstration grid as in the first release.
+them before every transition. Without a forecast there is nothing to draft.
 """
 
 import hashlib
@@ -18,11 +17,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from backend.app.db import Record, now
-from backend.app.schemas import ReviewRequest, Selection
-from chatbot.providers import render_grounded
-from chatbot.retrieval import ReferenceIndex
-from chatbot.service import forecast_sentences
-from chatbot.tools import ClimateTools
+from backend.app.schemas import ReviewRequest
 from climate_engine.core import ROOT, checksum
 from climate_engine.products import weekly_bulletin as weekly
 from climate_engine.products.bulletin import BulletinInputs, WordTemplateGenerator, stamp_header
@@ -75,7 +70,7 @@ def review_label(bulletin: dict) -> str | None:
     """The page header label of a reviewed weekly draft (None while it is still a draft)."""
     decisions = {
         "approved": "APPROVED",
-        "published": "PUBLISHED (local demonstration record)",
+        "published": "PUBLISHED",
         "rejected": "REJECTED - NOT FOR RELEASE",
     }
     state = decisions.get(bulletin["status"])
@@ -94,27 +89,14 @@ def check_consistency(bulletin: dict) -> dict:
     errors = []
     if checksum(bulletin["facts"]) != bulletin["facts_checksum"]:
         errors.append("Structured facts checksum mismatch")
-    if bulletin.get("kind") == WEEKLY:
-        if bulletin["text"] != weekly_text(bulletin["facts"]):
-            errors.append("Bulletin text differs from the frozen template sections")
-        return {
-            "status": "FAIL" if errors else "PASS",
-            "errors": errors,
-            "checks": ["facts_checksum", "template_sections", "exact_rendering"],
-        }
-    expected = forecast_sentences(bulletin["facts"])
-    actual = bulletin["sentences"]
-    if actual != expected:
-        errors.append("Narrative sentences differ from deterministic facts")
-    ids = bulletin["sentence_ids"]
-    if len(ids) != len(expected) or set(ids) != set(expected):
-        errors.append("Narrative outline is invalid")
-    elif bulletin["text"] != "\n\n".join(expected[key] for key in ids):
-        errors.append("Narrative text contains unsupported content")
+    if bulletin.get("kind") != WEEKLY:
+        errors.append("Drafts of the retired demonstration cannot be reviewed")
+    elif bulletin["text"] != weekly_text(bulletin["facts"]):
+        errors.append("Bulletin text differs from the frozen template sections")
     return {
         "status": "FAIL" if errors else "PASS",
         "errors": errors,
-        "checks": ["facts_checksum", "sentence_values", "outline_allowlist", "exact_rendering"],
+        "checks": ["facts_checksum", "template_sections", "exact_rendering"],
     }
 
 
@@ -124,60 +106,28 @@ class BulletinService:
         self.repo = platform.repo
 
     def generate(
-        self, selection: Selection, parent_id: str | None = None, forecast_id: str | None = None
+        self,
+        forecast_id: str | None = None,
+        parent_id: str | None = None,
+        actor: str = "forecaster",
     ) -> dict:
+        """The weekly bulletin draft of a forecast; a revision keeps its parent's forecast,
+        and without either the latest forecast is used."""
+        from backend.app.services.forecasts import ForecastService
+
         parent = self.repo.get("bulletin", parent_id) if parent_id else None
         forecast_id = forecast_id or (parent or {}).get("forecast_id")
-        if forecast_id is None and parent is None:
-            from backend.app.services.forecasts import ForecastService
-
-            if ForecastService(self.platform).runs():
-                forecast_id = ForecastService(self.platform).latest()["forecast_id"]
-        if forecast_id is not None:
-            return self.generate_weekly(forecast_id, selection, parent_id)
-        facts = ClimateTools(self.platform).call("get_bulletin_context", selection)
-        references = ReferenceIndex().search("rainfall verification bulletin review")
-        sentences = forecast_sentences(facts)
-        # A draft states every approved sentence, in order: there is nothing to choose.
-        rendered = render_grounded(
-            "Draft a technical Week-2 rainfall summary",
-            sentences,
-            references,
-            required=list(sentences),
-        )
-        identifier = str(uuid4())
-        output = Path(os.getenv("RUN_ROOT", str(ROOT / "data" / "runs"))) / "bulletins" / identifier
-        output.mkdir(parents=True, exist_ok=True)
-        image = output / "map.png"
-        image.write_bytes(self.platform.png(selection))
-        store = package_store()
-        if store is not None:  # hosts without a persistent disk keep the map in Blob Storage
-            store.put(map_key(identifier), image.read_bytes())
-        bulletin = {
-            "title": f"Week-2 rainfall summary · {selection.country}",
-            "status": "draft",
-            "selection": selection.model_dump(),
-            "parent_id": parent_id,
-            "created_at": now(),
-            "facts": facts,
-            "facts_checksum": checksum(facts),
-            "sentences": sentences,
-            **rendered,
-            "sources": references,
-            "map_path": str(image),
-            "map_checksum": file_checksum(image),
-            "reviews": [],
-            "publication_scope": "local demonstration record only; no dissemination",
-        }
-        bulletin["consistency"] = check_consistency(bulletin)
-        if bulletin["consistency"]["status"] != "PASS":
-            raise ValueError("Draft consistency check failed")
-        record = self.repo.save("bulletin", bulletin, identifier)
-        self.repo.audit("generate_bulletin_draft", "prototype", identifier)
-        return record
+        if forecast_id is None:
+            runs = ForecastService(self.platform).runs()
+            if not runs:
+                raise KeyError(
+                    "no operational forecast yet: run a forecast before drafting a bulletin"
+                )
+            forecast_id = runs[0]["forecast_id"]
+        return self.generate_weekly(forecast_id, parent_id, actor)
 
     def generate_weekly(
-        self, forecast_id: str, selection: Selection, parent_id: str | None = None
+        self, forecast_id: str, parent_id: str | None = None, actor: str = "forecaster"
     ) -> dict:
         """Freeze the ICPAC weekly bulletin of one forecast package for review."""
         from backend.app.services.forecasts import ForecastService
@@ -223,7 +173,7 @@ class BulletinService:
         output = Path(os.getenv("RUN_ROOT", str(ROOT / "data" / "runs"))) / "bulletins" / identifier
         output.mkdir(parents=True, exist_ok=True)
         image, document = output / "map.png", output / "bulletin.docx"
-        image.write_bytes(weekly.rainfall_png(inputs, "hybrid"))
+        image.write_bytes(weekly.rainfall_png(inputs))
         document.write_bytes(WordTemplateGenerator().render_bytes(inputs))
         store = package_store()
         if store is not None:  # hosts without a persistent disk keep both in Blob Storage
@@ -233,7 +183,6 @@ class BulletinService:
             "kind": WEEKLY,
             "title": title,
             "status": "draft",
-            "selection": selection.model_dump(),
             "forecast_id": forecast_id,
             "parent_id": parent_id,
             "created_at": now(),
@@ -248,15 +197,15 @@ class BulletinService:
             "document_path": str(document),
             "document_checksum": file_checksum(document),
             "reviews": [],
-            "publication_scope": "local demonstration record only; no dissemination",
+            "created_by": actor,
+            "publication_scope": "recorded in this service; ICPAC disseminates the approved "
+            "bulletin through its own channels",
         }
         bulletin["consistency"] = check_consistency(bulletin)
         if bulletin["consistency"]["status"] != "PASS":
             raise ValueError("Draft consistency check failed")
         record = self.repo.save("bulletin", bulletin, identifier)
-        self.repo.audit(
-            "generate_bulletin_draft", "prototype", identifier, {"forecast": forecast_id}
-        )
+        self.repo.audit("generate_bulletin_draft", actor, identifier, {"forecast": forecast_id})
         return record
 
     def transition(self, identifier: str, action: str, review: ReviewRequest) -> dict:
@@ -386,13 +335,13 @@ class BulletinService:
 
     def _reproduce(self, bulletin: dict, checksum_key: str) -> bytes:
         if bulletin.get("kind") != WEEKLY:
-            return self.platform.png(Selection.model_validate(bulletin["selection"]))
+            raise ValueError("Drafts of the retired demonstration cannot be reproduced")
         from backend.app.services.forecasts import ForecastService
 
         directory = ForecastService(self.platform).directory(bulletin["forecast_id"])
         inputs = BulletinInputs.from_package(directory)
         if checksum_key == "map_checksum":
-            return weekly.rainfall_png(inputs, "hybrid")
+            return weekly.rainfall_png(inputs)
         return WordTemplateGenerator().render_bytes(inputs)
 
     def compare(self, left_id: str, right_id: str) -> dict:
@@ -402,10 +351,7 @@ class BulletinService:
             "right": right,
             "facts_identical": left["facts_checksum"] == right["facts_checksum"],
             "text_identical": left["text"] == right["text"],
-            "changed_selection": [
-                key
-                for key in left["selection"]
-                if left["selection"][key] != right["selection"][key]
-            ]
-            + (["forecast"] if left.get("forecast_id") != right.get("forecast_id") else []),
+            "changed_selection": ["forecast"]
+            if left.get("forecast_id") != right.get("forecast_id")
+            else [],
         }

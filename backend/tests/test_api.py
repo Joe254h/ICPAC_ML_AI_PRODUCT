@@ -1,8 +1,10 @@
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.db import database_url
 from backend.app.main import create_app
+from climate_engine.verification import metrics
 
 
 @pytest.fixture
@@ -16,47 +18,58 @@ def test_major_endpoints(client):
         "/health",
         "/config",
         "/forecasts",
-        "/observations",
-        "/observations/CHIRPS",
-        "/observations/TAMSAT/availability",
+        "/data/sources",
+        "/data/ecmwf",
+        "/data/chirps",
+        "/operations",
         "/models",
-        "/models/mock-v1",
-        "/verification",
-        "/products",
-        "/products/png",
+        "/bulletins",
     ]:
         assert client.get(path).status_code == 200, path
-    data = client.get("/analysis").json()
-    assert data["qc"][0]["status"] == "PASS"
-    assert data["provenance"]["mode"] == "synthetic"
-    assert len(data["observation_comparison"]) == 3
-    assert data["map"]["features"]
-    assert client.get("/analysis?cycle=2026-09-21").status_code == 200
+    # The retired demonstration has no endpoints any more.
+    for path in ["/analysis", "/export/png", "/products", "/observations", "/jobs"]:
+        assert client.get(path).status_code == 404, path
 
 
-def test_health_keeps_demonstration_checks_apart_from_the_operational_model(client):
-    components = client.get("/health").json()["components"]
-    assert components["Demonstration production artifact"] == "Healthy"
-    assert components["Operational model"] == "Unavailable · no operational model registered"
-    assert not [name for name in components if name.lower().startswith("production")]
+def test_data_sources_list_active_and_planned_sources(client):
+    sources = {s["id"]: s for s in client.get("/data/sources").json()}
+    assert {k for k, s in sources.items() if s["status"] == "active"} == {"ecmwf", "chirps"}
+    assert {k for k, s in sources.items() if s["status"] == "planned"} == {
+        "tamsat",
+        "rfe2",
+        "arc2",
+        "imerg",
+    }
+    assert sources["ecmwf"]["fetched"] == 0 and sources["ecmwf"]["latest"] is None
 
 
-def test_selection_and_persistence(client):
-    chirps = client.get("/analysis?country=Kenya").json()
-    tamsat = client.get("/analysis?country=Kenya&observation=TAMSAT").json()
-    assert chirps["metrics"]["rmse"] != tamsat["metrics"]["rmse"]
-    run = client.post("/verification/run", json={"country": "Kenya"})
-    assert run.status_code == 200
-    assert client.get("/verification").json()[0]["id"] == run.json()["id"]
-    assert client.get("/analysis?observation=UNKNOWN").status_code == 422
-    assert client.get("/analysis?cycle=2020-01-01").status_code == 422
-    assert client.get("/models/absent").status_code == 404
+def test_health_reports_the_operational_service(client):
+    health = client.get("/health").json()
+    assert health["mode"] == "operational"
+    components = health["components"]
+    assert components["Operational forecasts"] == "Warning · no forecast run yet"
+    assert components["ECMWF input"].startswith("Warning")
+    assert components["MBC + AI/ML forecast"].startswith("In progress")
+    assert not any("emonstration" in name for name in components)
 
 
-def test_downloads(client):
-    assert client.get("/export/json").headers["content-type"].startswith("application/json")
-    assert "country,mean_rainfall_mm" in client.get("/export/csv").text
-    assert client.get("/export/png").content[:4] == bytes([137, 80, 78, 71])
+def test_bulletin_drafts_need_a_forecast(client):
+    response = client.post("/bulletins/generate", json={"actor": "Joe N"})
+    assert response.status_code == 404
+    assert "no operational forecast yet" in response.json()["detail"]
+
+
+def test_known_metrics_and_constant_arrays():
+    score = metrics(np.array([2.0, 4.0, 6.0]), np.array([1.0, 2.0, 3.0]))
+    assert score["mae"] == 2
+    assert score["bias"] == 2
+    assert score["rmse"] == pytest.approx(np.sqrt(14 / 3))
+    assert score["correlation"] == pytest.approx(1)
+    assert metrics(np.ones(3), np.ones(3))["correlation"] is None
+    with pytest.raises(ValueError):
+        metrics(np.array([np.nan]), np.array([1]))
+    with pytest.raises(ValueError):
+        metrics(np.ones(2), np.ones(3))
 
 
 @pytest.mark.parametrize(

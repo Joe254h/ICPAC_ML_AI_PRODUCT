@@ -6,7 +6,7 @@ current forecast grid. The rainfall classes are the reference's (heavy above 200
 moderate 50-200 mm, light below 50 mm in the week); where they fall is described per
 country from the share and position of its cells in each class. Products this forecast
 does not have (rainfall anomaly, exceptional rainfall, temperature, heat stress) keep
-their place and bold lead and say they are not available; nothing is inferred for them.
+their place and bold lead and say they are still in progress; nothing is inferred for them.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ DECISION_NOTE = (
     "agriculture, pastoralism, disaster risk management, water resources, and other "
     "climate-sensitive sectors"
 )
-UNAVAILABLE = "not available for this forecast"
+UNAVAILABLE = "in progress"
 MISSING = {
     "anomaly": "an approved Week-2 rainfall climatology for the forecast window",
     "exceptional": "approved climatological 95th-percentile thresholds",
@@ -121,9 +121,13 @@ def scope_label(inputs: BulletinInputs) -> str:
     facts = inputs.interpretation
     model = facts["model"]
     status = model.get("status") or "unregistered"
-    parts = ["DRAFT - NOT APPROVED", f"Model {model['model_id']} ({status})"]
-    if status != "production":
-        parts.append("not the production model")
+    if facts.get("primary_layer", "hybrid") == "mbc":
+        # MBC alone: the statistical correction of the ECMWF ensemble, no AI/ML layer.
+        parts = ["DRAFT - NOT APPROVED", "ECMWF ensemble + MBC", "AI/ML hybrid in progress"]
+    else:
+        parts = ["DRAFT - NOT APPROVED", f"Model {model['model_id']} ({status})"]
+        if status != "production":
+            parts.append("not the production model")
     parts.append("forecaster review required")
     if facts["input"]["synthetic"]:
         parts.append("SYNTHETIC TEST INPUT - NOT A FORECAST OF REAL WEATHER")
@@ -140,7 +144,13 @@ class Grid:
     longitude: np.ndarray
 
 
-def read_layer(inputs: BulletinInputs, layer: str = "hybrid") -> Grid:
+def primary(inputs: BulletinInputs) -> str:
+    """The layer the bulletin is issued from: the hybrid when produced, else MBC."""
+    return str(inputs.interpretation.get("primary_layer", "hybrid"))
+
+
+def read_layer(inputs: BulletinInputs, layer: str | None = None) -> Grid:
+    layer = layer or primary(inputs)
     with xr.open_dataset(inputs.package / "forecast.nc") as dataset:
         return Grid(
             np.array(dataset[layer].values, dtype=float),
@@ -308,12 +318,14 @@ def _paragraphs(items: list[tuple[str, str]]) -> dict[str, list[str]]:
 
 
 def _unavailable(key: str, leads: list[str]) -> list[tuple[str, str]]:
-    first = f" {UNAVAILABLE}: it requires {MISSING[key]}."
-    return [(lead, first if index == 0 else f" {UNAVAILABLE}.") for index, lead in enumerate(leads)]
+    first = f": {UNAVAILABLE}, it requires {MISSING[key]}."
+    return [
+        (lead, first if index == 0 else f": {UNAVAILABLE}.") for index, lead in enumerate(leads)
+    ]
 
 
 def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
-    grid = read_layer(inputs, "hybrid")
+    grid = read_layer(inputs)
     masks = country_masks(grid)
     regional = rainfall_bullets(grid, masks, LEADS)
     somalia_masks = {k: v for k, v in masks.items() if k == "Somalia"}
@@ -327,7 +339,7 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
     )
     unavailable_products = (
         "",
-        "Rainfall anomaly, exceptional rainfall, temperature and heat-stress products are "
+        "Rainfall anomaly, exceptional rainfall, temperature and heat-stress products are still "
         f"{UNAVAILABLE}.",
     )
     result: list[dict[str, Any]] = [
@@ -342,7 +354,7 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
                         " "
                         + DECISION_NOTE
                         + ". This forecast currently provides the Total Rainfall product; "
-                        f"the other products are marked as {UNAVAILABLE}.",
+                        f"the other products are still {UNAVAILABLE}.",
                     )
                 ]
             ),
@@ -351,7 +363,7 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
             "key": "rainfall",
             "title": "Total Rainfall",
             **_paragraphs(regional),
-            "map_layer": "hybrid",
+            "map_layer": primary(inputs),
         },
         {
             "key": "anomaly",
@@ -400,7 +412,7 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
                 "key": "somalia",
                 "title": "Somalia",
                 **_paragraphs(somalia),
-                "map_layer": "hybrid",
+                "map_layer": primary(inputs),
                 "map_country": "Somalia",
             }
         )
@@ -409,7 +421,7 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
             {
                 "key": "somalia",
                 "title": "Somalia",
-                **_paragraphs([(lead, f" {UNAVAILABLE}.") for lead in SOMALIA_LEADS.values()]),
+                **_paragraphs([(lead, f": {UNAVAILABLE}.") for lead in SOMALIA_LEADS.values()]),
                 "missing_dependency": "Somalia grid cells in this forecast",
             }
         )
@@ -437,10 +449,11 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------- maps
 
 
-def map_title(inputs: BulletinInputs, key: str, layer: str = "hybrid") -> str:
+def map_title(inputs: BulletinInputs, key: str, layer: str | None = None) -> str:
     start, _ = _window(inputs)
     title = MAP_TITLES[key].format(period=map_period(inputs), start=f"{start:%Y-%m-%d}")
-    return title + LAYER_NAMES.get(layer, "")
+    layer = layer or primary(inputs)
+    return title + ("" if layer == primary(inputs) else LAYER_NAMES.get(layer, ""))
 
 
 def map_label(
@@ -451,9 +464,15 @@ def map_label(
     parts = ["DRAFT"]
     if synthetic:
         parts.append("SYNTHETIC TEST INPUT - NOT REAL WEATHER")
-    parts.append(f"{model_id} ({status}" + (", not production)" if status != "production" else ")"))
-    if method:
-        parts.append(method)
+    if method == "MBC":
+        # The statistical correction of the ECMWF ensemble; no AI/ML model is involved.
+        parts.append("ECMWF ensemble + MBC")
+    else:
+        parts.append(
+            f"{model_id} ({status}" + (", not production)" if status != "production" else ")")
+        )
+        if method:
+            parts.append(method)
     parts.append(forecast_id)
     return " · ".join(parts)
 
@@ -476,35 +495,47 @@ def rainfall_map(
     layer: str,
     note: str,
     country: str | None = None,
+    primary: bool = False,
 ) -> bytes:
-    """A Week-2 rainfall layer (raw, MBC or hybrid) as a reference-style map."""
+    """A Week-2 rainfall layer (raw, MBC or hybrid) as a reference-style map; the layer the
+    forecast is issued from carries the plain template title."""
     if layer not in LAYER_NAMES:
         raise ValueError("Weekly rainfall maps support hybrid, mbc and raw")
     period = period_label(valid_start, valid_end, "%b")
-    title = MAP_TITLES["rainfall"].format(period=period) + LAYER_NAMES[layer]
+    title = MAP_TITLES["rainfall"].format(period=period) + ("" if primary else LAYER_NAMES[layer])
     return weekly_maps.render(title, field, country=country, note=note)
 
 
 def rainfall_png(
-    inputs: BulletinInputs, layer: str = "hybrid", country: str | None = None
+    inputs: BulletinInputs, layer: str | None = None, country: str | None = None
 ) -> bytes:
+    layer = layer or primary(inputs)
     if layer not in LAYER_NAMES:
         raise ValueError("Weekly rainfall maps support hybrid, mbc and raw")
+    if layer not in inputs.interpretation.get("layers", LAYER_NAMES):
+        raise ValueError(f"This forecast has no {layer} layer")
     grid = read_layer(inputs, layer)
     field = maps.Field(layer, grid.values, grid.latitude, grid.longitude)
-    method = inputs.interpretation["method"]["label"] if layer == "hybrid" else layer.upper()
+    is_primary = layer == primary(inputs)
+    method = inputs.interpretation["method"]["label"] if is_primary else layer.upper()
     facts = inputs.interpretation
     return rainfall_map(
-        field, facts["valid_start"], facts["valid_end"], layer, map_note(inputs, method), country
+        field,
+        facts["valid_start"],
+        facts["valid_end"],
+        layer,
+        map_note(inputs, method),
+        country,
+        primary=is_primary,
     )
 
 
 def missing_image(inputs: BulletinInputs, key: str, country: str | None = None) -> bytes:
-    """The reference map frame with the product's title and why it is not available."""
+    """The reference map frame with the product's title and why it is still in progress."""
     return weekly_maps.render(
         map_title(inputs, key),
         country=country,
-        message=f"Not available for this forecast\nRequires {MISSING[key]}",
+        message=f"In progress\nRequires {MISSING[key]}",
         note=map_note(inputs),
     )
 

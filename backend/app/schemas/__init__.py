@@ -1,49 +1,14 @@
 from datetime import date
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
-
-
-class Selection(BaseModel):
-    cycle: str = "2026-09-28"
-    observation: Literal["CHIRPS", "TAMSAT", "RFE2"] = "CHIRPS"
-    model: str = "mock-v1"
-    provider: str = "ECMWF S2S"
-    country: str = "GHA"
-    layer: Literal["corrected", "raw", "observed", "bias", "rmse", "improvement", "anomaly"] = (
-        "corrected"
-    )
-
-
-class QCResult(BaseModel):
-    status: str
-    dataset: str
-    checks: dict[str, Any]
-    warnings: list[str]
-    errors: list[str]
-
-
-class ForecastResponse(BaseModel):
-    selection: Selection
-    label: str
-    period: str
-    metrics: dict[str, float | int | None]
-    mean_rainfall_mm: float | None
-    anomaly_percent: float | None
-    countries: list[dict[str, Any]]
-    model_comparison: list[dict[str, Any]]
-    observation_comparison: list[dict[str, Any]]
-    timeseries: list[dict[str, Any]]
-    map: dict[str, Any]
-    provenance: dict[str, Any]
-    qc: list[QCResult]
 
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     session_id: str | None = None
-    selection: Selection = Field(default_factory=Selection)
-    context_mode: Literal["operational", "demonstration"] = "demonstration"
+    # The Copilot answers from operational forecasts only.
+    context_mode: Literal["operational"] = "operational"
     forecast_id: str | None = Field(default=None, pattern=r"^w2-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}$")
     country: str | None = Field(default=None, max_length=80)
     variant: Literal["hybrid", "mbc", "raw"] | None = None
@@ -70,18 +35,6 @@ class ReviewRequest(BaseModel):
         if len(value) < 2:
             raise ValueError("A named reviewer is required")
         return value
-
-
-class RegisterRequest(BaseModel):
-    model_id: str = Field(pattern=r"^[a-zA-Z0-9_-]+$", max_length=80)
-    model_name: str
-    version: str
-    model_type: str
-    artifact_path: str
-    feature_schema: str
-    training_period: str = "not supplied"
-    validation_period: str = "not supplied"
-    notes: str = ""
 
 
 class DescriptorRegisterRequest(BaseModel):
@@ -121,26 +74,29 @@ class IndependentTestRequest(BaseModel):
         return value
 
 
-class IngestRequest(BaseModel):
-    source: Literal["CHIRPS", "TAMSAT", "RFE2"]
-    path: str
-    actor: str = Field(min_length=2, max_length=80)
-
-
 FORECAST_ID = r"^w2-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}$"
 
 
 class ForecastRunRequest(BaseModel):
-    """Run the operational Week-2 forecast for one initialization.
+    """Run the operational Week-2 forecast for one initialization (00 UTC).
 
-    ``ecmwf_files`` reads the documented input files for the date from FORECAST_INPUT_ROOT;
-    ``synthetic_fixture`` generates labelled synthetic input (demonstration and tests,
-    enabled only where ALLOW_SYNTHETIC_FORECASTS=true).
+    ``ecmwf_opendata`` downloads the ECMWF ensemble rainfall from ECMWF Open Data when it is
+    not already in FORECAST_INPUT_ROOT (the newest published run if no date is given);
+    ``ecmwf_files`` uses files placed there by the documented naming convention.
     """
 
-    initialization: date
-    source: Literal["ecmwf_files", "synthetic_fixture"] = "ecmwf_files"
+    initialization: date | None = None
+    source: Literal["ecmwf_opendata", "ecmwf_files"] = "ecmwf_opendata"
     model_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]+$", max_length=80)
+    actor: str = Field(min_length=2, max_length=80)
+
+
+class OperationRequest(BaseModel):
+    """A background operational task (see backend/app/services/operations.py)."""
+
+    action: Literal["fetch_ecmwf", "run_forecast", "verify_due", "verify_forecast", "cycle"]
+    initialization: date | None = None
+    forecast_id: str | None = Field(default=None, pattern=FORECAST_ID)
     actor: str = Field(min_length=2, max_length=80)
 
 
@@ -156,3 +112,10 @@ class VerificationRequest(BaseModel):
 
     observation: str = Field(pattern=r"^[A-Za-z0-9_./-]+\.nc$", max_length=200)
     actor: str = Field(min_length=2, max_length=80)
+
+
+class BulletinRequest(BaseModel):
+    """Generate the weekly bulletin draft of a forecast (the latest by default)."""
+
+    forecast_id: str | None = Field(default=None, pattern=FORECAST_ID)
+    actor: str = Field(default="forecaster", min_length=2, max_length=80)

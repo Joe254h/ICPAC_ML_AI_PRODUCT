@@ -13,7 +13,6 @@ COPY pyproject.toml ./
 COPY backend backend
 COPY climate_engine climate_engine
 COPY chatbot chatbot
-COPY hpc hpc
 COPY scripts scripts
 COPY config config
 COPY fixtures fixtures

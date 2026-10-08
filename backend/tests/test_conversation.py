@@ -67,12 +67,12 @@ def test_missing_verification_never_returns_mock_scores_and_definitions_follow_t
     run(env)
     result = ask(env, "What is the RMSE for Kenya?")
     # A direct request for the score must query the package, not just define RMSE.
-    assert "unavailable" in result["text"]
+    assert "has not been verified yet" in result["text"]
     assert "5.35" not in result["text"]
     followup = ask(env, "What does that mean?", result["session_id"])
     assert "errors" in followup["text"]
     comparison = ask(env, "Compare CHIRPS and TAMSAT", result["session_id"])
-    assert "comparison of observation sources is unavailable" in comparison["text"]
+    assert "comparison between observation sources is not available yet" in comparison["text"]
 
 
 def test_chat_bulletin_and_map_use_the_same_package_as_forecast(env, fast_maps):
@@ -168,7 +168,7 @@ def test_llm_gets_conversation_history_with_fresh_approved_facts(env, fast_maps,
     # The model chooses among the answers; the labels are shown with every answer.
     assert calls[1]["answer_ids"] == ["Somalia_raw", "Somalia_mbc", "Somalia_hybrid"]
     assert "Somalia" in calls[1]["answer_sentences"]["Somalia_hybrid"]
-    assert set(calls[1]["always_shown"]) == {"scope", "input", "model_status", "comparison_scope"}
+    assert set(calls[1]["always_shown"]) == {"scope", "model_status", "comparison_scope"}
     # A question with one possible answer needs no model call.
     third = ask(env, "Explain the forecast for Kenya", first["session_id"])
     assert third["provider"] == "deterministic" and len(calls) == 2
@@ -186,7 +186,7 @@ def test_greetings_and_explanations_work_without_forecast_and_history_is_retaine
             context_mode="operational",
         )
     )
-    assert "bias-correction" in mbc["text"]
+    assert "bias correction" in mbc["text"]
     record = platform.repo.get("chat_session", hello["session_id"])
     record["messages"] = record["messages"] * 26
     platform.repo.save("chat_session", record, record["id"])

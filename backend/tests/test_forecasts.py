@@ -1,5 +1,6 @@
 """Operational forecast runs, product packages and the forecast API on tiny artifacts."""
 
+import copy
 import dataclasses
 import json
 import os
@@ -69,7 +70,6 @@ def env(tmp_path, monkeypatch):
         "DATA_ROOT": tmp_path / "observations",
     }.items():
         monkeypatch.setenv(name, str(value))
-    monkeypatch.setenv("ALLOW_SYNTHETIC_FORECASTS", "true")
     paths = write_artifacts(root)
     cfg = tiny_cfg()
     grid = load_grid(paths["domain"], cfg["grid"])
@@ -93,8 +93,23 @@ def fast_maps(monkeypatch):
     monkeypatch.setattr(icpac_maps, "render_png", lambda *args, **kwargs: PNG)
 
 
+def inputs(env, initialization: str = "2026-10-05", pressure: bool = True) -> None:
+    """ECMWF input files for one initialization, as the HPC or a download leaves them."""
+    write_fixture(
+        env.tmp / "inputs",
+        date.fromisoformat(initialization),
+        LAT,
+        LON,
+        STEPS if pressure else None,
+        members=3,
+        labelled=False,
+    )
+
+
 def run(env, initialization: str = "2026-10-05", **body: Any) -> dict:
-    payload = {"initialization": initialization, "source": "synthetic_fixture", "actor": "Joe"}
+    if not (env.tmp / "inputs" / f"ecmwf_s2s_tp_{initialization}.nc").exists():
+        inputs(env, initialization)
+    payload = {"initialization": initialization, "source": "ecmwf_files", "actor": "Joe"}
     response = env.client.post("/forecasts/run", json={**payload, **body})
     assert response.status_code == 201, response.text
     return response.json()
@@ -103,7 +118,10 @@ def run(env, initialization: str = "2026-10-05", **body: Any) -> dict:
 def test_run_publishes_a_complete_package(env):
     record = run(env)
     assert record["model_id"] == "test_mbc_atmos37_catboost_v1"
-    assert record["model_status"] == "candidate" and record["synthetic"] is True
+    assert record["model_status"] == "candidate" and record["synthetic"] is False
+    assert record["primary_layer"] == "hybrid" and record["products"]["hybrid"]["status"] == (
+        "available"
+    )
     assert record["method"] == "MBC + ATMOS37 CATBOOST" and record["baseline"] == "MBC"
     assert record["valid_start"] == "2026-10-12T00:00:00+00:00"
     assert record["valid_end"] == "2026-10-19T00:00:00+00:00"
@@ -122,10 +140,9 @@ def test_run_publishes_a_complete_package(env):
 
     provenance = json.loads((directory / "provenance.json").read_text())
     assert PROVENANCE_FIELDS <= set(provenance)
-    assert provenance["input_label"] == "synthetic test fixture"
-    assert provenance["configuration_overrides"]["ecmwf.pressure.week2_steps_hours"]["value"] == (
-        STEPS
-    )
+    assert provenance["input_label"] == "ECMWF S2S files"
+    assert provenance["configuration_overrides"] == {}
+    assert provenance["pressure_steps_hours"] == STEPS
     countries = json.loads((directory / "countries.json").read_text())
     assert [c["country"] for c in countries] == ["Kenya", "Somalia"]
     for row in countries:
@@ -136,12 +153,13 @@ def test_run_publishes_a_complete_package(env):
     assert (directory / "countries.csv").read_text().startswith("country,cell_count,raw_mean_mm")
     manifest = packages.read_manifest(directory)
     assert manifest["labels"][0] == "Model status: candidate (not production)"
-    assert "SYNTHETIC TEST INPUT: not a forecast of real weather" in manifest["labels"]
+    assert not any("SYNTHETIC" in label for label in manifest["labels"])
+    assert manifest["layers"] == ["hybrid", "mbc", "raw", "residual"]
     assert set(manifest["missing_dependencies"]) == {"anomaly", "category"}
     inputs = json.loads((directory / "interpretation_inputs.json").read_text())
     assert inputs["model"]["role"] == "candidate (not production)"
-    assert inputs["input"]["synthetic"] and inputs["anomaly"]["status"] == "unavailable"
-    assert any("synthetic" in caveat for caveat in inputs["caveats"])
+    assert not inputs["input"]["synthetic"] and inputs["anomaly"]["status"] == "unavailable"
+    assert inputs["primary_layer"] == "hybrid" and inputs["countries"][0]["layer"] == "hybrid"
     for layer in packages.MAP_LAYERS:
         assert (directory / "maps" / f"{layer}.png").read_bytes()[:4] == PNG
 
@@ -215,33 +233,87 @@ def test_unsafe_or_impossible_runs_are_refused(env, fast_maps, monkeypatch):
     body = {"initialization": "2026-10-05", "source": "ecmwf_files", "actor": "Joe"}
     missing = client.post("/forecasts/run", json=body)
     assert missing.status_code == 503 and "ecmwf_s2s_tp_2026-10-05.nc" in missing.json()["detail"]
-    demo = client.post("/forecasts/run", json={**body, "model_id": "mock-v1"})
-    assert demo.status_code == 422 and "demonstration model" in demo.json()["detail"]
+    unknown = client.post("/forecasts/run", json={**body, "model_id": "mock-v1"})
+    assert unknown.status_code == 404
     assert forecasts.RUN_LOCK.acquire(blocking=False)
     try:
-        busy = client.post("/forecasts/run", json={**body, "source": "synthetic_fixture"})
+        busy = client.post("/forecasts/run", json=body)
         assert busy.status_code == 409
     finally:
         forecasts.RUN_LOCK.release()
-    monkeypatch.setenv("ALLOW_SYNTHETIC_FORECASTS", "false")
-    disabled = client.post("/forecasts/run", json={**body, "source": "synthetic_fixture"})
-    assert disabled.status_code == 422 and "ALLOW_SYNTHETIC_FORECASTS" in disabled.json()["detail"]
+    # Synthetic demonstration input is no longer accepted.
+    retired = client.post("/forecasts/run", json={**body, "source": "synthetic_fixture"})
+    assert retired.status_code == 422
+    assert (
+        client.post("/forecasts/run", json={"source": "ecmwf_files", "actor": "Joe"})
+        .json()["detail"]
+        .startswith("Name the initialization date")
+    )
     assert client.get("/forecasts").json() == []
     assert client.get("/forecasts/latest").status_code == 404
 
 
 def test_ecmwf_files_are_found_by_naming_convention(env, fast_maps):
-    write_fixture(env.tmp / "inputs", date(2026, 10, 5), LAT, LON, STEPS, members=3)
-    record = run(env, source="ecmwf_files")
+    record = run(env)
     provenance = env.client.get(f"/forecasts/{record['forecast_id']}").json()["provenance"]
-    assert provenance["configuration_overrides"] == {}
     assert [i["path"] for i in provenance["input_source"]["inputs"]] == [
         "ecmwf_s2s_tp_2026-10-05.nc",
         "ecmwf_s2s_pl_2026-10-05.nc",
     ]
     assert provenance["ensemble_members"] == 3
-    # The fixture's own label follows the data, whichever route delivered it.
+
+
+def test_synthetic_input_is_labelled_and_never_listed(env, fast_maps):
+    write_fixture(env.tmp / "inputs", date(2026, 10, 5), LAT, LON, STEPS, members=3)
+    response = env.client.post(
+        "/forecasts/run",
+        json={"initialization": "2026-10-05", "source": "ecmwf_files", "actor": "Joe"},
+    )
+    record = response.json()
+    # The fixture's own label follows the data, whichever route delivered it ...
     assert record["synthetic"] is True
+    manifest = packages.read_manifest(forecasts.package_root() / record["forecast_id"])
+    assert "SYNTHETIC TEST INPUT: not a forecast of real weather" in manifest["labels"]
+    # ... and such runs never appear among the operational forecasts.
+    assert env.client.get("/forecasts").json() == []
+    assert env.client.get("/forecasts/latest").status_code == 404
+
+
+def test_without_the_atmos37_inputs_a_run_holds_raw_and_mbc(env, monkeypatch):
+    """No pressure-level steps: the hybrid is in progress, never approximated."""
+    cfg = copy.deepcopy(env.cfg)
+    cfg["ecmwf"]["pressure"]["week2_steps_hours"] = None
+    monkeypatch.setattr(forecasts, "settings", lambda: cfg)
+    inputs(env, pressure=False)
+    record = run(env)
+    assert record["layers"] == ["raw", "mbc"] and record["primary_layer"] == "mbc"
+    assert record["method"] == "MBC"
+    assert record["products"]["hybrid"]["status"] == "in_progress"
+    assert "week2_steps_hours" in record["products"]["hybrid"]["reason"]
+    fid = record["forecast_id"]
+    directory = forecasts.package_root() / fid
+    assert packages.check_package(directory) == []
+    assert not (directory / "maps" / "hybrid.png").exists()
+    with xr.open_dataset(directory / "forecast.nc") as stored:
+        assert set(stored.data_vars) == {"raw", "mbc", "domain_mask"}
+    client = env.client
+    detail = client.get(f"/forecasts/{fid}").json()
+    assert set(detail["maps"]) == {"mbc", "raw"} and detail["primary_layer"] == "mbc"
+    missing = client.get(f"/forecasts/{fid}/map?layer=hybrid")
+    assert missing.status_code == 404 and "in progress" in missing.json()["detail"]
+    assert client.get(f"/forecasts/{fid}/package/maps/hybrid.png").status_code == 404
+    assert client.get(f"/forecasts/{fid}/map?layer=mbc").status_code == 200
+    rows = client.get(f"/forecasts/{fid}/countries").json()
+    assert set(rows[0]) >= {"raw", "mbc"} and "hybrid" not in rows[0]
+    assert "hybrid_mean_mm" not in client.get(f"/forecasts/{fid}/countries?format=csv").text
+    bulletin = client.get(f"/forecasts/{fid}/bulletin").json()
+    assert next(s for s in bulletin["sections"] if s["key"] == "rainfall")["map_layer"] == "mbc"
+    draft = client.post("/bulletins/generate", json={"forecast_id": fid, "actor": "Joe N"})
+    assert draft.status_code == 200, draft.text
+    assert "ECMWF ensemble + MBC" in draft.json()["facts"]["label"]
+    assert "AI/ML hybrid in progress" in draft.json()["facts"]["label"]
+    health = client.get("/health").json()["components"]
+    assert health["MBC + AI/ML forecast"].startswith("In progress")
 
 
 def write_observation(env, record: dict, name: str, scale: float = 1.0, shift_days: int = 0):

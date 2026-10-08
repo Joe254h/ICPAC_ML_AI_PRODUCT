@@ -32,15 +32,17 @@ T = TypeVar("T", bound="ResidualMBCModel")
 class InferenceResult:
     raw: np.ndarray  # X_mean: raw ECMWF ensemble-mean Week-2 rainfall (mm)
     mbc: np.ndarray  # MBC_forecast (mm)
-    residual: np.ndarray  # predicted CHIRPS - MBC (mm)
-    hybrid: np.ndarray  # max(MBC + residual, 0) (mm)
+    residual: np.ndarray | None  # predicted CHIRPS - MBC (mm); None when not run
+    hybrid: np.ndarray | None  # max(MBC + residual, 0) (mm); None when not run
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def layers(self) -> list[str]:
+        return [n for n in ("raw", "mbc", "residual", "hybrid") if getattr(self, n) is not None]
 
     def to_grid(self, grid: DomainGrid) -> dict[str, np.ndarray]:
         """Fields on the full model grid (NaN outside the domain)."""
-        return {
-            name: grid.to_grid(getattr(self, name)) for name in ("raw", "mbc", "residual", "hybrid")
-        }
+        return {name: grid.to_grid(getattr(self, name)) for name in self.layers}
 
 
 def load_schema(path: Path) -> list[str]:

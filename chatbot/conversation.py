@@ -6,7 +6,10 @@ from datetime import datetime, timedelta
 from backend.app.schemas import ChatRequest
 from backend.app.services.forecasts import ForecastService
 from chatbot.retrieval import approved_glossary
-from climate_engine.core import config
+from climate_engine.inputs import sources
+from climate_engine.operational.grid import ICPAC_COUNTRIES
+
+LABELS = {"hybrid": "MBC + AI/ML", "mbc": "MBC", "raw": "Raw ECMWF"}
 
 DEFINITIONS = {
     "rainfall": "The country mean averages rainfall across the country's covered grid cells. Local amounts can be higher or lower, so use the map to understand where rainfall is concentrated.",
@@ -14,7 +17,7 @@ DEFINITIONS = {
     "mae": "MAE is the average absolute difference between the forecast and observations. Lower values indicate a closer match over the same verified case.",
     "bias": "Bias is forecast rainfall minus observed rainfall. Positive bias means overprediction; negative bias means underprediction.",
     "correlation": "Spatial correlation describes whether rainfall patterns vary together across the verified grid. It does not establish temporal forecasting skill or guarantee accurate rainfall amounts.",
-    "mbc": "MBC adjusts the forecast using a fitted bias-correction mapping. The hybrid model then predicts a residual adjustment to the MBC rainfall field.",
+    "mbc": "MBC (multiplicative bias correction) multiplies the ECMWF ensemble-mean rainfall by the ratio of observed (CHIRPS) to forecast rainfall for the same month and grid cell, fitted on 2005-2021. The MBC + AI/ML hybrid then adds a learned residual correction to the MBC field when its inputs are available.",
     "anomaly": "A rainfall anomaly compares a forecast with the climatology for the same location and forecast window. A rainfall total alone cannot establish whether rainfall is above or below normal.",
     "candidate": "A candidate model is available for evaluation and has not been approved for production. Its independent test and human review must be completed before promotion.",
     "heat stress": "Heat stress depends on temperature, humidity and the approved index used. A rainfall forecast cannot supply a heat-stress category.",
@@ -103,7 +106,7 @@ def glossary_term(question: str) -> str | None:
 def countries_in(message: str) -> list[str]:
     remaining = message.lower()
     found = []
-    for country in sorted(config()["countries"], key=len, reverse=True):
+    for country in sorted(ICPAC_COUNTRIES, key=len, reverse=True):
         pattern = r"\b" + re.escape(country.lower()) + r"\b"
         if re.search(pattern, remaining):
             found.append(country)
@@ -211,9 +214,9 @@ class OperationalConversation:
             term in question for term in ("whole region", "regional", "greater horn")
         ):
             country = "GHA"
-        if country not in {"GHA", *config()["countries"]}:
+        if country not in {"GHA", *ICPAC_COUNTRIES}:
             raise ValueError("Unknown forecast country")
-        variant = body.variant or previous.get("variant", "hybrid")
+        variant = body.variant or previous.get("variant")
         if "raw" in question:
             variant = "raw"
         elif "hybrid" in question or "ai/ml" in question:
@@ -250,11 +253,11 @@ class OperationalConversation:
         elif intent == "help":
             sentences["help"] = GUIDE
         elif intent == "datasets":
-            datasets = self.platform.repo.list("dataset")
+            datasets = sources()
+            active = [d["name"] for d in datasets if d["status"] == "active"]
+            planned = [d["name"] for d in datasets if d["status"] != "active"]
             sentences["datasets"] = (
-                "Registered observation sources: "
-                + "; ".join(f"{d['source']} ({d.get('mode', 'synthetic')})" for d in datasets)
-                + ". Registration does not imply that a forecast has been verified against that source."
+                f"In use: {', '.join(active)}. Coming later: {', '.join(planned)}."
             )
             trace.append(
                 {
@@ -277,6 +280,17 @@ class OperationalConversation:
                 )
                 facts = detail["interpretation"]
                 period = self._period(detail)
+                layers = detail.get("layers", ["hybrid", "mbc", "raw", "residual"])
+                primary = detail.get("primary_layer", "hybrid")
+                if variant is None:
+                    variant = primary
+                if variant not in layers:
+                    sentences["hybrid_status"] = (
+                        "The MBC + AI/ML forecast is still in progress for this forecast, so "
+                        f"I'm using {LABELS[primary]} instead."
+                    )
+                    variant = primary
+                context["variant"] = variant
                 sentences["scope"] = f"We're looking at {country} for {period}."
                 if detail["synthetic"]:
                     sentences["input"] = (
@@ -297,7 +311,7 @@ class OperationalConversation:
                     if country == "GHA"
                     else (row or {}).get(variant, {}).get("mean_mm")
                 )
-                label = {"hybrid": "MBC + AI/ML", "mbc": "MBC", "raw": "Raw ECMWF"}[variant]
+                label = LABELS[variant]
                 tool = "get_country_forecast"
                 evidence = {
                     "forecast_id": fid,
@@ -323,7 +337,7 @@ class OperationalConversation:
                     compare_countries = named if len(named) > 1 else [country]
                     for place in compare_countries:
                         item = next((r for r in rows if r["country"] == place), None)
-                        for method in ("raw", "mbc", "hybrid"):
+                        for method in [m for m in ("raw", "mbc", "hybrid") if m in layers]:
                             value = (
                                 facts["domain_mean_mm"][method]
                                 if place == "GHA"
@@ -341,7 +355,7 @@ class OperationalConversation:
                 elif intent == "compare_observations":
                     tool = "compare_observations"
                     sentences["comparison"] = (
-                        "A comparison of observation sources is unavailable for this forecast package. Each source must first be paired with this package's valid window and grid; demonstration-grid scores cannot be used instead."
+                        "Forecasts are verified against CHIRPS. TAMSAT, RFE 2.0, ARC 2.0 and IMERG are planned sources, so a comparison between observation sources is not available yet."
                     )
                     evidence["verification"] = detail["verification"]
                 elif intent == "model":
@@ -450,7 +464,7 @@ class OperationalConversation:
         verification = detail["verification"]
         if verification["status"] != "available":
             sentences["verification"] = (
-                "This forecast has not been verified against observations for its valid window. RMSE, MAE, bias and correlation are unavailable; demonstration-grid scores cannot substitute for them."
+                "This forecast has not been verified yet: CHIRPS observations are fetched once its Week-2 window has ended. RMSE, MAE, bias and correlation will be available then."
             )
             return
         item = (

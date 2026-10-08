@@ -119,7 +119,7 @@ def test_products_this_forecast_lacks_keep_their_place_and_infer_nothing(inputs)
     for key in ("anomaly", "exceptional", "temperature", "temperature_anomaly", "heat_stress"):
         section = sections[key]
         assert section["missing_dependency"] and not section.get("map_layer")
-        assert all("not available for this forecast" in text for text in section["text"])
+        assert all("in progress" in text for text in section["text"])
     assert sections["anomaly"]["leads"] == ["More than usual rainfall", "Less than usual rainfall"]
     assert sections["temperature"]["leads"][0] == "Elevated temperatures"
     assert sections["decision_support"]["leads"] == ["Decision-Support Note:"]
@@ -290,9 +290,7 @@ def test_weekly_maps_reproduce_the_reference_geometry():
 
 
 def test_country_and_placeholder_maps_keep_the_layout():
-    message = weekly_maps.render(
-        "Rainfall Anomalies for 15-22 Oct 2026", message="Not available for this forecast"
-    )
+    message = weekly_maps.render("Rainfall Anomalies for 15-22 Oct 2026", message="In progress")
     _, rows, cols = dark_lines(message)
     assert rows and cols  # the frame is drawn without a field
     somalia = weekly_maps.render("Total Rainfall (mm) for 15-22 Oct 2026", country="Somalia")

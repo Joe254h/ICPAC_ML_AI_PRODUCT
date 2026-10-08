@@ -8,7 +8,6 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-DEMO_LABEL = "DEMO DATA · SYNTHETIC · NOT FOR OPERATIONAL USE"
 
 
 def config(name: str = "science") -> dict[str, Any]:

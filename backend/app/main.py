@@ -1,20 +1,19 @@
-import csv
-import io
 import json
 import logging
 import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 
 from backend.app.api.forecasts import install as install_forecasts
 from backend.app.db import Repository
-from backend.app.schemas import ForecastResponse, Selection
+from backend.app.services import operational
 from backend.app.services.forecasts import RunInProgress, Unavailable, capabilities
 from backend.app.services.health import system_health
+from backend.app.services.operations import OperationService
 from backend.app.services.platform import Platform
-from climate_engine.core import DEMO_LABEL, config
+from climate_engine.inputs import sources
 
 
 class JSONFormatter(logging.Formatter):
@@ -47,18 +46,11 @@ def create_app(database_url: str | None = None) -> FastAPI:
             Repository(database_url),
             register_descriptors=os.getenv("AUTO_REGISTER_MODELS", "true") == "true",
         )
-        for job in app.state.platform.repo.list("job"):
-            if job["executor"] == "local" and job["status"] in {"queued", "running"}:
-                job.update(
-                    status="failed",
-                    exit_code=1,
-                    log="Local worker interrupted by service restart; resubmit explicitly.",
-                )
-                app.state.platform.repo.save("job", job, job["id"])
+        OperationService(app.state.platform).recover()
         yield
         app.state.platform.repo.engine.dispose()
 
-    app = FastAPI(title="ICPAC Climate Intelligence Prototype", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="ICPAC Week-2 Forecast Service", version="0.2.0", lifespan=lifespan)
 
     @app.exception_handler(ValueError)
     async def value_error(request: Request, exc: ValueError):
@@ -91,41 +83,21 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
     @app.get("/health")
     def health(p: Platform = Depends(platform)) -> dict:
-        return {**system_health(p), "label": DEMO_LABEL}
+        return system_health(p)
 
     @app.get("/config")
     def settings(p: Platform = Depends(platform)) -> dict:
         return {
-            "science": config(),
-            "forecasts": config("forecasts"),
-            "observations": list(config("observations")["sources"]),
-            "models": p.repo.list("model"),
             "operational": capabilities(),
-            "label": DEMO_LABEL,
+            "models": [m for m in p.repo.list("model") if operational.is_operational(m)],
+            "data_sources": sources(),
         }
-
-    @app.get("/analysis", response_model=ForecastResponse)
-    def analysis(selection: Selection = Depends(), p: Platform = Depends(platform)):
-        """Demonstration case on the synthetic grid (cycles listed by /config)."""
-        return p.calculate(selection)
 
     install_forecasts(app, platform)
 
-    @app.get("/observations")
-    def observations(p: Platform = Depends(platform)) -> list[dict]:
-        return p.repo.list("dataset")
-
-    @app.get("/observations/{source}/availability")
-    def availability(source: str, p: Platform = Depends(platform)) -> dict:
-        return {"source": source, "dates": p.observation(source).list_available_dates()}
-
-    @app.get("/observations/{source}")
-    def observation(source: str, p: Platform = Depends(platform)) -> dict:
-        return p.repo.get("dataset", source)
-
     @app.get("/models")
     def models(p: Platform = Depends(platform)) -> list[dict]:
-        return p.repo.list("model")
+        return [m for m in p.repo.list("model") if operational.is_operational(m)]
 
     @app.get("/models/current")
     def current_model(p: Platform = Depends(platform)) -> dict:
@@ -136,71 +108,10 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
     @app.get("/models/{model_id}")
     def model(model_id: str, p: Platform = Depends(platform)) -> dict:
-        return p.repo.get("model", model_id)
-
-    @app.get("/verification")
-    def verification(p: Platform = Depends(platform)) -> list[dict]:
-        return p.repo.list("verification")
-
-    @app.post("/verification/run")
-    def run_verification(selection: Selection, p: Platform = Depends(platform)) -> dict:
-        return p.run_verification(selection)
-
-    @app.get("/export/{format}")
-    def export(format: str, selection: Selection = Depends(), p: Platform = Depends(platform)):
-        result = p.calculate(selection)
-        if format == "json":
-            return Response(
-                json.dumps(result),
-                media_type="application/json",
-                headers={"Content-Disposition": 'attachment; filename="icpac-demo.json"'},
-            )
-        if format == "png":
-            return Response(
-                p.png(selection),
-                media_type="image/png",
-                headers={"Content-Disposition": 'attachment; filename="icpac-demo.png"'},
-            )
-        if format == "csv":
-            stream = io.StringIO()
-            columns = [
-                "country",
-                "mean_rainfall_mm",
-                "rmse",
-                "mae",
-                "bias",
-                "correlation",
-                "cell_count",
-                "mask_status",
-            ]
-            writer = csv.DictWriter(stream, fieldnames=columns, extrasaction="ignore")
-            writer.writeheader()
-            writer.writerows(result["countries"])
-            return Response(
-                stream.getvalue(),
-                media_type="text/csv",
-                headers={
-                    "Content-Disposition": 'attachment; filename="icpac-synthetic-countries.csv"'
-                },
-            )
-        raise ValueError("Supported exports: png, csv, json")
-
-    @app.get("/products")
-    def products(p: Platform = Depends(platform)) -> list[dict]:
-        return [
-            {"id": fmt, "name": name, "format": fmt, "label": DEMO_LABEL}
-            for fmt, name in [
-                ("png", "Week-2 rainfall map"),
-                ("csv", "Country verification table"),
-                ("json", "Forecast & provenance package"),
-            ]
-        ]
-
-    @app.get("/products/{id}")
-    def product(id: str) -> dict:
-        if id not in {"png", "csv", "json"}:
-            raise KeyError(id)
-        return {"id": id, "download": f"/export/{id}", "label": DEMO_LABEL}
+        record = p.repo.get("model", model_id)
+        if not operational.is_operational(record):
+            raise KeyError(model_id)
+        return record
 
     # Extensions are installed only after Phase 1 passes its local checks.
     try:

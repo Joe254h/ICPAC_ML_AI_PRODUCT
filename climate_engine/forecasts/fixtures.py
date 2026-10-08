@@ -124,10 +124,13 @@ def write_fixture(
     steps_hours: Sequence[float] | None,
     members: int = 3,
     rainfall_steps_hours: Sequence[float] | None = None,
+    labelled: bool = True,
 ) -> tuple[Path, Path | None]:
     """Write rainfall (on the given grid) and, if steps are given, coarse pressure files.
 
     ``rainfall_steps_hours`` keeps only those cumulative steps (smaller files).
+    ``labelled=False`` leaves out the synthetic label, for tests of the operational path that
+    must treat the files as real input (they are never served outside the tests).
     """
     directory.mkdir(parents=True, exist_ok=True)
     tag = initialization.isoformat()
@@ -135,6 +138,8 @@ def write_fixture(
     rainfall = rainfall_fixture(initialization, latitude, longitude, members)
     if rainfall_steps_hours is not None:
         rainfall = rainfall.sel(step=pd.to_timedelta(list(rainfall_steps_hours), unit="h"))
+    if not labelled:
+        rainfall.attrs.pop("fixture")
     rainfall.to_netcdf(rain_path)
     if steps_hours is None:
         return rain_path, None
@@ -143,5 +148,8 @@ def write_fixture(
         (float(longitude.min()), float(longitude.max())),
     )
     pressure_path = directory / f"ecmwf_s2s_pl_{tag}.nc"
-    pressure_fixture(initialization, plat, plon, steps_hours, members).to_netcdf(pressure_path)
+    pressure = pressure_fixture(initialization, plat, plon, steps_hours, members)
+    if not labelled:
+        pressure.attrs.pop("fixture")
+    pressure.to_netcdf(pressure_path)
     return rain_path, pressure_path

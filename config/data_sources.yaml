@@ -1,0 +1,76 @@
+# Input data sources of the operational Week-2 forecast.
+#
+# status: active   -> downloaded and processed by the platform
+#         planned  -> listed for forecasters, no reader yet ("coming later")
+version: data-sources-v1
+
+ecmwf_opendata:
+  # ECMWF Open Data (CC BY 4.0): the real-time ensemble (ENS), 0.25 degree, 15 days.
+  # Mirrors are tried in order; data.ecmwf.int keeps the last few days, the AWS mirror
+  # keeps an archive (from 2023), so older initializations come from there.
+  mirrors: [ecmwf, aws]
+  model: ifs
+  resolution: 0p25
+  stream: enfo
+  # Perturbed members only, as in training (the control member is excluded).
+  type: pf
+  parameter: tp
+  # The 00 UTC run of each initialization date.
+  run_hour: 0
+  # Crop of the global field kept on disk: wide enough for the 1.5 degree averaging
+  # windows around the points that surround the model domain.
+  area: {south: -16.5, north: 27.0, west: 16.5, east: 55.5}
+  licence: "ECMWF Open Data, CC BY 4.0 (https://www.ecmwf.int/en/forecasts/datasets/open-data)"
+
+chirps:
+  # CHIRPS v2.0 daily, 0.05 degree, Africa subset (the model grid is CHIRPS-aligned).
+  # The final product is published about three weeks after each month; the preliminary
+  # product a few days after each pentad. Final is used whenever it exists.
+  final_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/africa_daily/tifs/p05/{year}/chirps-v2.0.{year}.{month:02d}.{day:02d}.tif.gz"
+  prelim_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/prelim/global_daily/tifs/p05/{year}/chirps-v2.0.{year}.{month:02d}.{day:02d}.tif"
+  nodata: -9999.0
+  licence: "CHIRPS, Climate Hazards Center, UC Santa Barbara (public domain, cite Funk et al. 2015)"
+
+sources:
+  - id: ecmwf
+    name: ECMWF ensemble (ENS)
+    role: forecast input
+    status: active
+    description: "Week-2 (days 8-14) ensemble rainfall: 50 perturbed members, 00 UTC run, 0.25 degree"
+    provider: ECMWF Open Data
+    url: https://www.ecmwf.int/en/forecasts/datasets/open-data
+  - id: chirps
+    name: CHIRPS v2.0
+    role: verification (observed rainfall)
+    status: active
+    description: "Daily satellite-gauge rainfall, 0.05 degree; final product, else preliminary"
+    provider: Climate Hazards Center, UC Santa Barbara
+    url: https://www.chc.ucsb.edu/data/chirps
+  - id: tamsat
+    name: TAMSAT
+    role: verification (observed rainfall)
+    status: planned
+    description: "Daily rainfall estimates for Africa, 0.0375 degree"
+    provider: University of Reading
+    url: https://www.tamsat.org.uk/
+  - id: rfe2
+    name: RFE 2.0
+    role: verification (observed rainfall)
+    status: planned
+    description: "NOAA CPC African Rainfall Estimate, daily, 0.1 degree"
+    provider: NOAA Climate Prediction Center
+    url: https://www.cpc.ncep.noaa.gov/products/fews/rfe.shtml
+  - id: arc2
+    name: ARC 2.0
+    role: verification (observed rainfall)
+    status: planned
+    description: "NOAA CPC African Rainfall Climatology, daily, 0.1 degree"
+    provider: NOAA Climate Prediction Center
+    url: https://www.cpc.ncep.noaa.gov/products/fews/AFR_CLIM/AMS_ARC2a.pdf
+  - id: imerg
+    name: GPM IMERG
+    role: verification (observed rainfall)
+    status: planned
+    description: "NASA Integrated Multi-satellitE Retrievals for GPM, daily, 0.1 degree"
+    provider: NASA GES DISC
+    url: https://gpm.nasa.gov/data/imerg

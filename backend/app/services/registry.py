@@ -1,11 +1,10 @@
 """Versioned model registration and explicitly reviewed model transitions.
 
-Two kinds of model share the registry:
-
-* operational residual models (task ``week2_operational``), registered from reviewed
-  descriptors after every artifact check passes; production needs a passed independent
-  test, re-verified artifacts, a fresh inference check and a named reviewer;
-* demonstration models on the synthetic grid (task ``week2_precipitation``).
+Operational residual models (task ``week2_operational``) are registered from reviewed
+descriptors after every artifact check passes; production needs a passed independent test,
+re-verified artifacts, a fresh inference check and a named reviewer. Records of the retired
+demonstration (task ``week2_precipitation``) may remain in older databases; they are never
+listed, used or changed.
 
 Production is per task: promoting a model retires only that task's production model.
 """
@@ -22,23 +21,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.db import Record, now
-from backend.app.schemas import (
-    IndependentTestRequest,
-    RegisterRequest,
-    ReviewRequest,
-    Selection,
-)
+from backend.app.schemas import IndependentTestRequest, ReviewRequest
 from backend.app.services import operational
-from climate_engine.core import config
 from climate_engine.models.descriptor import VALIDATION_SCORES, validation_scores
-from climate_engine.provenance import code_version, file_checksum, permitted_file
+from climate_engine.provenance import code_version
 
-FORMATS = {
-    "catboost": {".cbm"},
-    "lightgbm": {".txt"},
-    "xgboost": {".json", ".ubj"},
-    "abc": {".json"},
-}
 DEMO_TASK = "week2_precipitation"
 
 
@@ -164,43 +151,6 @@ class ModelRegistry:
                 )
         return record
 
-    def register(self, body: RegisterRequest) -> dict:
-        """Demonstration models on the synthetic grid (one-feature schema)."""
-        if body.feature_schema != config()["feature_schema"]:
-            raise ValueError(
-                "Unsupported feature schema for direct registration: operational models "
-                "register through a descriptor (config/model_registry/*.yaml); "
-                "demonstration models use rainfall_total_v1"
-            )
-        path = permitted_file(body.artifact_path, "ARTIFACT_ROOT", "artifacts")
-        if body.model_type not in FORMATS or path.suffix.lower() not in FORMATS[body.model_type]:
-            raise ValueError(
-                "Use a supported native artifact format: CatBoost, LightGBM, XGBoost or ABC JSON"
-            )
-        self._require_new_id(body.model_id)
-        record = self.repo.save(
-            "model",
-            {
-                **body.model_dump(),
-                "artifact_path": str(path),
-                "checksum": file_checksum(path),
-                "created_at": now(),
-                "git_commit": code_version(),
-                "status": "experimental",
-                "validated": False,
-                "metrics": {},
-                "domain": config()["domain"],
-                "grid": config()["grid_shape"],
-                "task": DEMO_TASK,
-                "scope": "demonstration",
-            },
-            body.model_id,
-        )
-        self.repo.audit(
-            "register_model", "prototype", body.model_id, {"checksum": record["checksum"]}
-        )
-        return record
-
     def _require_new_id(self, model_id: str) -> None:
         try:
             self.repo.get("model", model_id)
@@ -217,24 +167,11 @@ class ModelRegistry:
 
     # ------------------------------------------------------------------ evidence
 
-    def validate(self, model_id: str, selection: Selection) -> dict:
+    def validate(self, model_id: str) -> dict:
         metadata = self.repo.get("model", model_id)
-        if operational.is_operational(metadata):
-            return self._revalidate_operational(model_id, metadata)
-        result = self.platform.calculate(selection.model_copy(update={"model": model_id}))
-        metadata.update(
-            validated=True,
-            metrics=result["metrics"],
-            validation={
-                "selection": result["selection"],
-                "provenance": result["provenance"],
-                "artifact_checksum": metadata["checksum"],
-                "timestamp": now(),
-                "scope": "prototype case; independent scientific validation still required",
-            },
-        )
-        self.repo.audit("validate_model", "prototype", model_id, {"qc": result["qc"]})
-        return self.repo.save("model", metadata, model_id)
+        if not operational.is_operational(metadata):
+            raise KeyError(model_id)
+        return self._revalidate_operational(model_id, metadata)
 
     def _revalidate_operational(self, model_id: str, metadata: dict) -> dict:
         """Re-verify artifacts and rerun the inference check; never uses test-period data."""
@@ -310,11 +247,13 @@ class ModelRegistry:
         if action not in {"candidate", "promote", "rollback", "retire"}:
             raise ValueError("Unknown model action")
         record = self.repo.get("model", model_id)
-        if action == "promote" and operational.is_operational(record):
+        if not operational.is_operational(record):
+            raise KeyError(model_id)
+        if action == "promote":
             self._check_production_gate(record)
         # Check artifact integrity and runtime before production changes.
         if action in {"promote", "rollback"}:
-            self.platform.model(model_id).load()
+            operational.OperationalModel(record).load()
         with self._write_lock() as session:
             records = list(
                 session.scalars(select(Record).where(Record.kind == "model").with_for_update())
@@ -360,7 +299,6 @@ class ModelRegistry:
                     {"comment": review.comment, "previous_status": old},
                 )
             )
-        self.platform._calculate.cache_clear()
         return target
 
     @staticmethod

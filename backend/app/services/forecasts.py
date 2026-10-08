@@ -1,17 +1,20 @@
 """Operational Week-2 forecast runs: execution, product packages, countries, verification.
 
 A run uses the operational model in use (production, else the newest candidate) unless
-another registered operational model is named. It writes the product package under
-RUN_ROOT/forecasts/<forecast_id> and records a summary in the database. Inputs are found
-by the documented naming convention inside FORECAST_INPUT_ROOT, never from request paths.
-Large or many-member runs belong on the HPC (scripts/run_operational.py), whose packages
-are registered with ``import_package``.
+another registered operational model is named. Its ECMWF ensemble rainfall is downloaded
+from ECMWF Open Data (``source="ecmwf_opendata"``, the default) or read from files placed in
+FORECAST_INPUT_ROOT by the documented naming convention (``source="ecmwf_files"``), never
+from request paths. It writes the product package under RUN_ROOT/forecasts/<forecast_id>
+and records a summary in the database. Packages produced on the HPC
+(scripts/run_operational.py) are registered with ``import_package``.
+
+The MBC + AI/ML (hybrid) layer is produced only when every input of the model is
+available; otherwise the run holds raw ECMWF and MBC and records why the hybrid is still
+in progress.
 """
 
-import copy
 import json
 import os
-import tempfile
 import threading
 from datetime import date, datetime
 from pathlib import Path
@@ -27,17 +30,18 @@ from backend.app.services.registry import ModelRegistry, status_at
 from climate_engine.cartography import icpac_maps as maps
 from climate_engine.core import ROOT
 from climate_engine.forecasts import ECMWFS2SForecastProvider
-from climate_engine.forecasts.fixtures import FIXTURE_PRESSURE_STEPS_HOURS, write_fixture
+from climate_engine.inputs import chirps, ecmwf_opendata
 from climate_engine.operational.pipeline import (
     ForecastRun,
     check_domain,
     default_run_root,
+    is_synthetic,
     load_observed,
+    primary_layer,
     run_forecast,
     verify,
 )
 from climate_engine.operational.settings import settings
-from climate_engine.preprocessing.atmos37 import needs_pressure
 from climate_engine.products import package as packages
 from climate_engine.products import weekly_bulletin as weekly
 from climate_engine.products.bulletin import BulletinInputs, WordTemplateGenerator
@@ -46,8 +50,8 @@ from climate_engine.provenance import file_checksum, permitted_file
 from climate_engine.verification import CELL_METRICS, CellStatistics, pooled_metrics
 
 KIND = "forecast_run"
-SYNTHETIC_ENV = "ALLOW_SYNTHETIC_FORECASTS"
-FIXTURE_MEMBERS = 4
+INPUT_KIND = "ecmwf_input"
+CHIRPS_KIND = "chirps_week2"
 MEDIA_TYPES = {
     ".json": "application/json",
     ".csv": "text/csv",
@@ -87,8 +91,17 @@ def package_root() -> Path:
     return default_run_root() / "forecasts"
 
 
-def synthetic_runs_allowed() -> bool:
-    return os.getenv(SYNTHETIC_ENV, "false") == "true"
+def hybrid_status() -> dict[str, Any]:
+    """Whether new runs can produce the MBC + AI/ML (hybrid) layer, and why not."""
+    if settings()["ecmwf"]["pressure"].get("week2_steps_hours") is None:
+        return {
+            "status": "in_progress",
+            "reason": "The Atmos37 AI/ML model needs the seven Week-2 pressure-level forecast "
+            "steps of its training code (ecmwf.pressure.week2_steps_hours) and the ECMWF "
+            "pressure-level fields; until both are supplied, forecasts provide raw ECMWF "
+            "and MBC.",
+        }
+    return {"status": "available", "reason": None}
 
 
 def capabilities() -> dict[str, Any]:
@@ -98,9 +111,10 @@ def capabilities() -> dict[str, Any]:
     except (OSError, ValueError):
         countries = []
     return {
-        "synthetic_runs_allowed": synthetic_runs_allowed(),
         "pressure_steps_configured": settings()["ecmwf"]["pressure"].get("week2_steps_hours")
         is not None,
+        "hybrid": hybrid_status(),
+        "input_sources": ["ecmwf_opendata", "ecmwf_files"],
         "map_layers": list(packages.MAP_LAYERS),
         "verification_maps": {name: title for name, (_, title) in VERIFICATION_MAPS.items()},
         "countries": countries,
@@ -117,6 +131,13 @@ def input_files(initialization: date) -> tuple[Path, Path | None]:
             path = input_root() / f"ecmwf_s2s_{kind}_{tag}{suffix}"
             if path.exists():
                 return path
+        # A file fetched earlier on another replica: object storage keeps a copy.
+        store = package_store()
+        name = f"ecmwf_s2s_{kind}_{tag}.nc"
+        if store is not None and (data := store.get(f"inputs/ecmwf/{name}")) is not None:
+            input_root().mkdir(parents=True, exist_ok=True)
+            (input_root() / name).write_bytes(data)
+            return input_root() / name
         return None
 
     rainfall = find("tp")
@@ -147,43 +168,50 @@ class ForecastService:
             raise ValueError(f"{record['model_id']} is {record['status']} and cannot forecast")
         return record
 
+    # ------------------------------------------------------------------ ECMWF input
+
+    def fetch_ecmwf(self, initialization: date | None, actor: str) -> dict[str, Any]:
+        """Download the Week-2 ensemble rainfall of one 00 UTC run (the newest published
+        by default) from ECMWF Open Data into FORECAST_INPUT_ROOT."""
+        initialization = initialization or ecmwf_opendata.latest_initialization()
+        result = ecmwf_opendata.fetch(initialization, input_root())
+        store = package_store()
+        if store is not None:
+            store.put(f"inputs/ecmwf/{result.path.name}", result.path.read_bytes())
+        record = {
+            **result.record(),
+            "source": "ecmwf_opendata",
+            "fetched_at": now(),
+            "fetched_by": actor,
+            "bytes": result.path.stat().st_size,
+        }
+        saved = self.repo.save(INPUT_KIND, record, f"ecmwf-{initialization.isoformat()}")
+        self.repo.audit("ecmwf_fetched", actor, saved["id"], {"mirror": result.mirror})
+        return saved
+
+    def ecmwf_inputs(self) -> list[dict[str, Any]]:
+        return sorted(self.repo.list(INPUT_KIND), key=lambda r: r["initialization"], reverse=True)
+
     def run(self, body: ForecastRunRequest) -> dict[str, Any]:
-        if body.source == "synthetic_fixture" and not synthetic_runs_allowed():
-            raise ValueError(
-                f"Synthetic demonstration runs are disabled here ({SYNTHETIC_ENV} is not true)"
-            )
         if not RUN_LOCK.acquire(blocking=False):
             raise RunInProgress("Another forecast run is in progress; retry when it finishes")
         try:
+            initialization = body.initialization
+            if body.source == "ecmwf_opendata":
+                initialization = initialization or ecmwf_opendata.latest_initialization()
+                try:
+                    input_files(initialization)
+                except FileNotFoundError:
+                    self.fetch_ecmwf(initialization, body.actor)
+            elif initialization is None:
+                raise ValueError("Name the initialization date of the ECMWF files to use")
             record = self.model_record(body.model_id)
             model = operational.OperationalModel(record).load()
             grid = operational.authoritative_grid()
             cfg = settings()
-            cycle = body.initialization.isoformat()
-            with tempfile.TemporaryDirectory(prefix="icpac-fixture-") as scratch:
-                overrides: dict[str, Any] = {}
-                if body.source == "synthetic_fixture":
-                    cfg = copy.deepcopy(cfg)
-                    steps = list(FIXTURE_PRESSURE_STEPS_HOURS)
-                    cfg["ecmwf"]["pressure"]["week2_steps_hours"] = steps
-                    overrides["ecmwf.pressure.week2_steps_hours"] = {
-                        "value": steps,
-                        "reason": "steps of the synthetic fixture; the training definition "
-                        "is still required for real runs",
-                    }
-                    rainfall, pressure = write_fixture(
-                        Path(scratch),
-                        body.initialization,
-                        grid.latitude,
-                        grid.longitude,
-                        steps if needs_pressure(model.names) else None,
-                        members=FIXTURE_MEMBERS,
-                        rainfall_steps_hours=cfg["ecmwf"]["rainfall"]["accumulation_steps_hours"],
-                    )
-                else:
-                    rainfall, pressure = input_files(body.initialization)
-                provider = ECMWFS2SForecastProvider(rainfall, pressure, cfg)
-                run = run_forecast(provider, cycle, model, grid, cfg, record, overrides)
+            rainfall, pressure = input_files(initialization)
+            provider = ECMWFS2SForecastProvider(rainfall, pressure, cfg)
+            run = run_forecast(provider, initialization.isoformat(), model, grid, cfg, record)
             directory = packages.write_package(run, package_root(), grid, record)
             self._publish(directory)
             return self._save(run, record, body.actor, "run")
@@ -248,7 +276,10 @@ class ForecastService:
             "family": p["model"].get("family"),
             "algorithm": p["model"].get("algorithm"),
             "input_label": p["input_label"],
-            "synthetic": p["input_label"] != "ECMWF S2S files",
+            "synthetic": is_synthetic(p),
+            "primary_layer": primary_layer(p),
+            "layers": p.get("layers", list(packages.MAP_LAYERS)),
+            "products": p.get("products", {}),
             "protected_test_period": p["protected_test_period"],
             "verification_status": (run.verification or packages.NO_VERIFICATION)["status"],
             "created_at": now(),
@@ -286,19 +317,19 @@ class ForecastService:
         return directory
 
     def runs(self) -> list[dict[str, Any]]:
+        """Forecasts from real ECMWF input, newest first. Runs on synthetic test input (the
+        retired demonstration) are kept in the database but never listed."""
         return sorted(
-            self.repo.list(KIND),
+            (r for r in self.repo.list(KIND) if not r.get("synthetic")),
             key=lambda r: (r["initialization"], r["generation_time"]),
             reverse=True,
         )
 
     def latest(self) -> dict[str, Any]:
-        """The newest forecast from real input; synthetic runs only when nothing else exists."""
         runs = self.runs()
-        real = [r for r in runs if not r["synthetic"]]
         if not runs:
             raise KeyError("no operational forecast run yet")
-        return self.get((real or runs)[0]["forecast_id"])
+        return self.get(runs[0]["forecast_id"])
 
     def _path(self, forecast_id: str, name: str) -> Path:
         """A package file, served only while it matches the checksum in the manifest."""
@@ -328,10 +359,16 @@ class ForecastService:
         if problems:
             raise ValueError(f"Package {forecast_id} failed its integrity checks: {problems}")
         base = f"/forecasts/{forecast_id}"
+        manifest = packages.read_manifest(directory)
+        layers = packages.manifest_layers(manifest)
+        provenance = self._read(forecast_id, "provenance.json")
         return {
             **record,
-            "manifest": packages.read_manifest(directory),
-            "provenance": self._read(forecast_id, "provenance.json"),
+            "layers": layers,
+            "primary_layer": primary_layer(provenance),
+            "products": provenance.get("products", {}),
+            "manifest": manifest,
+            "provenance": provenance,
             "model": self._read(forecast_id, "model.json"),
             "countries": self._read(forecast_id, "countries.json"),
             "verification": self._read(forecast_id, "verification.json"),
@@ -342,9 +379,11 @@ class ForecastService:
                 layer: f"{base}/map?layer={layer}"
                 + (f"&style={weekly.MAP_STYLE}" if layer != "residual" else "")
                 for layer in packages.MAP_LAYERS
+                if layer in layers
             },
             "files": {
-                name: f"{base}/package/{name}" for name in ("manifest.json", *packages.FILES)
+                name: f"{base}/package/{name}"
+                for name in ("manifest.json", *packages.package_files(layers))
             },
         }
 
@@ -359,6 +398,9 @@ class ForecastService:
         if name not in {"manifest.json", *packages.FILES}:
             self.repo.get(KIND, forecast_id)
             raise KeyError(name)
+        manifest = packages.read_manifest(self.directory(forecast_id))
+        if name != "manifest.json" and name not in manifest.get("files", {}):
+            raise Unavailable(f"Forecast {forecast_id} has no {name}")
         path = self._path(forecast_id, name)
         return path.read_bytes(), MEDIA_TYPES[path.suffix]
 
@@ -369,6 +411,13 @@ class ForecastService:
         layer with style="package", as the image frozen in the package."""
         if layer not in packages.MAP_LAYERS:
             raise ValueError(f"Map layers: {', '.join(packages.MAP_LAYERS)}")
+        self.repo.get(KIND, forecast_id)
+        manifest = packages.read_manifest(self.directory(forecast_id))
+        if layer not in packages.manifest_layers(manifest):
+            raise Unavailable(
+                f"Forecast {forecast_id} has no {layer} layer: the MBC + AI/ML forecast is "
+                "in progress"
+            )
         style = style or ("package" if layer == "residual" else weekly.MAP_STYLE)
         if style == "package":
             if country is not None:
@@ -468,15 +517,78 @@ class ForecastService:
         self.repo.audit("forecast_verified", body.actor, forecast_id, {"observation": path.name})
         return result
 
+    def data_root(self) -> Path:
+        return Path(os.getenv("DATA_ROOT", str(ROOT / "data" / "observations")))
+
+    def verify_with_chirps(
+        self, forecast_id: str, actor: str, get: chirps.Downloader | None = None
+    ) -> dict[str, Any]:
+        """Download CHIRPS for the forecast's seven valid days and verify the forecast."""
+        get = get or chirps.download
+        record = self.repo.get(KIND, forecast_id)
+        if record.get("verification_status") == "available":
+            raise ValueError(f"Forecast {forecast_id} is already verified")
+        start = datetime.fromisoformat(record["valid_start"]).date()
+        if not chirps.window_complete(start):
+            raise Unavailable(
+                f"The Week-2 window {start.isoformat()} to "
+                f"{chirps.window_days(start)[-1].isoformat()} has not ended long enough ago "
+                "for CHIRPS to cover it"
+            )
+        grid = operational.authoritative_grid()
+        week = chirps.week_total(start, grid, get)
+        folder = self.data_root() / "chirps"
+        folder.mkdir(parents=True, exist_ok=True)
+        name = chirps.file_name(start)
+        partial = folder / f".{name}.partial"
+        chirps.to_dataset(week, grid).to_netcdf(partial)
+        partial.replace(folder / name)
+        store = package_store()
+        if store is not None:
+            store.put(f"inputs/chirps/{name}", (folder / name).read_bytes())
+        self.repo.save(
+            CHIRPS_KIND,
+            {**week.record(), "file": name, "fetched_at": now(), "fetched_by": actor},
+            f"chirps-{start.isoformat()}",
+        )
+        return self.verify(
+            forecast_id, VerificationRequest(observation=f"chirps/{name}", actor=actor)
+        )
+
+    def verify_due(self, actor: str) -> dict[str, Any]:
+        """Verify every unverified forecast whose window CHIRPS should now cover."""
+        verified, waiting, failed = [], [], []
+        for record in self.runs():
+            if record.get("verification_status") == "available":
+                continue
+            start = datetime.fromisoformat(record["valid_start"]).date()
+            if not chirps.window_complete(start):
+                waiting.append(record["forecast_id"])
+                continue
+            try:
+                self.verify_with_chirps(record["forecast_id"], actor)
+                verified.append(record["forecast_id"])
+            except (chirps.CHIRPSUnavailable, Unavailable) as exc:
+                waiting.append(f"{record['forecast_id']}: {exc}")
+            except Exception as exc:  # recorded for the forecaster, then the next one
+                failed.append(f"{record['forecast_id']}: {type(exc).__name__}: {exc}")
+        return {"verified": verified, "waiting": waiting, "failed": failed}
+
+    def chirps_inputs(self) -> list[dict[str, Any]]:
+        return sorted(self.repo.list(CHIRPS_KIND), key=lambda r: r["valid_start"], reverse=True)
+
     def verified(
-        self, model_id: str | None, include_protected: bool
+        self, model_id: str | None, include_protected: bool, variant: str | None = None
     ) -> tuple[str, list[dict[str, Any]], int]:
-        """Verified forecasts of one model (the model in use by default) and how many
-        protected-period forecasts were left out."""
+        """Verified forecasts of one model (the model in use by default) that hold
+        ``variant`` (any layer by default), and how many protected-period forecasts were
+        left out."""
         model_id = model_id or ModelRegistry(self.platform).current()["model"]["model_id"]
         records, skipped = [], 0
         for record in self.runs():
             if record["model_id"] != model_id or record.get("verification_status") != "available":
+                continue
+            if variant is not None and variant not in record.get("layers", VARIANTS):
                 continue
             if record["protected_test_period"] and not include_protected:
                 skipped += 1
@@ -517,9 +629,15 @@ class ForecastService:
         """Which gridded verification metrics have enough verified forecasts behind them."""
         model_id, records, skipped = self.verified(model_id, include_protected)
         cases = len(records)
+        counts = {
+            variant: sum(variant in r.get("layers", VARIANTS) for r in records)
+            for variant in VARIANTS
+        }
         return {
             "model_id": model_id,
             "cases": cases,
+            "cases_by_variant": counts,
+            "default_variant": "hybrid" if counts["hybrid"] else "mbc",
             "forecasts": [record["forecast_id"] for record in records],
             "excluded_protected_period": skipped,
             "metrics": {
@@ -530,22 +648,24 @@ class ForecastService:
                 }
                 for name, (_, title) in VERIFICATION_MAPS.items()
             },
-            "variants": list(VARIANTS),
+            "variants": [v for v in VARIANTS if counts[v]] or ["raw", "mbc"],
         }
 
     def verification_map(
         self,
         metric: str,
-        variant: str = "hybrid",
+        variant: str | None = None,
         model_id: str | None = None,
         include_protected: bool = False,
     ) -> bytes:
         """A gridded metric over one model's verified forecasts, in the ICPAC map standard."""
         if metric not in VERIFICATION_MAPS:
             raise ValueError(f"Verification maps: {', '.join(VERIFICATION_MAPS)}")
+        if variant is None:
+            variant = self.verification_maps(model_id, include_protected)["default_variant"]
         if variant not in VARIANTS or (metric == "skill" and variant == "raw"):
             raise ValueError("Variants: raw, mbc, hybrid (skill compares mbc or hybrid with raw)")
-        model_id, records, skipped = self.verified(model_id, include_protected)
+        model_id, records, skipped = self.verified(model_id, include_protected, variant)
         if len(records) < MAP_MIN_CASES[metric]:
             raise Unavailable(
                 f"{VERIFICATION_MAPS[metric][1]} needs {MAP_MIN_CASES[metric]} verified "

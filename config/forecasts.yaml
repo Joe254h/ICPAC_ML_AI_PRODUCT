@@ -1,4 +1,0 @@
-sources: [ECMWF S2S, ECMWF IFS, ECMWF AIFS, GEFS, CFS]
-mode: synthetic
-cycles: [2026-09-14, 2026-09-21, 2026-09-28]
-accumulation: daily_increments

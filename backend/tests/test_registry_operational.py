@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from backend.app.db import Repository
-from backend.app.schemas import IndependentTestRequest, ReviewRequest, Selection
+from backend.app.schemas import IndependentTestRequest, ReviewRequest
 from backend.app.services import operational
 from backend.app.services.platform import Platform
 from backend.app.services.registry import ModelRegistry, status_at
@@ -126,8 +126,6 @@ def test_production_needs_a_passed_independent_test_recorded_once(setup):
         "role": "production",
         "model": platform.repo.get("model", model_id),
     }
-    demo = platform.repo.get("model", "mock-v1")
-    assert demo["status"] == "production", "promotion must not retire another task's model"
 
 
 def test_concurrent_registrations_of_one_model_record_it_once(setup):
@@ -219,16 +217,7 @@ def test_changed_artifacts_block_promotion_and_revalidation(setup):
     with pytest.raises(ValueError, match="checksum"):
         registry.transition(model_id, "promote", REVIEW)
     with pytest.raises(ValueError, match="checksum"):
-        registry.validate(model_id, Selection())
-
-
-def test_operational_models_cannot_run_on_the_demo_grid(setup):
-    platform, registry, paths, root, tmp = setup
-    model_id = registry.register_descriptor(str(write_descriptor(tmp / "d.yaml", paths, root)))[
-        "model_id"
-    ]
-    with pytest.raises(ValueError, match="800x700"):
-        platform.calculate(Selection(model=model_id))
+        registry.validate(model_id)
 
 
 def test_startup_registers_the_committed_candidate_from_real_artifacts(tmp_path, monkeypatch):

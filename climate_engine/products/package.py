@@ -3,7 +3,8 @@
 Layout of ``<root>/<forecast_id>/`` (file names are fixed for downstream tools):
 
     manifest.json               package index: identifiers, labels, SHA256 of every file
-    forecast.nc                 raw, mbc, residual and hybrid Week-2 totals (mm), domain mask
+    forecast.nc                 raw and mbc Week-2 totals (mm), with residual and hybrid when
+                                the AI/ML layer was produced, and the domain mask
     provenance.json             reproducibility record of the run
     model.json                  registry metadata of the model that produced the forecast
     countries.json              country statistics over the authoritative country_id
@@ -14,6 +15,8 @@ Layout of ``<root>/<forecast_id>/`` (file names are fixed for downstream tools):
     maps/raw.png, maps/mbc.png, maps/hybrid.png   in the ICPAC weekly bulletin's map layout
                                 ICPAC map standard; the three share one colour scale
     maps/residual.png           the CatBoost residual (CHIRPS - MBC), diverging scale
+
+Maps exist for the layers the forecast holds; the manifest lists them under ``layers``.
 
 A package is written to a temporary directory and published by renaming it, so readers
 never see a partial package. Only verification.json changes afterwards (when observations
@@ -37,7 +40,7 @@ import xarray as xr
 
 from climate_engine.cartography import icpac_maps as maps
 from climate_engine.operational.grid import DomainGrid
-from climate_engine.operational.pipeline import ForecastRun
+from climate_engine.operational.pipeline import ForecastRun, is_synthetic, present, primary_layer
 from climate_engine.provenance import file_checksum
 
 PACKAGE_VERSION = "icpac-week2-package-v1"
@@ -45,7 +48,7 @@ OBSERVATION_FILE = "observation.nc"  # added with the verification, when observa
 VERIFICATION_CLAIM = ".verification.claim"  # held while a verification is being recorded
 CLAIM_STALE_SECONDS = 15 * 60
 MAP_LAYERS = ("hybrid", "mbc", "raw", "residual")
-FILES = (
+CORE_FILES = (
     "forecast.nc",
     "provenance.json",
     "model.json",
@@ -53,8 +56,25 @@ FILES = (
     "countries.csv",
     "verification.json",
     "interpretation_inputs.json",
-    *(f"maps/{layer}.png" for layer in MAP_LAYERS),
 )
+# Every file a package can hold (a forecast without the AI/ML layer has no hybrid and
+# residual maps).
+FILES = (*CORE_FILES, *(f"maps/{layer}.png" for layer in MAP_LAYERS))
+
+
+def run_layers(run: ForecastRun) -> list[str]:
+    return present(run.dataset, MAP_LAYERS)
+
+
+def package_files(layers: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    return (*CORE_FILES, *(f"maps/{layer}.png" for layer in MAP_LAYERS if layer in layers))
+
+
+def manifest_layers(manifest: dict[str, Any]) -> list[str]:
+    """Layers of a package; packages from before optional layers hold all four."""
+    return list(manifest.get("layers", MAP_LAYERS))
+
+
 MODEL_FIELDS = (
     "model_id",
     "model_name",
@@ -110,6 +130,8 @@ def model_role(status: str | None) -> str:
 
 
 def method_label(provenance: dict[str, Any]) -> str:
+    if primary_layer(provenance) == "mbc":
+        return "MBC"
     model = provenance.get("model", {})
     family = str(model.get("family", "")).upper()
     return f"MBC + {family} {str(model.get('algorithm', '')).upper()}".strip()
@@ -118,14 +140,15 @@ def method_label(provenance: dict[str, Any]) -> str:
 def countries_csv(countries: list[dict[str, Any]]) -> str:
     stream = io.StringIO()
     columns = ["country", "cell_count"]
-    for variable in ("raw", "mbc", "hybrid"):
+    variables = [v for v in ("raw", "mbc", "hybrid") if countries and v in countries[0]]
+    for variable in variables:
         columns += [f"{variable}_{stat}_mm" for stat in ("mean", "median", "min", "max")]
     columns += ["anomaly", "category"]
     writer = csv.DictWriter(stream, fieldnames=columns, lineterminator="\n")
     writer.writeheader()
     for row in countries:
         flat: dict[str, Any] = {"country": row["country"], "cell_count": row["cell_count"]}
-        for variable in ("raw", "mbc", "hybrid"):
+        for variable in variables:
             for stat in ("mean", "median", "min", "max"):
                 flat[f"{variable}_{stat}_mm"] = row[variable][f"{stat}_mm"]
         flat["anomaly"] = row["anomaly"]["status"]
@@ -139,7 +162,7 @@ def domain_means(run: ForecastRun, grid: DomainGrid) -> dict[str, float]:
     weights = np.cos(np.deg2rad(grid.cell_latitude))
     return {
         name: round(float(np.average(grid.to_cells(run.dataset[name].values), weights=weights)), 3)
-        for name in ("raw", "mbc", "residual", "hybrid")
+        for name in present(run.dataset, ("raw", "mbc", "residual", "hybrid"))
     }
 
 
@@ -148,7 +171,8 @@ def interpretation_inputs(
 ) -> dict[str, Any]:
     """Facts a bulletin writer or the copilot may use; no narrative is generated here."""
     p = run.provenance
-    synthetic = p["input_label"] != "ECMWF S2S files"
+    synthetic = is_synthetic(p)
+    primary = primary_layer(p)
     caveats = []
     if model.get("status") != "production":
         caveats.append(
@@ -156,22 +180,30 @@ def interpretation_inputs(
         )
     if synthetic:
         caveats.append("Input is a synthetic test fixture: not a forecast of real weather")
+    hybrid = p.get("products", {}).get("hybrid", {"status": "available"})
+    if hybrid["status"] != "available":
+        caveats.append(f"MBC + AI/ML (hybrid) forecast in progress: {hybrid.get('reason')}")
     caveats.append(
         "Rainfall colours use the supplied ICPAC weekly bulletin's fixed rainfall classes"
     )
-    countries = [
-        {
+    countries = []
+    for row in run.countries:
+        entry = {
             "country": row["country"],
-            "hybrid_mean_mm": row["hybrid"]["mean_mm"],
-            "hybrid_median_mm": row["hybrid"]["median_mm"],
-            "hybrid_min_mm": row["hybrid"]["min_mm"],
-            "hybrid_max_mm": row["hybrid"]["max_mm"],
+            "layer": primary,
+            "forecast_mean_mm": row[primary]["mean_mm"],
+            "forecast_median_mm": row[primary]["median_mm"],
+            "forecast_min_mm": row[primary]["min_mm"],
+            "forecast_max_mm": row[primary]["max_mm"],
             "mbc_mean_mm": row["mbc"]["mean_mm"],
             "raw_mean_mm": row["raw"]["mean_mm"],
-            "hybrid_minus_mbc_mean_mm": round(row["hybrid"]["mean_mm"] - row["mbc"]["mean_mm"], 3),
         }
-        for row in run.countries
-    ]
+        if "hybrid" in row:
+            entry["hybrid_mean_mm"] = row["hybrid"]["mean_mm"]
+            entry["hybrid_minus_mbc_mean_mm"] = round(
+                row["hybrid"]["mean_mm"] - row["mbc"]["mean_mm"], 3
+            )
+        countries.append(entry)
     return {
         "forecast_id": run.forecast_id,
         "initialization": p["forecast_initialization"],
@@ -184,9 +216,16 @@ def interpretation_inputs(
             "description": (
                 "Hybrid residual-corrected forecast: the CatBoost model predicts the residual "
                 "CHIRPS - MBC from the 37 Atmos37 features and hybrid = max(MBC + residual, 0)"
+                if primary == "hybrid"
+                else "Multiplicative bias correction (MBC): the ECMWF ensemble-mean Week-2 "
+                "rainfall times the locked 2005-2021 CHIRPS/ECMWF ratio of the "
+                "initialization month, cell by cell"
             ),
             "baseline": p["model"].get("baseline"),
         },
+        "primary_layer": primary,
+        "layers": run_layers(run),
+        "products": p.get("products", {}),
         "model": {
             "model_id": p["model_id"],
             "version": p["model_version"],
@@ -213,8 +252,9 @@ def map_figures(run: ForecastRun, model: dict[str, Any]) -> dict[str, maps.Figur
     p = run.provenance
     lat = run.dataset["latitude"].values
     lon = run.dataset["longitude"].values
-    fields = {name: run.dataset[name].values.astype(float) for name in MAP_LAYERS}
-    pooled = np.concatenate([fields[name].ravel() for name in ("raw", "mbc", "hybrid")])
+    names = run_layers(run)
+    fields = {name: run.dataset[name].values.astype(float) for name in names}
+    pooled = np.concatenate([fields[name].ravel() for name in names if name != "residual"])
     scale = maps.limits(pooled, maps.STYLES["rainfall"])
     lines = [
         f"Initialised {p['forecast_initialization']} 00 UTC | valid "
@@ -222,14 +262,14 @@ def map_figures(run: ForecastRun, model: dict[str, Any]) -> dict[str, maps.Figur
         f"{p['forecast_valid_end'][:16].replace('T', ' ')} UTC (Days 8-14)",
         f"Model {p['model_id']} {p['model_version']}: {model_role(model.get('status'))}",
     ]
-    if p["input_label"] != "ECMWF S2S files":
+    if is_synthetic(p):
         lines.append("SYNTHETIC TEST INPUT - NOT A FORECAST OF REAL WEATHER")
     note = "\n".join(lines)
     titles = {
         "raw": ("RAW ECMWF | Week-2 Rainfall", "rainfall"),
         "mbc": ("MBC | Week-2 Rainfall", "rainfall"),
         "hybrid": (f"{method_label(p)} | Week-2 Rainfall", "rainfall"),
-        "residual": (f"{p['model']['algorithm'].upper()} | Predicted Residual", "residual"),
+        "residual": (f"{str(p['model']['algorithm']).upper()} | Predicted Residual", "residual"),
     }
     return {
         name: maps.Figure(
@@ -244,7 +284,7 @@ def map_figures(run: ForecastRun, model: dict[str, Any]) -> dict[str, maps.Figur
             ],
             note=note,
         )
-        for name in MAP_LAYERS
+        for name in names
     }
 
 
@@ -255,24 +295,20 @@ def rainfall_maps(run: ForecastRun, grid: DomainGrid, model: dict[str, Any]) -> 
     p = run.provenance
     lat = run.dataset["latitude"].values
     lon = run.dataset["longitude"].values
-    note_args = (
-        p["model_id"],
-        model.get("status"),
-        p["input_label"] != "ECMWF S2S files",
-        run.forecast_id,
-    )
+    note_args = (p["model_id"], model.get("status"), is_synthetic(p), run.forecast_id)
     result = {}
-    for name in ("raw", "mbc", "hybrid"):
+    for name in present(run.dataset):
         values = run.dataset[name].values.astype(float)
         if values.shape == grid.mask.shape:
             values = np.where(grid.mask, values, np.nan)
-        method = method_label(p) if name == "hybrid" else name.upper()
+        method = method_label(p) if name == primary_layer(p) else name.upper()
         result[name] = weekly.rainfall_map(
             maps.Field(name, values, lat, lon),
             p["forecast_valid_start"],
             p["forecast_valid_end"],
             name,
             weekly.map_label(*note_args, method),
+            primary=name == primary_layer(p),
         )
     return result
 
@@ -313,8 +349,9 @@ def write_package(
         canvas = canvas or maps.Canvas(mask=grid)
         for name, png in rainfall_maps(run, grid, model).items():
             (staging / "maps" / f"{name}.png").write_bytes(png)
-        residual = map_figures(run, model)["residual"]
-        (staging / "maps" / "residual.png").write_bytes(maps.render_png(residual, canvas))
+        if "residual" in run.dataset:
+            residual = map_figures(run, model)["residual"]
+            (staging / "maps" / "residual.png").write_bytes(maps.render_png(residual, canvas))
         _write_json(staging / "manifest.json", manifest(run, staging, model))
         staging.rename(directory)
     except BaseException:
@@ -327,7 +364,7 @@ def manifest(run: ForecastRun, directory: Path, model: dict[str, Any]) -> dict[s
     from climate_engine.products.bulletin import WordTemplateGenerator
 
     p = run.provenance
-    synthetic = p["input_label"] != "ECMWF S2S files"
+    synthetic = is_synthetic(p)
     labels = [f"Model status: {model_role(model.get('status'))}"]
     if synthetic:
         labels.append("SYNTHETIC TEST INPUT: not a forecast of real weather")
@@ -353,7 +390,9 @@ def manifest(run: ForecastRun, directory: Path, model: dict[str, Any]) -> dict[s
             if key != "bulletin" or WordTemplateGenerator().status()["status"] != "ready"
         },
         "verification_status": (run.verification or NO_VERIFICATION)["status"],
-        "files": {name: file_checksum(directory / name) for name in FILES},
+        "layers": run_layers(run),
+        "primary_layer": primary_layer(p),
+        "files": {name: file_checksum(directory / name) for name in package_files(run_layers(run))},
     }
 
 
@@ -372,7 +411,8 @@ def check_package(directory: Path) -> list[str]:
     if data.get("package_version") != PACKAGE_VERSION:
         problems.append(f"package_version {data.get('package_version')!r} is not {PACKAGE_VERSION}")
     files = data.get("files", {})
-    problems += [f"{name} not listed in the manifest" for name in FILES if name not in files]
+    required = package_files(manifest_layers(data))
+    problems += [f"{name} not listed in the manifest" for name in required if name not in files]
     for name, checksum in files.items():
         path = directory / name
         if not path.is_file():

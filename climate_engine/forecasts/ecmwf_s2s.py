@@ -112,7 +112,8 @@ class ECMWFS2SForecastProvider(ForecastProvider):
         absent = [h for h in needed if not np.isclose(hours, h).any()]
         if absent:
             raise ValueError(f"Rainfall steps {absent} h missing for the Week-2 window")
-        ds.attrs.update(forecast_cycle=cycle, source=self.source)
+        ds.attrs["forecast_cycle"] = cycle
+        ds.attrs.setdefault("source", self.source)  # a downloaded file names its own source
         return ds
 
     def load_pressure(self, cycle: str) -> xr.Dataset | None:
@@ -127,7 +128,8 @@ class ECMWFS2SForecastProvider(ForecastProvider):
             have = set(np.asarray(ds[name][ecmwf["level_dim"]].values).tolist())
             if not set(levels) <= have:
                 raise ValueError(f"{name}: levels {sorted(set(levels) - have)} hPa missing")
-        ds.attrs.update(forecast_cycle=cycle, source=self.source)
+        ds.attrs["forecast_cycle"] = cycle
+        ds.attrs.setdefault("source", self.source)  # a downloaded file names its own source
         return ds
 
     def metadata(self) -> dict:

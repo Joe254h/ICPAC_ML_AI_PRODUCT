@@ -108,6 +108,76 @@ def to_cells(da: xr.DataArray, grid: DomainGrid, regrid: str | None) -> xr.DataA
     return da.interp(points, method="linear")
 
 
+def on_model_grid(da: xr.DataArray, grid: DomainGrid, tolerance: float = 1e-4) -> bool:
+    """Whether every model-grid latitude and longitude is a coordinate of the input."""
+
+    def covered(source: np.ndarray, needed: np.ndarray) -> bool:
+        source = np.sort(np.asarray(source, dtype=float))
+        position = np.clip(np.searchsorted(source, needed), 1, source.size - 1)
+        nearest = np.minimum(
+            np.abs(source[position] - needed), np.abs(source[position - 1] - needed)
+        )
+        return bool((nearest <= tolerance).all())
+
+    return covered(da["latitude"].values, grid.latitude) and covered(
+        da["longitude"].values, grid.longitude
+    )
+
+
+def spacing(axis: np.ndarray) -> float:
+    return float(np.median(np.abs(np.diff(np.asarray(axis, dtype=float)))))
+
+
+def _window_weights(source: np.ndarray, target: np.ndarray, degrees: float) -> np.ndarray:
+    """Averaging weights (target x source): points inside the target box count fully,
+    points on its edge half, as in an area mean on a regular grid."""
+    distance = np.abs(source[None, :] - target[:, None])
+    half = degrees / 2.0
+    weights = np.where(distance < half - 1e-6, 1.0, 0.0)
+    weights += np.where(np.abs(distance - half) <= 1e-6, 0.5, 0.0)
+    totals = weights.sum(axis=1, keepdims=True)
+    if (totals == 0).any():
+        raise ValueError("The rainfall input does not cover the averaging windows")
+    return weights / totals
+
+
+def coarsen(da: xr.DataArray, degrees: float) -> xr.DataArray:
+    """Area mean of a finer regular latitude/longitude field onto the ``degrees`` grid whose
+    points are multiples of ``degrees`` (the ECMWF S2S 1.5 degree grid of training).
+
+    Only target points whose whole averaging box lies inside the input are kept. A field
+    already as coarse as ``degrees`` is returned unchanged.
+    """
+    da = da.sortby(["latitude", "longitude"])
+    lat, lon = da["latitude"].values.astype(float), da["longitude"].values.astype(float)
+    if min(spacing(lat), spacing(lon)) >= degrees - 1e-6:
+        return da
+    half = degrees / 2.0
+
+    def axis(values: np.ndarray) -> np.ndarray:
+        first = np.ceil((values.min() + half - 1e-6) / degrees) * degrees
+        last = np.floor((values.max() - half + 1e-6) / degrees) * degrees
+        return np.round(np.arange(first, last + degrees / 2, degrees), 6)
+
+    target_lat, target_lon = axis(lat), axis(lon)
+    w_lat = _window_weights(lat, target_lat, degrees)
+    w_lon = _window_weights(lon, target_lon, degrees)
+    other = [d for d in da.dims if d not in ("latitude", "longitude")]
+    values = da.transpose(*other, "latitude", "longitude").values.astype(np.float64)
+    averaged = np.einsum("ij,...jk,lk->...il", w_lat, values, w_lon)
+    return xr.DataArray(
+        averaged,
+        dims=(*other, "latitude", "longitude"),
+        coords={
+            **{d: da[d] for d in other if d in da.coords},
+            "latitude": target_lat,
+            "longitude": target_lon,
+        },
+        attrs={**da.attrs, "averaged_to_degrees": degrees},
+        name=da.name,
+    )
+
+
 def _finite(values: np.ndarray, name: str) -> np.ndarray:
     bad = int(np.count_nonzero(~np.isfinite(values)))
     if bad:
@@ -122,13 +192,26 @@ def rainfall_features(ds: xr.Dataset, grid: DomainGrid, cfg: dict) -> dict[str, 
     tp = ds[rain["variable"]]
     scale = rainfall_scale(tp)
     start, end = rain["accumulation_steps_hours"]
+    # Finer inputs (ECMWF Open Data, 0.25 degree) are first averaged to the resolution of
+    # the training forecasts, so the MBC ratios see fields as smooth as those they were
+    # fitted on; coarser or on-grid inputs are used as they are.
+    resolution = rain.get("training_resolution_degrees")
+    on_grid = on_model_grid(tp, grid)
+    if not on_grid and rain["regrid"] is None:
+        raise ValueError("tp is not on the model grid; set ecmwf.rainfall.regrid explicitly")
     stats = EnsembleStats()
     negative = 0
     for member in ensemble_members(tp, cfg):
         week2 = week2_accumulation(
             tp.sel({member_dim: member}), rain["accumulation"], step_dim, start, end
         )
-        cells = _finite(to_cells(week2, grid, rain["regrid"]).values * scale, f"tp member {member}")
+        if on_grid:
+            cells = to_cells(week2, grid, None).values
+        else:
+            if resolution:
+                week2 = coarsen(week2, float(resolution))
+            cells = to_cells(week2, grid, rain["regrid"]).values
+        cells = _finite(cells * scale, f"tp member {member}")
         negative += int((cells < 0).sum())
         stats.add(cells)
     mean, spread = stats.result()
@@ -193,6 +276,7 @@ def atmospheric_features(ds: xr.Dataset, grid: DomainGrid, cfg: dict) -> dict[st
 __all__ = [
     "ATMOSPHERIC_VARIABLES",
     "EnsembleStats",
+    "coarsen",
     "atmospheric_features",
     "check_pressure_units",
     "derived",
