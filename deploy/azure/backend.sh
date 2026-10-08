@@ -75,30 +75,57 @@ KEY=$(az storage account keys list --resource-group "$GROUP" --account-name "$ST
   --query "[0].value" --output tsv)
 
 step "Container Apps environment $ENVIRONMENT"
-# The app mounts an Azure Files share, which needs a workload-profiles environment (the
-# app runs on its serverless Consumption profile). Express environments, which Azure may
-# create by default, cannot mount Azure Files: replace one that holds no apps.
-if az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" --output none 2>/dev/null; then
-  if [ -z "$(az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" \
-    --query "properties.workloadProfiles[0].name" --output tsv)" ]; then
-    if [ -n "$(az containerapp list --resource-group "$GROUP" --environment "$ENVIRONMENT" \
-      --query "[].name" --output tsv)" ]; then
-      echo "Environment $ENVIRONMENT has no workload profiles and already runs apps;"
-      echo "rerun with another name, for example: ENVIRONMENT=icpac-standard bash backend.sh"
-      exit 1
-    fi
-    echo "Replacing $ENVIRONMENT, which cannot mount Azure Files"
-    az containerapp env delete --name "$ENVIRONMENT" --resource-group "$GROUP" --yes --output none
+# The app mounts an Azure Files share. Express environments, which Azure may create when
+# no mode is given, cannot mount Azure Files, so the environment is created explicitly in
+# WorkloadProfiles mode (the app runs on its serverless Consumption profile). Setting the
+# mode needs the containerapp extension.
+az extension add --name containerapp --upgrade --yes --only-show-errors ||
+  echo "Could not update the containerapp extension; continuing with the installed CLI"
+ERRORS=$(mktemp)
+environment_mode() {
+  az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" \
+    --query properties.environmentMode --output tsv 2>/dev/null | tr '[:upper:]' '[:lower:]'
+}
+create_environment() {
+  if az containerapp env create --help 2>/dev/null | grep -q -- "--environment-mode"; then
+    az containerapp env create --name "$ENVIRONMENT" --resource-group "$GROUP" \
+      --location "$LOCATION" --environment-mode WorkloadProfiles --output none
+  else
+    az containerapp env create --name "$ENVIRONMENT" --resource-group "$GROUP" \
+      --location "$LOCATION" --enable-workload-profiles true --output none
+  fi
+}
+replace_environment() {
+  if [ -n "$(az containerapp list --resource-group "$GROUP" --environment "$ENVIRONMENT" \
+    --query "[].name" --output tsv)" ]; then
+    echo "Environment $ENVIRONMENT is an express environment that already runs apps;"
+    echo "rerun with another name, for example: ENVIRONMENT=icpac-standard bash backend.sh"
+    exit 1
+  fi
+  echo "Replacing $ENVIRONMENT: express environments cannot mount Azure Files (a few minutes)"
+  az containerapp env delete --name "$ENVIRONMENT" --resource-group "$GROUP" --yes --output none
+  create_environment
+}
+link_storage() {
+  az containerapp env storage set --name "$ENVIRONMENT" --resource-group "$GROUP" \
+    --storage-name "$STORAGE_LINK" --azure-file-account-name "$STORAGE" \
+    --azure-file-account-key "$KEY" --azure-file-share-name "$SHARE" \
+    --access-mode ReadWrite --output none 2> "$ERRORS"
+}
+if ! az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" --output none 2>/dev/null; then
+  create_environment
+elif [ "$(environment_mode)" = express ]; then
+  replace_environment
+fi
+if ! link_storage; then
+  if grep -q ExpressEnvironmentResourceNotSupported "$ERRORS"; then
+    replace_environment
+    link_storage || { cat "$ERRORS" >&2; exit 1; }
+  else
+    cat "$ERRORS" >&2
+    exit 1
   fi
 fi
-if ! az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" --output none 2>/dev/null; then
-  az containerapp env create --name "$ENVIRONMENT" --resource-group "$GROUP" \
-    --location "$LOCATION" --enable-workload-profiles true --output none
-fi
-az containerapp env storage set --name "$ENVIRONMENT" --resource-group "$GROUP" \
-  --storage-name "$STORAGE_LINK" --azure-file-account-name "$STORAGE" \
-  --azure-file-account-key "$KEY" --azure-file-share-name "$SHARE" \
-  --access-mode ReadWrite --output none
 ENVIRONMENT_ID=$(az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" \
   --query id --output tsv)
 
@@ -114,7 +141,7 @@ if az containerapp show --name "$APP" --resource-group "$GROUP" --output none 2>
   fi
 fi
 DEFINITION=$(mktemp --suffix .yaml)
-trap 'rm -f "$DEFINITION"' EXIT
+trap 'rm -f "$DEFINITION" "$ERRORS"' EXIT
 # JSON is valid YAML; python writes it so passwords need no escaping.
 APP="$APP" LOCATION="$LOCATION" ENVIRONMENT_ID="$ENVIRONMENT_ID" IMAGE="$IMAGE" \
   SYNTHETIC="$SYNTHETIC" DATABASE_URL="$DATABASE_URL" KEEP_DATABASE="$KEEP_DATABASE" \
