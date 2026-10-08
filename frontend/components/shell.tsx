@@ -143,9 +143,14 @@ function Sidebar({
             onClick={close}
             className="flex min-w-0 items-center gap-2.5"
           >
-            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
-              <CloudRain size={17} />
-            </span>
+            {/* The IGAD seal, as on the weekly bulletin maps. */}
+            <img
+              src="/igad-seal.png"
+              alt="IGAD"
+              width={32}
+              height={32}
+              className="size-8 shrink-0 rounded-full bg-white"
+            />
             {!rail && (
               <span className="min-w-0 leading-tight">
                 <strong className="block truncate text-[0.98rem] tracking-tight">

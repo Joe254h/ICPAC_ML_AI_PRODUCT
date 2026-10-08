@@ -136,15 +136,29 @@ export default function Bulletin({ id }: PageProps) {
         <Card>
           <CardHeader
             title="Weekly bulletin draft"
-            description="Current package facts in the supplied bulletin's section order. Missing products remain explicit; forecaster review is required."
+            description="Current package facts in the supplied bulletin's sections and wording. The week is named by its boundary dates (00 UTC), as in the reference. Missing products remain explicit; forecaster review is required."
           />
           <CardContent className="space-y-6 pt-3">
             {status.data.sections.map((section) => (
               <section key={section.key} className="space-y-3">
                 <h2 className="text-lg font-semibold">{section.title}</h2>
-                {section.text.filter(Boolean).map((text, index) => (
-                  <p key={index}>{text}</p>
-                ))}
+                {section.text.map((text, index) => {
+                  if (!text) return null;
+                  // The reference's bold lead ("Heavy rainfall (above 200 mm)").
+                  const lead = section.leads?.[index] ?? "";
+                  return (
+                    <p key={index}>
+                      {lead && text.startsWith(lead) ? (
+                        <>
+                          <strong>{lead}</strong>
+                          {text.slice(lead.length)}
+                        </>
+                      ) : (
+                        text
+                      )}
+                    </p>
+                  );
+                })}
                 {section.map && (
                   // Package maps are scientific images served through the binary API proxy.
                   <img

@@ -54,32 +54,89 @@ IMAGE_SLOTS = {
 }
 
 
-def fill_paragraph(document: str, paragraph_id: str, replacement: str) -> str:
+BOLD = re.compile(r'<w:b(?:\s+w:val="(?:1|true|on)")?\s*/>')
+KEEP = re.compile(r"<w:bookmark(?:Start|End)\b[^>]*/>")
+HEADER_LABEL = "76E49786"  # the empty paragraph under the reference header's table
+
+
+def _run_properties(run: str) -> str:
+    match = re.search(r"<w:rPr>.*?</w:rPr>", run, re.S)
+    return match[0] if match else ""
+
+
+def fill_paragraph(document: str, paragraph_id: str, segments: list[tuple[str, str]]) -> str:
+    """Replace a reference paragraph's text, keeping its paragraph and run formatting.
+
+    ``segments`` are (text, style) with style "bold", "bold-sup" or "regular"; each takes
+    the properties of the paragraph's first run of that kind.
+    """
     pattern = rf'(<w:p\b[^>]*\bw14:paraId="{paragraph_id}"[^>]*>)(.*?)(</w:p>)'
 
-    def fill(match):
-        remaining = replacement
-        text_nodes = list(re.finditer(r"(<w:t\b[^>]*>)(.*?)(</w:t>)", match[2], re.S))
-        if not text_nodes:
+    def fill(match: re.Match) -> str:
+        body = match[2]
+        runs = [r for r in re.findall(r"<w:r\b[^>]*>.*?</w:r>", body, re.S) if "<w:t" in r]
+        if not runs:
             raise ValueError(f"No editable text in template paragraph {paragraph_id}")
-        index = 0
-
-        def text_node(node):
-            nonlocal remaining, index
-            count = len(remaining) if index == len(text_nodes) - 1 else len(html.unescape(node[2]))
-            value, remaining = remaining[:count], remaining[count:]
-            index += 1
-            opening = node[1]
-            if "xml:space=" not in opening:
-                opening = opening[:-1] + ' xml:space="preserve">'
-            return opening + html.escape(value, quote=False) + node[3]
-
-        body = re.sub(r"(<w:t\b[^>]*>)(.*?)(</w:t>)", text_node, match[2], flags=re.S)
-        return match[1] + body + match[3]
+        kinds: dict[str, str] = {}
+        for run in runs:
+            props = _run_properties(run)
+            kind = "regular"
+            if BOLD.search(props):
+                kind = "bold-sup" if "superscript" in props else "bold"
+            kinds.setdefault(kind, props)
+        if "regular" not in kinds:
+            kinds["regular"] = re.sub(r"<w:bCs?\b[^>]*/>", "", kinds["bold"])
+        if "bold" not in kinds:
+            kinds["bold"] = kinds["regular"].replace(
+                "<w:color", '<w:b w:val="1" /><w:bCs w:val="1" /><w:color', 1
+            )
+        kinds.setdefault("bold-sup", kinds["bold"])
+        paragraph_properties = re.search(r"<w:pPr\b.*?</w:pPr>", body, re.S)
+        new_runs = "".join(
+            f'<w:r>{kinds[style]}<w:t xml:space="preserve">{html.escape(text, quote=False)}'
+            "</w:t></w:r>"
+            for text, style in segments
+            if text
+        )
+        kept = "".join(KEEP.findall(body))
+        return (
+            match[1]
+            + (paragraph_properties[0] if paragraph_properties else "")
+            + new_runs
+            + kept
+            + match[3]
+        )
 
     result, count = re.subn(pattern, fill, document, flags=re.S)
     if count != 1:
         raise ValueError(f"Expected one template paragraph {paragraph_id}; found {count}")
+    return result
+
+
+def lead_segments(lead: str, rest: str) -> list[tuple[str, str]]:
+    """Bold lead (with the reference's superscript ordinal) and regular remainder."""
+    segments: list[tuple[str, str]] = []
+    if "95th" in lead:
+        before, after = lead.split("95th", 1)
+        segments += [(before + "95", "bold"), ("th", "bold-sup"), (after, "bold")]
+    elif lead:
+        segments.append((lead, "bold"))
+    return segments + [(rest, "regular")]
+
+
+def fill_header(header: str, label: str) -> str:
+    """Write the draft label, centred and small, in the reference header's empty paragraph."""
+    pattern = rf'(<w:p\b[^>]*\bw14:paraId="{HEADER_LABEL}"[^>]*>)(.*?)(</w:p>)'
+    run = (
+        '<w:pPr><w:pStyle w:val="Header" /><w:jc w:val="center" /></w:pPr>'
+        '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial" w:cs="Arial" />'
+        '<w:b w:val="1" /><w:bCs w:val="1" /><w:color w:val="C00000" /><w:sz w:val="16" />'
+        f'<w:szCs w:val="16" /></w:rPr><w:t xml:space="preserve">{html.escape(label, quote=False)}'
+        "</w:t></w:r>"
+    )
+    result, count = re.subn(pattern, lambda m: m[1] + run + m[3], header, flags=re.S)
+    if count != 1:
+        raise ValueError("The reference header's label paragraph was not found")
     return result
 
 
@@ -150,7 +207,7 @@ class WordTemplateGenerator(BulletinGenerator):
             "template": self.template.name,
             "template_sha256": REFERENCE_SHA256,
             "review": "DRAFT - human review required before release",
-            "layout_validation": "Word page rendering pending; verify the draft in Word",
+            "layout_validation": "Pages follow the reference layout; check pagination in Word before release",
         }
 
     def render_bytes(self, inputs: BulletinInputs) -> bytes:
@@ -162,28 +219,33 @@ class WordTemplateGenerator(BulletinGenerator):
         with zipfile.ZipFile(self.template) as source, zipfile.ZipFile(output, "w") as target:
             document = source.read("word/document.xml").decode("utf-8-sig")
             for paragraph_id, (key, index) in TEXT_SLOTS.items():
-                text = title if key == "title" else content[key]["text"][index]
-                if key == "decision_support":
-                    text = "Decision-Support Note: " + text
-                document = fill_paragraph(document, paragraph_id, text)
+                if key == "title":
+                    segments = [(title, "bold")]
+                else:
+                    section = content[key]
+                    lead = section["leads"][index]
+                    segments = lead_segments(lead, section["text"][index][len(lead) :])
+                document = fill_paragraph(document, paragraph_id, segments)
             for part in source.infolist():
                 payload = source.read(part.filename)
                 if part.filename == "word/document.xml":
                     payload = document.encode("utf-8")
+                elif part.filename == "word/header1.xml":
+                    header = fill_header(payload.decode("utf-8-sig"), weekly.scope_label(inputs))
+                    payload = header.encode("utf-8")
                 elif part.filename in IMAGE_SLOTS:
-                    section = content[IMAGE_SLOTS[part.filename]]
+                    key = IMAGE_SLOTS[part.filename]
+                    section = content[key]
+                    image_format = "GIF" if part.filename.endswith(".gif") else "PNG"
                     if section.get("map_layer"):
                         generated = weekly.rainfall_png(
                             inputs, section["map_layer"], section.get("map_country")
                         )
-                        payload = weekly.fit_reference_figure(payload, generated)
                     else:
-                        payload = weekly.missing_image(
-                            payload,
-                            section["title"],
-                            section["missing_dependency"],
-                            "GIF" if part.filename.endswith(".gif") else "PNG",
+                        generated = weekly.missing_image(
+                            inputs, key, "Somalia" if key.startswith("somalia") else None
                         )
+                    payload = weekly.fit_reference_figure(payload, generated, image_format)
                 target.writestr(part, payload)
         return output.getvalue()
 

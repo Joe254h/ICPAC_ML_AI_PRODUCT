@@ -63,20 +63,26 @@ slots and figure payloads while retaining the other package parts. The known
 reference SHA256 is checked before export; an alternative `BULLETIN_TEMPLATE_PATH`
 needs its own validated mapping. The backend image includes the reference.
 
-The Weekly product page previews the same sections and offers **Download Word
-draft**. Historical forecast text and images are replaced. Missing anomaly,
-95th-percentile exceedance, temperature and heat-stress products are explicitly
-unavailable; rainfall totals cannot supply those fields. Drafts are marked for
-human review, including the candidate and synthetic-input warnings.
+Every weekly forecast follows the reference: the same title ("Weekly Forecast for 05-12
+October 2026", the week named by its boundary dates as in the reference's 06-13), the
+same sections, bullets and bold leads. The rainfall bullets use the reference's classes
+(heavy above 200 mm, moderate 50-200 mm, light below 50 mm) and name where each falls
+("most parts of", "northern parts of", "isolated areas in") from the share and position
+of each country's grid cells. Rainfall anomaly, exceptional rainfall, temperature and
+heat-stress bullets keep their place and lead but say they are not available: rainfall
+totals cannot supply them. The page header carries the draft, model-status and
+synthetic-input label; the body keeps the reference's layout. The Weekly product page
+previews the same sections and offers **Download Word draft**.
 
-Rainfall maps use the reference's fixed classes at 1, 10, 30, 50, 100 and 200 mm,
-with grey/orange/yellow/green colours. New product packages use that style.
-Existing packages and their checksums stay intact; `style=weekly-v1` on the map
-endpoint provides a cached derived view, including the Somalia view. Original
-package images remain downloadable. The Somalia logo is placed offshore as in
-the reference. Only national boundaries are currently supplied; its internal
-administrative boundaries require an approved boundary dataset. Word page rendering was unavailable on the
-local Windows runtime; check the draft's pagination in Word before release.
+The maps reproduce the reference maps (`climate_engine/cartography/weekly_maps.py`):
+Mercator frame and extent, filled contours in the reference's classes and colours, a
+boxed colour bar, outward ticks, black national boundaries, grey coastlines and lake
+shores, Somalia's regions on the Somalia map, and the IGAD seal
+(`cartography/igad_seal.png`) inside the frame. Products this forecast lacks are drawn
+as the same frame with a "not available" note. The extra lines come from Natural Earth
+(public domain) through `scripts/build_weekly_map_layers.py`. The backend image installs
+Liberation Sans, which has Helvetica's metrics. Existing packages and their checksums
+stay intact; `style=weekly-v1` on the map endpoint renders the weekly view on demand.
 
 ## Backend: Azure Container Apps (Azure for Students)
 

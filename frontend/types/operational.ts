@@ -208,6 +208,7 @@ export type BulletinStatus = {
     key: string;
     title: string;
     text: string[];
+    leads?: string[];
     map?: string;
     missing_dependency?: string;
   }[];

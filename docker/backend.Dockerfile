@@ -5,6 +5,10 @@ ARG INSTALL_MODEL_RUNTIMES=false
 # Extra dependency groups, e.g. "postgres" for Supabase or another PostgreSQL.
 ARG PIP_EXTRAS=""
 ENV GIT_COMMIT=${GIT_COMMIT} PYTHONUNBUFFERED=1 MPLBACKEND=Agg
+# Liberation Sans has Helvetica's metrics: the weekly bulletin maps use it to match the
+# ICPAC reference maps (climate_engine/cartography/weekly_maps.py).
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml ./
 COPY backend backend
 COPY climate_engine climate_engine
