@@ -19,6 +19,7 @@ export default function Bulletins({ selection }: { selection: Selection }) {
       changed_selection: string[];
       facts_identical: boolean;
     } | null>(null);
+  const weekly = active?.kind === "icpac-weekly";
   async function load() {
     setRows(await request("/bulletins"));
   }
@@ -105,8 +106,8 @@ export default function Bulletins({ selection }: { selection: Selection }) {
             ))}
             {!rows.length && (
               <p>
-                Create a draft from the selected forecast. Source fields and its
-                map will be frozen for review.
+                Generate the ICPAC weekly bulletin of the latest forecast. Its
+                Word document, text and maps are frozen for review.
               </p>
             )}
           </div>
@@ -125,25 +126,38 @@ export default function Bulletins({ selection }: { selection: Selection }) {
                     </span>
                     <h3>{active.title}</h3>
                     <small>
-                      {active.facts.period} · {active.selection.observation}
+                      {weekly
+                        ? `ICPAC weekly bulletin · forecast ${active.forecast_id}`
+                        : `${active.facts.period} · ${active.selection.observation}`}
                     </small>
                   </div>
                   <span className="badge green">
                     Consistency {active.consistency.status}
                   </span>
                 </div>
-                <div className="narrative">{active.text}</div>
-                {active.fallback && (
-                  <p className="subtle-alert">{active.fallback}</p>
-                )}
-                <details className="frozen-map">
-                  <summary>View frozen forecast map</summary>
-                  <img
-                    alt="Frozen bulletin forecast map"
-                    src={"/api/bulletins/" + active.id + "/map"}
+                {weekly ? (
+                  // The frozen Word document, as the page its HTML export gives.
+                  <iframe
+                    className="bulletin-frame"
+                    title={active.title}
+                    src={"/api/bulletins/" + active.id + "/export?inline=true"}
                   />
-                </details>
-                <Sources sources={active.sources} />
+                ) : (
+                  <>
+                    <div className="narrative">{active.text}</div>
+                    {active.fallback && (
+                      <p className="subtle-alert">{active.fallback}</p>
+                    )}
+                    <details className="frozen-map">
+                      <summary>View frozen forecast map</summary>
+                      <img
+                        alt="Frozen bulletin forecast map"
+                        src={"/api/bulletins/" + active.id + "/map"}
+                      />
+                    </details>
+                    <Sources sources={active.sources} />
+                  </>
+                )}
                 <div className="action-row">
                   {active.status === "draft" && (
                     <button
@@ -184,6 +198,17 @@ export default function Bulletins({ selection }: { selection: Selection }) {
                   >
                     Create revision
                   </button>
+                  {weekly && (
+                    <a
+                      className="button secondary"
+                      href={
+                        "/api/bulletins/" + active.id + "/export?format=docx"
+                      }
+                    >
+                      <Download size={14} />
+                      Download Word
+                    </a>
+                  )}
                   <a
                     className="button secondary"
                     href={"/api/bulletins/" + active.id + "/export"}
@@ -252,10 +277,10 @@ export default function Bulletins({ selection }: { selection: Selection }) {
             ) : (
               <div className="empty-workflow">
                 <FilePlus2 size={30} />
-                <h3>A reviewed narrative starts with evidence</h3>
+                <h3>A reviewed bulletin starts with evidence</h3>
                 <p>
-                  Choose a cycle, model, observation source and country, then
-                  generate a draft.
+                  Generate a draft: the weekly bulletin of the latest forecast,
+                  in the ICPAC template, frozen for review.
                 </p>
               </div>
             )}

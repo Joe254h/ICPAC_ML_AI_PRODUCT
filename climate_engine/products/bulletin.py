@@ -140,6 +140,18 @@ def fill_header(header: str, label: str) -> str:
     return result
 
 
+def stamp_header(document: bytes, label: str) -> bytes:
+    """A copy of a generated bulletin with another page header label (its review state)."""
+    output = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(document)) as source, zipfile.ZipFile(output, "w") as target:
+        for part in source.infolist():
+            payload = source.read(part.filename)
+            if part.filename == "word/header1.xml":
+                payload = fill_header(payload.decode("utf-8-sig"), label).encode("utf-8")
+            target.writestr(part, payload)
+    return output.getvalue()
+
+
 class MissingDependency(RuntimeError):
     """A scientific or product dependency that has not been supplied."""
 

@@ -1,4 +1,6 @@
-from fastapi import Depends, FastAPI
+import re
+
+from fastapi import Depends, FastAPI, Query
 from fastapi.responses import Response
 
 from backend.app.schemas import (
@@ -10,13 +12,15 @@ from backend.app.schemas import (
     ReviewRequest,
     Selection,
 )
-from backend.app.services.bulletin_export import HTMLBulletinExporter
-from backend.app.services.bulletins import BulletinService
+from backend.app.services.bulletin_export import HTMLBulletinExporter, WeeklyHTMLExporter
+from backend.app.services.bulletins import WEEKLY, BulletinService
 from backend.app.services.ingestion import ObservationIngestion
 from backend.app.services.jobs import Jobs
 from backend.app.services.registry import ModelRegistry
 from chatbot.retrieval import ReferenceIndex
 from chatbot.service import Copilot
+
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 def install(app: FastAPI, dependency):
@@ -109,9 +113,14 @@ def install(app: FastAPI, dependency):
 
     @app.post("/bulletins/generate")
     def generate_bulletin(
-        body: Selection, parent_id: str | None = None, platform=Depends(dependency)
+        body: Selection,
+        parent_id: str | None = None,
+        forecast_id: str | None = Query(None, pattern=r"^w2-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}$"),
+        platform=Depends(dependency),
     ) -> dict:
-        return BulletinService(platform).generate(body, parent_id)
+        """The weekly bulletin of a forecast (the latest by default); before the first
+        forecast, a demonstration summary of the selection."""
+        return BulletinService(platform).generate(body, parent_id, forecast_id)
 
     @app.get("/bulletins/compare")
     def compare_bulletins(left: str, right: str, platform=Depends(dependency)) -> dict:
@@ -128,13 +137,33 @@ def install(app: FastAPI, dependency):
         )
 
     @app.get("/bulletins/{id}/export")
-    def export_bulletin(id: str, platform=Depends(dependency)):
+    def export_bulletin(
+        id: str,
+        format: str = Query("html", pattern=r"^(html|docx)$"),
+        inline: bool = False,
+        platform=Depends(dependency),
+    ):
+        """A weekly draft as its frozen Word document (docx) or that document as a web page
+        (html); a demonstration draft as its HTML summary."""
         bulletin = platform.repo.get("bulletin", id)
-        content = HTMLBulletinExporter().export(bulletin, BulletinService(platform).map(bulletin))
+        service = BulletinService(platform)
+        if bulletin.get("kind") == WEEKLY:
+            document = service.released(bulletin)
+            if format == "docx":
+                name = re.sub(r"[^A-Za-z0-9-]+", "_", bulletin["title"]).strip("_")
+                return Response(
+                    document,
+                    media_type=DOCX,
+                    headers={"Content-Disposition": f'attachment; filename="{name}.docx"'},
+                )
+            content = WeeklyHTMLExporter().export({**bulletin, "id": id}, document)
+        elif format == "docx":
+            raise ValueError("Demonstration drafts have no Word document")
+        else:
+            content = HTMLBulletinExporter().export(bulletin, service.map(bulletin))
+        disposition = "inline" if inline else f'attachment; filename="icpac-bulletin-{id}.html"'
         return Response(
-            content,
-            media_type="text/html",
-            headers={"Content-Disposition": f'attachment; filename="icpac-bulletin-{id}.html"'},
+            content, media_type="text/html", headers={"Content-Disposition": disposition}
         )
 
     @app.post("/bulletins/{id}/{action}")

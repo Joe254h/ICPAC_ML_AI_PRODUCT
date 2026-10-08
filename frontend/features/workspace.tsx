@@ -12,7 +12,7 @@ const VIEWS: Record<string, [string, string]> = {
   ],
   drafts: [
     "bulletins",
-    "Draft, review and approve bulletin text frozen on its evidence (demonstration grid).",
+    "Draft, review and approve the ICPAC weekly bulletin, frozen with its Word document and maps.",
   ],
   jobs: ["jobs", "Fixed pipeline stages with dependencies, logs and status."],
   settings: [

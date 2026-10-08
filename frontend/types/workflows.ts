@@ -52,6 +52,9 @@ export type ChatAnswer = ChatMessage & {
 };
 export type Bulletin = {
   id: string;
+  /** "icpac-weekly": the ICPAC weekly bulletin of an operational forecast. */
+  kind?: string;
+  forecast_id?: string;
   title: string;
   status: string;
   selection: Selection;

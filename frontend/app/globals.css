@@ -854,6 +854,15 @@
 .preview-heading small {
   color: var(--muted-foreground);
 }
+/* A weekly bulletin draft, shown as its Word document (the HTML export). */
+.bulletin-frame {
+  width: 100%;
+  height: 78vh;
+  min-height: 520px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #e9ecef;
+}
 .frozen-map img {
   max-width: 100%;
   border-radius: calc(var(--radius) - 2px);
