@@ -106,6 +106,9 @@ import time
 
 e = os.environ
 env = [
+    # A changed value makes every run a new revision, which pulls the latest image
+    # (express environments do not accept revision suffixes).
+    {"name": "DEPLOYED_AT", "value": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
     {"name": "ALLOW_SYNTHETIC_FORECASTS", "value": e["SYNTHETIC"]},
     {"name": "AUTO_REGISTER_MODELS", "value": "true"},
     # Packages are written to the container disk and copied to Blob Storage, from which a
@@ -121,14 +124,13 @@ definition = {
     "location": e["LOCATION"],
     "properties": {
         "environmentId": e["ENVIRONMENT_ID"],
+        # Only settings express environments support: single revision (built in), HTTP
+        # ingress on a fixed port, app secrets, TCP probes, replica limits.
         "configuration": {
-            "activeRevisionsMode": "Single",
-            "ingress": {"external": True, "targetPort": 8000, "transport": "auto"},
+            "ingress": {"external": True, "targetPort": 8000},
             "secrets": secrets,
         },
         "template": {
-            # A new suffix makes every run a new revision, which pulls the latest image.
-            "revisionSuffix": time.strftime("r%Y%m%d%H%M%S"),
             "containers": [
                 {
                     "name": e["APP"],
