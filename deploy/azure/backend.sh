@@ -82,21 +82,21 @@ ENVIRONMENT_ID=$(az containerapp env show --name "$ENVIRONMENT" --resource-group
   --query id --output tsv)
 
 step "Container app $APP from $IMAGE"
-APP_EXISTS=false
 KEEP_DATABASE=false
 if az containerapp show --name "$APP" --resource-group "$GROUP" --output none 2>/dev/null; then
-  APP_EXISTS=true
   # A rerun without DATABASE_URL keeps the database connection stored earlier.
-  if [ -z "$DATABASE_URL" ] && [ -n "$(az containerapp secret list --name "$APP" \
-    --resource-group "$GROUP" --query "[?name=='database-url'].name" --output tsv)" ]; then
-    KEEP_DATABASE=true
+  if [ -z "$DATABASE_URL" ]; then
+    DATABASE_URL=$(az containerapp secret list --name "$APP" --resource-group "$GROUP" \
+      --show-values --query "[?name=='database-url'].value | [0]" --output tsv)
+    [ -n "$DATABASE_URL" ] && KEEP_DATABASE=true
   fi
 fi
-DEFINITION=$(mktemp --suffix .yaml)
+DEFINITION=$(mktemp --suffix .json)
 trap 'rm -f "$DEFINITION"' EXIT
-# JSON is valid YAML; python writes it so passwords need no escaping.
+# The definition goes to the Azure API as it is (az rest): the CLI's create path adds null
+# fields that express environments reject. Python writes it so passwords need no escaping.
 APP="$APP" LOCATION="$LOCATION" ENVIRONMENT_ID="$ENVIRONMENT_ID" IMAGE="$IMAGE" \
-  SYNTHETIC="$SYNTHETIC" DATABASE_URL="$DATABASE_URL" KEEP_DATABASE="$KEEP_DATABASE" \
+  SYNTHETIC="$SYNTHETIC" DATABASE_URL="$DATABASE_URL" \
   CONNECTION="$CONNECTION" PACKAGES="$PACKAGES" CPU="$CPU" MEMORY="$MEMORY" \
   python3 - "$DEFINITION" <<'PY'
 import json
@@ -116,14 +116,11 @@ env = [
 secrets = [{"name": "package-store", "value": e["CONNECTION"]}]
 if e["DATABASE_URL"]:
     secrets.append({"name": "database-url", "value": e["DATABASE_URL"]})
-elif e["KEEP_DATABASE"] == "true":
-    secrets.append({"name": "database-url"})  # the update keeps the stored value
-if len(secrets) > 1:
     env.append({"name": "DATABASE_URL", "secretRef": "database-url"})
 definition = {
     "location": e["LOCATION"],
     "properties": {
-        "managedEnvironmentId": e["ENVIRONMENT_ID"],
+        "environmentId": e["ENVIRONMENT_ID"],
         "configuration": {
             "activeRevisionsMode": "Single",
             "ingress": {"external": True, "targetPort": 8000, "transport": "auto"},
@@ -157,11 +154,23 @@ definition = {
 with open(sys.argv[1], "w") as stream:
     json.dump(definition, stream, indent=2)
 PY
-if [ "$APP_EXISTS" = true ]; then
-  az containerapp update --name "$APP" --resource-group "$GROUP" --yaml "$DEFINITION" --output none
-else
-  az containerapp create --name "$APP" --resource-group "$GROUP" --yaml "$DEFINITION" --output none
-fi
+APP_ID="${ENVIRONMENT_ID%/managedEnvironments/*}/containerApps/$APP"
+az rest --method put --url "https://management.azure.com$APP_ID?api-version=2025-07-01" \
+  --body "@$DEFINITION" --output none
+for _ in $(seq 1 60); do
+  STATE=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
+    --query properties.provisioningState --output tsv 2>/dev/null || true)
+  case "$STATE" in
+    Succeeded) break ;;
+    Failed | Canceled)
+      echo "The container app reported $STATE:"
+      az containerapp show --name "$APP" --resource-group "$GROUP" \
+        --query "properties.{state:provisioningState, revision:latestRevisionName}" --output table
+      exit 1
+      ;;
+  esac
+  sleep 10
+done
 FQDN=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
   --query properties.configuration.ingress.fqdn --output tsv)
 
