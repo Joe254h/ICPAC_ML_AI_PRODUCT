@@ -34,12 +34,23 @@ demonstration runs (`ALLOW_SYNTHETIC_FORECASTS=true`).
 
 ## Frontend: Vercel
 
-1. Import the repository in Vercel; set **Root Directory** to `frontend` (framework:
-   Next.js; build command `pnpm build`).
-2. Environment variable `API_URL` = the backend URL (Cloud Run or Azure Container Apps, no
+1. Import the repository in Vercel; set **Root Directory** to `frontend` and the framework
+   to **Next.js**. Leave the output directory at its framework default. The repository
+   pins Node.js **22.x** and pnpm **11.19.0**, matching CI.
+2. `frontend/vercel.json` sets the install command to
+   `npx --yes pnpm@11.19.0 install --frozen-lockfile` and the build command to
+   `npx --yes pnpm@11.19.0 run build`. Keep these commands if entering them in the
+   dashboard. A bare `pnpm install` override can select Vercel's oldest bundled pnpm,
+   which ignores the version-9 lockfile and can fail with `ERR_INVALID_THIS` on modern
+   Node.js. The explicit version avoids that fallback without changing dependencies.
+   The root `package.json` also supplies the package-manager pin for Vercel's Corepack
+   check. See [Vercel's package-manager documentation](https://vercel.com/docs/package-managers).
+3. Environment variable `API_URL` = the backend URL (Cloud Run or Azure Container Apps, no
    trailing slash). The browser only talks to `/api/*` on the Vercel domain; the route
    handler forwards to `API_URL`, so the API needs no public CORS configuration.
-3. Production deploys follow the protected branch; preview deploys follow pull requests.
+4. Commit and push the deployment configuration, then deploy the new commit. A redeploy
+   of an older failed commit will still use its old files. Production deploys follow
+   the protected branch; preview deploys follow pull requests.
 
 ## Backend: Azure Container Apps (Azure for Students)
 
