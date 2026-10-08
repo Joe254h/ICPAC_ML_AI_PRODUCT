@@ -12,20 +12,32 @@ from climate_engine.core import config
 class LLMProvider(ABC):
     @abstractmethod
     def outline(
-        self, question: str, sentences: dict[str, str], references: list[dict]
+        self,
+        question: str,
+        sentences: dict[str, str],
+        references: list[dict],
+        history: list[dict] | None = None,
     ) -> list[str]: ...
 
 
 class MockLLMProvider(LLMProvider):
     def outline(
-        self, question: str, sentences: dict[str, str], references: list[dict]
+        self,
+        question: str,
+        sentences: dict[str, str],
+        references: list[dict],
+        history: list[dict] | None = None,
     ) -> list[str]:
         return list(sentences)
 
 
 class OpenAICompatibleProvider(LLMProvider):
     def outline(
-        self, question: str, sentences: dict[str, str], references: list[dict]
+        self,
+        question: str,
+        sentences: dict[str, str],
+        references: list[dict],
+        history: list[dict] | None = None,
     ) -> list[str]:
         cfg = config("runtime")["llm"]
         base_url = os.getenv("LLM_BASE_URL", cfg["base_url"]).rstrip("/")
@@ -57,6 +69,10 @@ class OpenAICompatibleProvider(LLMProvider):
                         "content": json.dumps(
                             {
                                 "question": question,
+                                "conversation": [
+                                    {"role": m["role"], "content": m["text"][:1200]}
+                                    for m in (history or [])[-12:]
+                                ],
                                 "approved_sentences": sentences,
                                 "reference_metadata": [
                                     {"id": d["id"], "title": d["title"], "category": d["category"]}
@@ -87,10 +103,15 @@ def provider() -> LLMProvider:
     raise ValueError("Unknown LLM provider")
 
 
-def render_grounded(question: str, sentences: dict[str, str], references: list[dict]) -> dict:
+def render_grounded(
+    question: str,
+    sentences: dict[str, str],
+    references: list[dict],
+    history: list[dict] | None = None,
+) -> dict:
     selected = provider()
     try:
-        ids = selected.outline(question, sentences, references)
+        ids = selected.outline(question, sentences, references, history)
         mode = "mock" if isinstance(selected, MockLLMProvider) else "openai_compatible"
         fallback = None
     except (httpx.HTTPError, ValueError, KeyError, TypeError, IndexError):

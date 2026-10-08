@@ -1,7 +1,8 @@
 """Deterministic tool routing and evidence-constrained narrative composition."""
 
 from backend.app.db import now
-from backend.app.schemas import ChatRequest
+from backend.app.schemas import ChatRequest, Selection
+from chatbot.conversation import OperationalConversation, countries_in
 from chatbot.providers import render_grounded
 from chatbot.retrieval import ReferenceIndex
 from chatbot.tools import ClimateTools
@@ -35,12 +36,35 @@ class Copilot:
         self.references = ReferenceIndex()
 
     def answer(self, body: ChatRequest) -> dict:
+        session: dict = (
+            self.platform.repo.get("chat_session", body.session_id)
+            if body.session_id
+            else {"messages": [], "created_at": now(), "title": body.message[:80]}
+        )
+        history = session["messages"]
+        if body.context_mode == "operational":
+            evidence = OperationalConversation(self.platform).compose(body, session)
+            references = self.references.search(body.message) if evidence["tool_trace"] else []
+            rendered = render_grounded(body.message, evidence.pop("sentences"), references, history)
+            response = {
+                **rendered,
+                **evidence,
+                "sources": references,
+                "created_at": now(),
+                "grounding": "Forecast values come from the checked package; conversation context is retained across turns.",
+            }
+            session["context"] = response["context"]
+            return self._save(body, session, response)
         question = body.message.lower()
         selection = body.selection
-        for country in sorted(config()["countries"], key=len, reverse=True):
-            if country.lower() in question:
-                selection = selection.model_copy(update={"country": country})
-                break
+        if not body.reset_context and body.selection.model_dump() == session.get("base_selection"):
+            selection = Selection.model_validate(
+                session.get("selection", body.selection.model_dump())
+            )
+        session["base_selection"] = body.selection.model_dump()
+        named = countries_in(question)
+        if named:
+            selection = selection.model_copy(update={"country": named[0]})
         for source in ("CHIRPS", "TAMSAT", "RFE2"):
             if source.lower() in question:
                 selection = selection.model_copy(update={"observation": source})
@@ -157,12 +181,7 @@ class Copilot:
                 "unavailable": f"Selected data are unavailable: {exc}. No statistics have been inferred."
             }
         references = self.references.search(body.message)
-        rendered = render_grounded(body.message, sentences, references)
-        session = (
-            self.platform.repo.get("chat_session", body.session_id)
-            if body.session_id
-            else {"messages": [], "created_at": now()}
-        )
+        rendered = render_grounded(body.message, sentences, references, history)
         response = {
             **rendered,
             "sources": references,
@@ -171,11 +190,24 @@ class Copilot:
             "created_at": now(),
             "grounding": "All values and sentences are rendered from deterministic backend evidence.",
         }
+        session["selection"] = selection.model_dump()
+        session["context"] = {"mode": "demonstration", **selection.model_dump()}
+        response["context"] = session["context"]
+        return self._save(body, session, response)
+
+    def _save(self, body: ChatRequest, session: dict, response: dict) -> dict:
         session["messages"] = [
-            *session["messages"][-98:],
+            *session["messages"],
             {"role": "user", "text": body.message, "created_at": now()},
             {"role": "assistant", **response},
         ]
+        session["updated_at"] = now()
+        session.setdefault("title", body.message[:80])
         record = self.platform.repo.save("chat_session", session, body.session_id)
-        self.platform.repo.audit("copilot_answer", "prototype", record["id"], {"tools": names})
+        self.platform.repo.audit(
+            "copilot_answer",
+            "prototype",
+            record["id"],
+            {"tools": [t["tool"] for t in response["tool_trace"]]},
+        )
         return {**response, "session_id": record["id"]}

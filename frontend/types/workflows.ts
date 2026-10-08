@@ -10,7 +10,7 @@ export type Source = {
 };
 export type ToolTrace = {
   tool: string;
-  arguments: Selection;
+  arguments: Record<string, unknown>;
   result: Record<string, unknown>;
 };
 export type ChatMessage = {
@@ -21,10 +21,33 @@ export type ChatMessage = {
   fallback?: string | null;
   sources?: Source[];
   tool_trace?: ToolTrace[];
+  context?: ChatContext;
+  links?: { label: string; url: string }[];
+  images?: { url: string; alt: string }[];
+};
+export type ChatContext = {
+  mode: "operational" | "demonstration";
+  country: string;
+  variant?: "hybrid" | "mbc" | "raw";
+  forecast_id?: string;
+  model_id?: string;
+  model_status?: string;
+  valid_start?: string;
+  valid_end?: string;
+  synthetic?: boolean;
+};
+export type ChatSession = {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  messages?: ChatMessage[];
+  context?: ChatContext;
 };
 export type ChatAnswer = ChatMessage & {
   session_id: string;
-  selection: Selection;
+  selection?: Selection;
   grounding: string;
 };
 export type Bulletin = {

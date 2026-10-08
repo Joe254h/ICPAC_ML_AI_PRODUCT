@@ -19,7 +19,7 @@ import {
   forecastSubtitle,
   useForecast,
 } from "@/features/operational/shared";
-import { dateTime } from "@/lib/format";
+import { dateTime, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type { BulletinStatus } from "@/types/operational";
 
@@ -42,12 +42,66 @@ export default function Bulletin({ id }: PageProps) {
   return (
     <>
       <PageHeader
-        title="Weekly product"
+        title="Weekly forecast bulletin"
         description={forecastSubtitle(detail)}
         badges={<ForecastBadges detail={detail} />}
-        actions={<LinkButton href="/bulletins">Bulletin drafts</LinkButton>}
+        actions={
+          <>
+            {generator?.status === "ready" && status.data?.export && (
+              <LinkButton href={"/api" + status.data.export}>
+                Download Word draft
+              </LinkButton>
+            )}
+            <LinkButton href="/bulletins">Bulletin drafts</LinkButton>
+          </>
+        }
       />
-      <div className="grid gap-6 xl:grid-cols-2">
+      {status.data?.sections && (
+        <article
+          className="bulletin-paper"
+          aria-label="Weekly forecast bulletin preview"
+        >
+          <header>
+            <p className="bulletin-organization">
+              IGAD Climate Prediction and Applications Centre
+            </p>
+            <h1>
+              {status.data.title ??
+                `Weekly Forecast for ${validDays(detail.valid_start, detail.valid_end)}`}
+            </h1>
+            <p>
+              Draft for forecaster review
+              {detail.synthetic ? " · Synthetic test inputs" : ""}
+            </p>
+          </header>
+          {status.data.sections.map((section) => (
+            <section key={section.key}>
+              <h2>{section.title}</h2>
+              {section.text.filter(Boolean).map((text, index) => (
+                <p key={index}>{text}</p>
+              ))}
+              {section.map ? (
+                // Scientific images are served through the binary API proxy.
+                <img
+                  src={"/api" + section.map}
+                  alt={`${section.title} for this forecast`}
+                  loading="lazy"
+                />
+              ) : section.missing_dependency ? (
+                <div className="bulletin-missing-map">
+                  <strong>{section.title} map unavailable</strong>
+                  <p>{section.missing_dependency}</p>
+                </div>
+              ) : null}
+            </section>
+          ))}
+          <footer>
+            IGAD | ICPAC · Forecast {detail.forecast_id} · Human review required
+            before release
+          </footer>
+        </article>
+      )}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader
             title="Product package"
@@ -57,7 +111,7 @@ export default function Bulletin({ id }: PageProps) {
             <Downloads detail={detail} />
           </CardContent>
         </Card>
-        <div className="grid content-start gap-6">
+        <div className="grid min-w-0 grid-cols-1 content-start gap-6">
           <Card>
             <CardHeader
               title={
@@ -132,33 +186,6 @@ export default function Bulletin({ id }: PageProps) {
           </Card>
         </div>
       </div>
-      {status.data?.sections && (
-        <Card>
-          <CardHeader
-            title="Weekly bulletin draft"
-            description="Current package facts in the supplied bulletin's section order. Missing products remain explicit; forecaster review is required."
-          />
-          <CardContent className="space-y-6 pt-3">
-            {status.data.sections.map((section) => (
-              <section key={section.key} className="space-y-3">
-                <h2 className="text-lg font-semibold">{section.title}</h2>
-                {section.text.filter(Boolean).map((text, index) => (
-                  <p key={index}>{text}</p>
-                ))}
-                {section.map && (
-                  // Package maps are scientific images served through the binary API proxy.
-                  <img
-                    src={"/api" + section.map}
-                    alt={`${section.title} for this forecast`}
-                    loading="lazy"
-                    className="mx-auto h-auto w-full max-w-2xl"
-                  />
-                )}
-              </section>
-            ))}
-          </CardContent>
-        </Card>
-      )}
     </>
   );
 }

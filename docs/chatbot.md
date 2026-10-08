@@ -1,8 +1,14 @@
 # Forecaster Copilot
 
-The Copilot executes only ten read-only climate tools: get_latest_forecast, get_country_forecast, get_verification_metrics, compare_models, compare_observations, get_qc_status, get_available_datasets, get_model_metadata, get_recent_products and get_bulletin_context. Country/source/model/period context is validated before calculation. Named countries override the current region; "last week" selects the preceding configured forecast cycle.
+The Copilot reads checked forecast packages, their country summaries and verification, the model registry, observation registration and approved references. It cannot run a forecast, promote a model or publish a bulletin. The demonstration interface retains its ten original climate tools for explicitly selected demonstration requests.
 
-POST /chat accepts message, optional session_id and Selection. Responses include text, tool_trace, source citations, provider/fallback status and session_id. GET /chat/sessions and /chat/sessions/{id} expose persisted history. The UI restores the last local conversation and supports a new conversation. Unknown dates, missing inputs and QC failures produce an explicit unavailable response.
+POST /chat accepts a message, optional session_id and context_mode. The Copilot UI sends context_mode=operational; it never uses the shell's hidden mock-v1 selection. Optional country, variant (hybrid, mbc, raw), forecast_id and reset_context control the conversation's checked package. The default demonstration mode preserves the original API contract for demonstration clients using Selection.
+
+The first forecast question resolves the same latest package as GET /forecasts/latest. Subsequent questions retain its ID, country, method and subject in the persisted session. "And Somalia?", "Tell me more" and "What does that mean?" use that context. Explicit countries or methods override the previous ones. "Latest" selects the newest package; "last week" selects the preceding available package. A date with no package produces an unavailable answer, with no substitution of demonstration values. Definitions and greetings work before a forecast exists.
+
+Responses include context, text, tool_trace, citations, provider/fallback status and session_id. Map questions can return a checked image URL, and bulletin questions link to the weekly preview and Word draft for the same package. Unsupported anomaly, exceptional rainfall, temperature and heat-stress requests stay unavailable. Comparing rainfall methods is distinct from ranking their skill; missing observations never yield mock verification scores.
+
+GET /chat/sessions lists titles, updated dates and contexts; GET /chat/sessions/{id} restores the full saved conversation. Stored messages are retained, while the language-model prompt receives only the latest twelve messages, each bounded in length, plus fresh approved facts. The interface supports saved-conversation selection, Enter to send, Shift+Enter for a newline, automatic scrolling and a jump to the latest message. A failed send restores the draft for retry without leaving a duplicate user message. Sources and tool details remain collapsed until requested.
 
 ## Provider configuration
 MockLLMProvider runs by default. Set the following for a Qwen-class instruction model served by Ollama, llama.cpp, vLLM or another compatible server:
@@ -17,7 +23,7 @@ LLM_API_KEY=
 Use the server's actual configured model ID and reachable URL. Compose uses host.docker.internal for a host service; Linux may need an operator-added host-gateway mapping. API keys remain server-side and are not logged. Restart the backend after changing provider configuration.
 
 ## Grounding boundary
-Python tools calculate all values. The provider receives approved evidence-rendered sentences and reference context, then returns only a JSON outline of sentence IDs. The backend requires every approved ID exactly once and renders the sentences itself. The LLM cannot invent, reorder field associations or alter numeric values. An invalid response or unavailable server falls back to a labelled deterministic outline.
+Python tools calculate all values. The provider receives approved evidence-rendered sentences, reference metadata and bounded conversation history, then returns only a JSON outline of sentence IDs. The backend requires every approved ID exactly once and renders the sentences itself. The LLM cannot invent, reorder field associations or alter numeric values. An invalid response or unavailable server falls back to a labelled deterministic outline.
 
 This deliberately constrained interpretation prototype does not offer unrestricted free-form LLM prose or autonomous tool selection. Broader generation requires evaluated claim-level grounding first. Questions and reference documents are treated as data, never executable instructions. No Python, shell, filesystem command, model promotion or publication tool exists.
 
@@ -29,6 +35,8 @@ Add only reviewed prototype references to the manifest. Future adapters can inge
 ## Bulletins
 Generate a frozen draft from get_bulletin_context. The service retains facts/SHA256, model/source/config provenance, citation versions and a frozen checksummed map. Automated consistency checks compare sentences and text to deterministic fields.
 
-Allowed human transitions: draft → under_review → approved → published; under_review → rejected. Each action needs reviewer name, confirmation and justification. Drafts cannot publish directly. The Bulletin page supports revisions, side-by-side comparison, review history and portable self-contained HTML export. Published means a **local demo record**, never external dissemination. HTMLBulletinExporter implements the export contract; WordTemplateExporter explicitly awaits a validated official template.
+Allowed human transitions: draft → under_review → approved → published; under_review → rejected. Each action needs reviewer name, confirmation and justification. Drafts cannot publish directly. The legacy Bulletin drafts page supports revisions, side-by-side comparison, review history and portable self-contained HTML export. Published means a **local demo record**, never external dissemination.
+
+The Weekly forecast bulletin page uses the owner's retained Word reference and its section order, with a reading preview, regional/Somalia rainfall maps and a Word draft download. It is separate from the legacy demonstration review records. The template's page settings, header/footer, styles and picture positions are retained, and old forecast text/images are replaced. Missing scientific products remain explicit; the original document is a layout reference, not current weather evidence. Full Word page rendering remains pending in this Windows environment, where LibreOffice is unavailable.
 
 Reviewer names are self-reported in this localhost prototype. Authentication, role-based review, immutable audits and controlled distribution are production integrations.

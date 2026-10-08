@@ -43,6 +43,19 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     session_id: str | None = None
     selection: Selection = Field(default_factory=Selection)
+    context_mode: Literal["operational", "demonstration"] = "demonstration"
+    forecast_id: str | None = Field(default=None, pattern=r"^w2-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}$")
+    country: str | None = Field(default=None, max_length=80)
+    variant: Literal["hybrid", "mbc", "raw"] | None = None
+    reset_context: bool = False
+
+    @field_validator("message")
+    @classmethod
+    def nonblank_message(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Enter a message")
+        return value
 
 
 class ReviewRequest(BaseModel):

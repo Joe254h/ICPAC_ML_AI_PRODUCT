@@ -333,7 +333,7 @@ export function Downloads({ detail }: { detail: ForecastDetail }) {
     ["maps/residual.png", "Map: CatBoost residual"],
   ];
   return (
-    <ul className="m-0 grid list-none gap-1 p-0">
+    <ul className="m-0 grid min-w-0 grid-cols-1 list-none gap-1 p-0">
       {names.map(([name, label]) => (
         <li key={name}>
           <a
@@ -342,7 +342,9 @@ export function Downloads({ detail }: { detail: ForecastDetail }) {
           >
             <span className="min-w-0">
               <span className="block truncate font-medium">{label}</span>
-              <code className="text-[0.8rem] text-subtle">{name}</code>
+              <code className="break-all text-[0.8rem] text-subtle">
+                {name}
+              </code>
             </span>
             <Download size={15} className="shrink-0 text-subtle" />
           </a>

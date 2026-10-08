@@ -3,18 +3,23 @@ test("Copilot calls tools and displays retrieved sources", async ({ page }) => {
   await page.goto("/copilot");
   await page
     .getByLabel("Ask Forecaster Copilot")
-    .fill("Compare CHIRPS and TAMSAT for Somalia.");
+    .fill("What observation datasets are available?");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.locator(".chat-message.assistant")).toContainText(
-    "Somalia",
+    "CHIRPS",
     { timeout: 60000 },
   );
-  await expect(page.locator(".chat-message.assistant")).toContainText("RMSE");
+  await expect(page.locator(".chat-message.assistant")).toContainText("TAMSAT");
   await expect(
     page.getByText("Inspect tool evidence", { exact: false }),
   ).toBeVisible();
   await expect(page.locator(".reference-list").last()).toContainText(
     "Prototype verification guide",
+  );
+  await page.getByLabel("Ask Forecaster Copilot").fill("What does RMSE mean?");
+  await page.getByLabel("Ask Forecaster Copilot").press("Enter");
+  await expect(page.locator(".chat-message.assistant").last()).toContainText(
+    "forecast errors",
   );
 });
 test("Bulletin requires a named review before approval", async ({ page }) => {

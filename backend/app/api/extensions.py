@@ -80,8 +80,19 @@ def install(app: FastAPI, dependency):
     @app.get("/chat/sessions")
     def sessions(platform=Depends(dependency)) -> list[dict]:
         return [
-            {"id": s["id"], "created_at": s["created_at"], "message_count": len(s["messages"])}
-            for s in platform.repo.list("chat_session")
+            {
+                "id": s["id"],
+                "title": s.get("title", "Forecast conversation"),
+                "created_at": s["created_at"],
+                "updated_at": s.get("updated_at", s["created_at"]),
+                "message_count": len(s["messages"]),
+                "context": s.get("context"),
+            }
+            for s in sorted(
+                platform.repo.list("chat_session"),
+                key=lambda s: s.get("updated_at", s["created_at"]),
+                reverse=True,
+            )
         ]
 
     @app.get("/chat/sessions/{id}")
