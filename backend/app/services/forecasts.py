@@ -40,6 +40,7 @@ from climate_engine.operational.settings import settings
 from climate_engine.preprocessing.atmos37 import needs_pressure
 from climate_engine.products import package as packages
 from climate_engine.products.bulletin import BulletinInputs, WordTemplateGenerator
+from climate_engine.products.store import package_store
 from climate_engine.provenance import file_checksum, permitted_file
 from climate_engine.verification import CELL_METRICS, CellStatistics, pooled_metrics
 
@@ -182,7 +183,8 @@ class ForecastService:
                     rainfall, pressure = input_files(body.initialization)
                 provider = ECMWFS2SForecastProvider(rainfall, pressure, cfg)
                 run = run_forecast(provider, cycle, model, grid, cfg, record, overrides)
-            packages.write_package(run, package_root(), grid, record)
+            directory = packages.write_package(run, package_root(), grid, record)
+            self._publish(directory)
             return self._save(run, record, body.actor, "run")
         finally:
             RUN_LOCK.release()
@@ -263,9 +265,19 @@ class ForecastService:
 
     # ------------------------------------------------------------------ reading
 
+    @staticmethod
+    def _publish(directory: Path) -> None:
+        """Copy a published or updated package to object storage, when one is configured."""
+        store = package_store()
+        if store is not None:
+            store.upload(directory)
+
     def directory(self, forecast_id: str) -> Path:
         directory = package_root() / forecast_id
         if not directory.is_dir():
+            store = package_store()
+            if store is not None and store.fetch(forecast_id, package_root()):
+                return directory
             raise FileNotFoundError(
                 f"Package {forecast_id} is not in RUN_ROOT/forecasts; the storage may not be "
                 "persistent or shared with the worker that produced it"
@@ -393,6 +405,7 @@ class ForecastService:
             attrs={**source, "valid_start": start.isoformat(), "valid_end": end.isoformat()},
         )
         packages.add_verification(directory, result, field)
+        self._publish(directory)
         record.update(
             verification_status="available",
             season=result["season"],

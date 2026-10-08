@@ -8,7 +8,10 @@
 #
 # The image comes from the GitHub Container Registry (built by the "Publish backend image"
 # workflow), so nothing is built in Azure: registry builds are not available on Azure for
-# Students subscriptions. Running the script again updates the app to the latest image.
+# Students subscriptions. Product packages (NetCDF, maps, countries, verification) are kept
+# in Blob Storage, so the app needs no mounted disk: Azure for Students creates "express"
+# Container Apps environments, which cannot mount Azure Files. Running the script again
+# updates the app to the latest image.
 #
 # Settings (environment variables, all optional):
 #   LOCATION      Azure region (default southafricanorth). Azure for Students allows a fixed
@@ -21,6 +24,7 @@
 #   SYNTHETIC     "true" (default) allows labelled synthetic test forecasts; set "false" once
 #                 real ECMWF input is connected.
 #   IMAGE         Container image (default ghcr.io/joe254h/icpac-backend:latest).
+#   CPU, MEMORY   Container size (default 2 and 4Gi; a full-grid forecast needs about 1 GB).
 #   GROUP, APP, ENVIRONMENT  Resource names (defaults icpac, icpac-api, icpac-env).
 set -euo pipefail
 
@@ -31,9 +35,9 @@ ENVIRONMENT=${ENVIRONMENT:-icpac-env}
 IMAGE=${IMAGE:-ghcr.io/joe254h/icpac-backend:latest}
 SYNTHETIC=${SYNTHETIC:-true}
 DATABASE_URL=${DATABASE_URL:-}
-SHARE=forecast-data
-STORAGE_LINK=forecast-data
-MOUNT=/mnt/data
+CPU=${CPU:-2}
+MEMORY=${MEMORY:-4Gi}
+PACKAGES=forecast-packages
 
 step() { printf '\n==> %s\n' "$*"; }
 
@@ -60,71 +64,19 @@ fi
 SUFFIX=$(az account show --query id --output tsv | tr -d '-' | cut -c1-12)
 STORAGE=${STORAGE:-icpac$SUFFIX}
 
-step "Storage account $STORAGE and file share $SHARE (forecast packages and inputs)"
+step "Storage account $STORAGE (forecast packages in the blob container $PACKAGES)"
 if ! az storage account show --name "$STORAGE" --resource-group "$GROUP" --output none 2>/dev/null; then
   az storage account create --name "$STORAGE" --resource-group "$GROUP" \
     --location "$LOCATION" --sku Standard_LRS --kind StorageV2 \
     --min-tls-version TLS1_2 --allow-blob-public-access false --output none
 fi
-if ! az storage share-rm show --resource-group "$GROUP" --storage-account "$STORAGE" \
-  --name "$SHARE" --output none 2>/dev/null; then
-  az storage share-rm create --resource-group "$GROUP" --storage-account "$STORAGE" \
-    --name "$SHARE" --quota 20 --output none
-fi
-KEY=$(az storage account keys list --resource-group "$GROUP" --account-name "$STORAGE" \
-  --query "[0].value" --output tsv)
+CONNECTION=$(az storage account show-connection-string --name "$STORAGE" \
+  --resource-group "$GROUP" --query connectionString --output tsv)
 
 step "Container Apps environment $ENVIRONMENT"
-# The app mounts an Azure Files share. Express environments, which Azure may create when
-# no mode is given, cannot mount Azure Files, so the environment is created explicitly in
-# WorkloadProfiles mode (the app runs on its serverless Consumption profile). Setting the
-# mode needs the containerapp extension.
-az extension add --name containerapp --upgrade --yes --only-show-errors ||
-  echo "Could not update the containerapp extension; continuing with the installed CLI"
-ERRORS=$(mktemp)
-environment_mode() {
-  az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" \
-    --query properties.environmentMode --output tsv 2>/dev/null | tr '[:upper:]' '[:lower:]'
-}
-create_environment() {
-  if az containerapp env create --help 2>/dev/null | grep -q -- "--environment-mode"; then
-    az containerapp env create --name "$ENVIRONMENT" --resource-group "$GROUP" \
-      --location "$LOCATION" --environment-mode WorkloadProfiles --output none
-  else
-    az containerapp env create --name "$ENVIRONMENT" --resource-group "$GROUP" \
-      --location "$LOCATION" --enable-workload-profiles true --output none
-  fi
-}
-replace_environment() {
-  if [ -n "$(az containerapp list --resource-group "$GROUP" --environment "$ENVIRONMENT" \
-    --query "[].name" --output tsv)" ]; then
-    echo "Environment $ENVIRONMENT is an express environment that already runs apps;"
-    echo "rerun with another name, for example: ENVIRONMENT=icpac-standard bash backend.sh"
-    exit 1
-  fi
-  echo "Replacing $ENVIRONMENT: express environments cannot mount Azure Files (a few minutes)"
-  az containerapp env delete --name "$ENVIRONMENT" --resource-group "$GROUP" --yes --output none
-  create_environment
-}
-link_storage() {
-  az containerapp env storage set --name "$ENVIRONMENT" --resource-group "$GROUP" \
-    --storage-name "$STORAGE_LINK" --azure-file-account-name "$STORAGE" \
-    --azure-file-account-key "$KEY" --azure-file-share-name "$SHARE" \
-    --access-mode ReadWrite --output none 2> "$ERRORS"
-}
 if ! az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" --output none 2>/dev/null; then
-  create_environment
-elif [ "$(environment_mode)" = express ]; then
-  replace_environment
-fi
-if ! link_storage; then
-  if grep -q ExpressEnvironmentResourceNotSupported "$ERRORS"; then
-    replace_environment
-    link_storage || { cat "$ERRORS" >&2; exit 1; }
-  else
-    cat "$ERRORS" >&2
-    exit 1
-  fi
+  az containerapp env create --name "$ENVIRONMENT" --resource-group "$GROUP" \
+    --location "$LOCATION" --output none
 fi
 ENVIRONMENT_ID=$(az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" \
   --query id --output tsv)
@@ -141,11 +93,12 @@ if az containerapp show --name "$APP" --resource-group "$GROUP" --output none 2>
   fi
 fi
 DEFINITION=$(mktemp --suffix .yaml)
-trap 'rm -f "$DEFINITION" "$ERRORS"' EXIT
+trap 'rm -f "$DEFINITION"' EXIT
 # JSON is valid YAML; python writes it so passwords need no escaping.
 APP="$APP" LOCATION="$LOCATION" ENVIRONMENT_ID="$ENVIRONMENT_ID" IMAGE="$IMAGE" \
   SYNTHETIC="$SYNTHETIC" DATABASE_URL="$DATABASE_URL" KEEP_DATABASE="$KEEP_DATABASE" \
-  STORAGE_LINK="$STORAGE_LINK" MOUNT="$MOUNT" python3 - "$DEFINITION" <<'PY'
+  CONNECTION="$CONNECTION" PACKAGES="$PACKAGES" CPU="$CPU" MEMORY="$MEMORY" \
+  python3 - "$DEFINITION" <<'PY'
 import json
 import os
 import sys
@@ -155,25 +108,22 @@ e = os.environ
 env = [
     {"name": "ALLOW_SYNTHETIC_FORECASTS", "value": e["SYNTHETIC"]},
     {"name": "AUTO_REGISTER_MODELS", "value": "true"},
-    {"name": "RUN_ROOT", "value": e["MOUNT"]},
-    {"name": "FORECAST_INPUT_ROOT", "value": e["MOUNT"] + "/inputs/ecmwf"},
-    {"name": "DATA_ROOT", "value": e["MOUNT"] + "/inputs/chirps"},
-    # Azure Files (SMB) does not support the HDF5 file locks used by NetCDF writers.
-    {"name": "HDF5_USE_FILE_LOCKING", "value": "FALSE"},
+    # Packages are written to the container disk and copied to Blob Storage, from which a
+    # restarted replica fetches them again.
+    {"name": "PACKAGE_STORE_CONNECTION", "secretRef": "package-store"},
+    {"name": "PACKAGE_STORE_CONTAINER", "value": e["PACKAGES"]},
 ]
-secrets = []
+secrets = [{"name": "package-store", "value": e["CONNECTION"]}]
 if e["DATABASE_URL"]:
     secrets.append({"name": "database-url", "value": e["DATABASE_URL"]})
 elif e["KEEP_DATABASE"] == "true":
     secrets.append({"name": "database-url"})  # the update keeps the stored value
-if secrets:
+if len(secrets) > 1:
     env.append({"name": "DATABASE_URL", "secretRef": "database-url"})
 definition = {
     "location": e["LOCATION"],
     "properties": {
         "managedEnvironmentId": e["ENVIRONMENT_ID"],
-        # Serverless profile of the workload-profiles environment: scales to zero.
-        "workloadProfileName": "Consumption",
         "configuration": {
             "activeRevisionsMode": "Single",
             "ingress": {"external": True, "targetPort": 8000, "transport": "auto"},
@@ -186,7 +136,7 @@ definition = {
                 {
                     "name": e["APP"],
                     "image": e["IMAGE"],
-                    "resources": {"cpu": 2.0, "memory": "4Gi"},
+                    "resources": {"cpu": float(e["CPU"]), "memory": e["MEMORY"]},
                     "env": env,
                     "probes": [
                         # Startup verifies every artifact and loads the model.
@@ -197,20 +147,10 @@ definition = {
                             "failureThreshold": 30,
                         }
                     ],
-                    "volumeMounts": [{"volumeName": "data", "mountPath": e["MOUNT"]}],
                 }
             ],
             # One replica: forecasts run one at a time and the app keeps one database.
             "scale": {"minReplicas": 0, "maxReplicas": 1},
-            "volumes": [
-                {
-                    "name": "data",
-                    "storageType": "AzureFile",
-                    "storageName": e["STORAGE_LINK"],
-                    # The image runs as user 1000 (climate).
-                    "mountOptions": "dir_mode=0777,file_mode=0777,uid=1000,gid=1000",
-                }
-            ],
         },
     },
 }

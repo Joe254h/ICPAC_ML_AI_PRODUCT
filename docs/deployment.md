@@ -60,18 +60,22 @@ scales to zero when idle.
    ```
 
    The script ([deploy/azure/backend.sh](../deploy/azure/backend.sh)) creates the resource
-   group `icpac`, a storage account with the file share `forecast-data` (mounted at
-   `/mnt/data`: product packages under `forecasts/`, ECMWF and CHIRPS inputs under
-   `inputs/`), a Container Apps environment and the app `icpac-api` (2 vCPU, 4 GiB, 0–1
-   replica). It prints the backend URL for `API_URL`. Run it again to deploy the latest
+   group `icpac`, a storage account whose blob container `forecast-packages` holds the
+   product packages, a Container Apps environment and the app `icpac-api` (2 vCPU, 4 GiB,
+   0–1 replica). It prints the backend URL for `API_URL`. Run it again to deploy the latest
    image; the stored database connection is kept.
 3. Settings: `LOCATION` (default `southafricanorth`; Azure for Students allows a fixed
    list of regions, shown by `az policy assignment list --disable-scope-strict-match
    --query "[].parameters.listOfAllowedLocations.value" -o tsv`; choose the one nearest the
-   database), `SYNTHETIC=false` once real ECMWF input arrives, `IMAGE` for another image.
-   The environment has workload profiles and the app runs on its serverless Consumption
-   profile: express environments, which Azure may create by default, cannot mount Azure
-   Files, so the script replaces an empty one.
+   database), `SYNTHETIC=false` once real ECMWF input arrives, `IMAGE`, `CPU` and `MEMORY`.
+
+Azure for Students creates **express** Container Apps environments, which cannot mount
+Azure Files. The app therefore needs no mounted disk: with `PACKAGE_STORE_CONNECTION` (a
+storage connection string) set, every package is copied to Blob Storage when it is
+published or verified, and a package missing from the container disk is fetched back
+([climate_engine/products/store.py](../climate_engine/products/store.py)). HPC packages
+can be uploaded to the same container (`<forecast_id>/<file>`) and registered with
+`POST /forecasts/import`.
 
 Without `DATABASE_URL` the database lives in the container and is emptied whenever the
 app scales to zero; use Supabase (below) for a lasting deployment. The first request after
