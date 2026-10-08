@@ -22,15 +22,30 @@ class Record(Base):
     payload: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+def database_url(url: str) -> str:
+    """Accept PostgreSQL URLs as providers such as Supabase print them (``postgres://`` or
+    ``postgresql://``) and use the psycopg driver the ``postgres`` extra installs."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix) :]
+    return url
+
+
 class Repository:
     def __init__(self, url: str | None = None):
         path = ROOT / "data" / "prototype.db"
         path.parent.mkdir(exist_ok=True)
-        self.url: str = url or os.environ.get("DATABASE_URL") or f"sqlite:///{path.as_posix()}"
-        self.engine = create_engine(
-            self.url,
-            connect_args={"check_same_thread": False} if self.url.startswith("sqlite") else {},
+        self.url: str = database_url(
+            url or os.environ.get("DATABASE_URL") or f"sqlite:///{path.as_posix()}"
         )
+        connect_args: dict = {}
+        if self.url.startswith("sqlite"):
+            connect_args = {"check_same_thread": False}
+        elif self.url.startswith("postgresql+psycopg"):
+            # No server-side prepared statements: connection poolers in transaction mode
+            # (Supabase port 6543, PgBouncer) cannot keep them between transactions.
+            connect_args = {"prepare_threshold": None}
+        self.engine = create_engine(self.url, connect_args=connect_args)
         Base.metadata.create_all(self.engine)
 
     def save(self, kind: str, payload: dict, record_id: str | None = None) -> dict:

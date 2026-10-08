@@ -20,7 +20,7 @@ COPY artifacts artifacts
 RUN extras="$PIP_EXTRAS"; \
     if [ "$INSTALL_MODEL_RUNTIMES" = "true" ]; then extras="${extras:+$extras,}models"; fi; \
     if [ -n "$extras" ]; then pip install --no-cache-dir ".[$extras]"; else pip install --no-cache-dir .; fi \
-    && useradd --create-home climate && mkdir -p /app/data && chown climate /app/data
+    && useradd --create-home --uid 1000 climate && mkdir -p /app/data && chown climate /app/data
 USER climate
 EXPOSE 8000
 # Cloud Run provides PORT; Compose and local runs use 8000.
