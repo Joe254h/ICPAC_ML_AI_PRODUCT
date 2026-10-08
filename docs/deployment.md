@@ -36,10 +36,44 @@ demonstration runs (`ALLOW_SYNTHETIC_FORECASTS=true`).
 
 1. Import the repository in Vercel; set **Root Directory** to `frontend` (framework:
    Next.js; build command `pnpm build`).
-2. Environment variable `API_URL` = the Cloud Run service URL (no trailing slash). The
-   browser only talks to `/api/*` on the Vercel domain; the route handler forwards to
-   `API_URL`, so the API needs no public CORS configuration.
+2. Environment variable `API_URL` = the backend URL (Cloud Run or Azure Container Apps, no
+   trailing slash). The browser only talks to `/api/*` on the Vercel domain; the route
+   handler forwards to `API_URL`, so the API needs no public CORS configuration.
 3. Production deploys follow the protected branch; preview deploys follow pull requests.
+
+## Backend: Azure Container Apps (Azure for Students)
+
+Azure for Students (GitHub Student Developer Pack, no credit card) runs the backend on
+Container Apps, Azure's counterpart of Cloud Run. Its monthly free grant (180,000
+vCPU-seconds, 360,000 GiB-seconds, 2 million requests) covers a demonstration; the app
+scales to zero when idle.
+
+1. The **Publish backend image** workflow builds `docker/backend.Dockerfile` on every push
+   to `main` and publishes `ghcr.io/joe254h/icpac-backend` (public, because the repository
+   is public). Azure Container Registry builds are not available on free-credit
+   subscriptions, so nothing is built in Azure.
+2. In [Azure Cloud Shell](https://shell.azure.com) (Bash):
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/Joe254h/ICPAC_ML_AI_PRODUCT/main/deploy/azure/backend.sh -o backend.sh
+   DATABASE_URL='<Supabase connection string>' bash backend.sh
+   ```
+
+   The script ([deploy/azure/backend.sh](../deploy/azure/backend.sh)) creates the resource
+   group `icpac`, a storage account with the file share `forecast-data` (mounted at
+   `/mnt/data`: product packages under `forecasts/`, ECMWF and CHIRPS inputs under
+   `inputs/`), a Container Apps environment and the app `icpac-api` (2 vCPU, 4 GiB, 0–1
+   replica). It prints the backend URL for `API_URL`. Run it again to deploy the latest
+   image; the stored database connection is kept.
+3. Settings: `LOCATION` (default `southafricanorth`; Azure for Students allows a fixed
+   list of regions, so rerun with an allowed one if it is refused), `SYNTHETIC=false` once
+   real ECMWF input arrives, `IMAGE` for another image.
+
+Without `DATABASE_URL` the database lives in the container and is emptied whenever the
+app scales to zero; use Supabase (below) for a lasting deployment. The first request after
+an idle period starts the app (about a minute: image pull, artifact checks, model load);
+the interface waits up to 90 s for it. Logs: `az containerapp logs show -n icpac-api -g
+icpac --follow`. Remove everything: `az group delete --name icpac`.
 
 ## Backend: Google Cloud Run
 
@@ -73,11 +107,19 @@ gcloud run deploy icpac-api --image "$IMAGE" --region REGION \
 
 ## Database: Supabase PostgreSQL
 
-Create a project, take the pooled connection string and store it as a Secret Manager
-secret: `postgresql+psycopg://USER:PASSWORD@HOST:6543/postgres?sslmode=require`. The
-database holds metadata only (models, forecast runs, verification summaries, approvals,
-audit); gridded fields stay in NetCDF packages in object storage. The record store is a
-prototype schema: add migrations and uniqueness constraints before multi-team use.
+Create a project (free plan; pick the region nearest the backend), open **Connect**, and
+copy the **Transaction pooler** connection string (port 6543, IPv4). Replace
+`[YOUR-PASSWORD]` with the database password (percent-encode `@ : / # ? %` in it, or reset
+it to letters and digits) and pass the string as it is: the backend
+accepts `postgres://` and `postgresql://` URLs, uses the psycopg driver and no prepared
+statements, as poolers require. Store it as a secret (Azure: the script's `DATABASE_URL`;
+Cloud Run: a Secret Manager secret). Free projects pause after a week without activity;
+resume them from the Supabase dashboard.
+
+The database holds metadata only (models, forecast runs, verification summaries,
+approvals, audit); gridded fields stay in NetCDF packages in file or object storage. The
+record store is a prototype schema: add migrations and uniqueness constraints before
+multi-team use.
 
 ## HPC to platform
 

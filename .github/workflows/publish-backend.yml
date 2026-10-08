@@ -1,0 +1,37 @@
+name: Publish backend image
+# Builds the backend image from main and publishes it to the GitHub Container Registry
+# (ghcr.io/<owner>/icpac-backend). Images from this public repository are public, so a
+# cloud host (Azure Container Apps, Cloud Run) pulls them without credentials.
+on:
+  push: {branches: [main]}
+  workflow_dispatch:
+permissions: {contents: read, packages: write}
+concurrency:
+  group: publish-backend
+  cancel-in-progress: true
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image name (lowercase owner)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/icpac-backend" >> "$GITHUB_ENV"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/backend.Dockerfile
+          push: true
+          build-args: |
+            PIP_EXTRAS=postgres
+            GIT_COMMIT=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
