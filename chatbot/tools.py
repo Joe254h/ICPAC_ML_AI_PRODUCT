@@ -16,7 +16,14 @@ TOOLS = (
     "get_model_metadata",
     "get_recent_products",
     "get_bulletin_context",
+    # Operational forecast (chatbot/operational.py) and the approved glossary.
+    "get_operational_forecast",
+    "get_operational_verification",
+    "compare_operational_layers",
+    "get_operational_model",
+    "get_glossary",
 )
+DEMONSTRATION_TOOLS = TOOLS[:10]
 
 
 class ClimateTools:
@@ -24,7 +31,7 @@ class ClimateTools:
         self.platform = platform
 
     def call(self, name: str, selection: Selection) -> dict:
-        if name not in TOOLS:
+        if name not in DEMONSTRATION_TOOLS:
             raise ValueError("Tool is not approved")
         if name == "get_available_datasets":
             return {

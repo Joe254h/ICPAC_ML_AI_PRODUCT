@@ -6,10 +6,11 @@ import type { Selection } from "@/types";
 import type { ChatAnswer, ChatMessage } from "@/types/workflows";
 import Sources from "@/components/sources";
 const suggestions = [
-  "Compare CHIRPS and TAMSAT verification for Somalia.",
-  "Which model performed best over Ethiopia?",
-  "What observation datasets are currently available?",
-  "Draft the rainfall summary for Kenya.",
+  "Summarise this week's rainfall forecast.",
+  "What is the forecast for Somalia?",
+  "Has this forecast been verified?",
+  "Which model produced this forecast?",
+  "What is MBC?",
 ];
 export default function Copilot({ selection }: { selection: Selection }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]),
@@ -35,9 +36,11 @@ export default function Copilot({ selection }: { selection: Selection }) {
     setInput("");
     setMessages((old) => [...old, { role: "user", text }]);
     try {
+      // Answers come from the latest forecast of the model in use.
       const answer = await mutate<ChatAnswer>("/chat", {
         message: text,
         selection,
+        scope: "operational",
         session_id: session,
       });
       setMessages((old) => [...old, { ...answer, role: "assistant" }]);
@@ -75,8 +78,9 @@ export default function Copilot({ selection }: { selection: Selection }) {
       <div className="grounding-bar">
         <ShieldCheck size={16} />
         <span>
-          Scientific values come from Python tools. The language model can
-          arrange approved sentences. Drafts require human review.
+          Answers use the latest forecast of the model in use. Values come from
+          Python tools; the language model only chooses and orders approved
+          sentences. Drafts require human review.
         </span>
       </div>
       <div className="chat-stream" aria-live="polite">
@@ -87,8 +91,8 @@ export default function Copilot({ selection }: { selection: Selection }) {
             </div>
             <h3>Explore the forecast evidence</h3>
             <p>
-              Ask about a country, compare reference sources, or prepare a
-              technical summary.
+              Ask about this week&apos;s rainfall, a country, verification, the
+              model or a term.
             </p>
             <div className="suggestions">
               {suggestions.map((text) => (

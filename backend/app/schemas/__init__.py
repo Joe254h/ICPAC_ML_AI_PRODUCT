@@ -43,6 +43,9 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     session_id: str | None = None
     selection: Selection = Field(default_factory=Selection)
+    # "operational": the latest forecast of the model in use (the demonstration grid only
+    # before the first run); "demonstration": the synthetic demonstration grid.
+    scope: Literal["operational", "demonstration"] = "operational"
 
 
 class ReviewRequest(BaseModel):

@@ -33,7 +33,7 @@ account's Limits page for its actual allowance.
    backend revision still has its old settings.
 
 The backend validates the returned sentence IDs and keeps all numerical values in
-Python. The model currently arranges validated sentences; changing the LLM does
+Python. The model only chooses and orders validated sentences; changing the LLM does
 not change the forecast context or supply missing scientific products.
 
 ## Local testing

@@ -41,6 +41,19 @@ class LocalDocumentIngestor(DocumentIngestor):
         return result
 
 
+def source(d: dict) -> dict:
+    """A reference as the Copilot cites it."""
+    return {
+        "id": d["id"],
+        "title": d["title"],
+        "category": d["category"],
+        "checksum": d["checksum"],
+        "synthetic": d.get("synthetic", False),
+        "excerpt": d["content"][:700],
+        "url": f"/api/references/{d['id']}",
+    }
+
+
 class ReferenceIndex:
     def __init__(self, manifest: Path | None = None):
         self.documents = LocalDocumentIngestor().ingest(
@@ -50,24 +63,30 @@ class ReferenceIndex:
     def search(self, query: str, limit: int = 3) -> list[dict]:
         terms = set(re.findall(r"[a-z]+", query.lower()))
         ranked = sorted(
-            self.documents,
+            [d for d in self.documents if d.get("searchable", True)],
             key=lambda d: len(
                 terms & set(re.findall(r"[a-z]+", (d["title"] + " " + d["content"]).lower()))
             ),
             reverse=True,
         )
-        return [
-            {
-                "id": d["id"],
-                "title": d["title"],
-                "category": d["category"],
-                "checksum": d["checksum"],
-                "synthetic": d.get("synthetic", False),
-                "excerpt": d["content"][:700],
-                "url": f"/api/references/{d['id']}",
-            }
-            for d in ranked[:limit]
-        ]
+        return [source(d) for d in ranked[:limit]]
+
+    def glossary(self) -> dict[str, dict]:
+        """Approved definitions by lower-case alias, from the glossary reference."""
+        try:
+            document = self.get("glossary")
+        except KeyError:
+            return {}
+        entries: dict[str, dict] = {}
+        for block in document["content"].split("\n## ")[1:]:
+            term, _, body = block.partition("\n")
+            lines = [line.strip() for line in body.strip().splitlines() if line.strip()]
+            if not lines or not lines[0].startswith("aliases:"):
+                continue
+            entry = {"term": term.strip(), "definition": " ".join(lines[1:])}
+            for alias in lines[0].removeprefix("aliases:").split(","):
+                entries[alias.strip().lower()] = entry
+        return entries
 
     def get(self, identifier: str) -> dict:
         for document in self.documents:

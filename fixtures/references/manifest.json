@@ -20,5 +20,13 @@
     "path": "sample.md",
     "approved": true,
     "synthetic": true
+  },
+  {
+    "id": "glossary",
+    "title": "Approved glossary",
+    "category": "scientific_reference",
+    "path": "glossary.md",
+    "approved": true,
+    "searchable": false
   }
 ]
