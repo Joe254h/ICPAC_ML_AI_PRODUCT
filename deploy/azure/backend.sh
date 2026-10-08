@@ -26,6 +26,8 @@
 #   IMAGE         Container image (default ghcr.io/joe254h/icpac-backend:latest).
 #   CPU, MEMORY   Container size (default 2 and 4Gi; a full-grid forecast needs about 1 GB).
 #   GROUP, APP, ENVIRONMENT  Resource names (defaults icpac, icpac-api, icpac-env).
+#   LLM_OVERRIDES Set by llm.sh: the Copilot settings for the self-hosted model. Without it,
+#                 the Copilot settings already on the app are kept.
 set -euo pipefail
 
 LOCATION=${LOCATION:-southafricanorth}
@@ -107,6 +109,7 @@ APP="$APP" LOCATION="$LOCATION" ENVIRONMENT_ID="$ENVIRONMENT_ID" IMAGE="$IMAGE" 
   SYNTHETIC="$SYNTHETIC" DATABASE_URL="$DATABASE_URL" \
   CONNECTION="$CONNECTION" PACKAGES="$PACKAGES" CPU="$CPU" MEMORY="$MEMORY" \
   CURRENT_ENV="$CURRENT_ENV" CURRENT_SECRETS="$CURRENT_SECRETS" \
+  LLM_OVERRIDES="${LLM_OVERRIDES:-}" \
   python3 - "$DEFINITION" <<'PY'
 import json
 import os
@@ -130,7 +133,12 @@ if e["DATABASE_URL"]:
     secrets.append({"name": "database-url", "value": e["DATABASE_URL"]})
     env.append({"name": "DATABASE_URL", "secretRef": "database-url"})
 stored = {s["name"]: s.get("value") for s in json.loads(e["CURRENT_SECRETS"] or "[]") or []}
-for setting in json.loads(e["CURRENT_ENV"] or "[]") or []:
+overrides = json.loads(e["LLM_OVERRIDES"] or "null")
+if overrides:
+    # llm.sh: the self-hosted model replaces every earlier Copilot setting.
+    env += overrides["env"]
+    secrets += overrides["secrets"]
+for setting in [] if overrides else json.loads(e["CURRENT_ENV"] or "[]") or []:
     if not setting.get("name", "").startswith("LLM_"):
         continue
     reference, value = setting.get("secretRef"), setting.get("value")

@@ -1,0 +1,73 @@
+name: Publish model image
+# Builds the Copilot's self-hosted language model (docker/llm.Dockerfile: Qwen3-4B-Instruct
+# served by llama.cpp) and publishes it to the GitHub Container Registry
+# (ghcr.io/<owner>/icpac-llm) once it has answered a test request. Images from this public
+# repository are public, so Azure pulls them without credentials.
+on:
+  push:
+    branches: [main]
+    paths: [docker/llm.Dockerfile, .github/workflows/publish-llm.yml]
+  workflow_dispatch:
+permissions: {contents: read, packages: write}
+concurrency:
+  group: publish-llm
+  cancel-in-progress: true
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image name (lowercase owner)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/icpac-llm" >> "$GITHUB_ENV"
+      - name: Build (downloads the model and checks its SHA256)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/llm.Dockerfile
+          load: true
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          tags: icpac-llm:test
+      - name: Answer a test request on 2 CPUs, as on Azure
+        run: |
+          docker run -d --name llm --cpus 2 -e LLAMA_API_KEY=smoke-test -e LLAMA_ARG_THREADS=2 \
+            -p 127.0.0.1:8080:8080 icpac-llm:test
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8080/health && break
+            sleep 2
+          done
+          # docker-compose.llm.yml checks health with curl inside the container.
+          docker exec llm curl -fsS http://localhost:8080/health
+          # Everything but /health needs the key.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/v1/models)" = 401
+          curl -fsS --max-time 300 http://127.0.0.1:8080/v1/chat/completions \
+            -H 'Authorization: Bearer smoke-test' -H 'Content-Type: application/json' -d '{
+              "model": "qwen3-4b-instruct", "temperature": 0, "max_tokens": 100,
+              "response_format": {"type": "json_object"},
+              "messages": [
+                {"role": "system", "content": "Return ONLY JSON {\"sentence_ids\":[...]}: the IDs, taken from answer_ids, of the answer_sentences that answer the question."},
+                {"role": "user", "content": "{\"answer_sentences\": {\"rain\": \"Kenya: 40 mm of rain.\", \"maps\": \"Maps are in the bulletin.\"}, \"answer_ids\": [\"rain\", \"maps\"], \"question\": \"How much rain will Kenya get?\"}"}
+              ]}' | tee reply.json
+          python3 - <<'PY'
+          import json
+
+          reply = json.load(open("reply.json"))
+          ids = json.loads(reply["choices"][0]["message"]["content"])["sentence_ids"]
+          assert "rain" in ids and set(ids) <= {"rain", "maps"}, ids
+          print("Outline:", ids)
+          PY
+      - name: Server log
+        if: always()
+        run: docker logs llm 2>&1 | tail -40 || true
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish
+        run: |
+          for tag in latest "$GITHUB_SHA"; do
+            docker tag icpac-llm:test "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done

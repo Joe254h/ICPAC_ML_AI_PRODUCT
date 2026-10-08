@@ -138,7 +138,7 @@ class BulletinService:
         facts = ClimateTools(self.platform).call("get_bulletin_context", selection)
         references = ReferenceIndex().search("rainfall verification bulletin review")
         sentences = forecast_sentences(facts)
-        # A draft states every approved sentence: the language model may only order them.
+        # A draft states every approved sentence, in order: there is nothing to choose.
         rendered = render_grounded(
             "Draft a technical Week-2 rainfall summary",
             sentences,

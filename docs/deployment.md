@@ -55,7 +55,9 @@ demonstration runs (`ALLOW_SYNTHETIC_FORECASTS=true`).
 ## Free Copilot model and weekly bulletin
 
 Follow [the Groq setup steps](groq-setup.md) to enable the free Qwen endpoint on
-the Azure backend. Its key stays in an Azure Container Apps secret.
+the Azure backend. Its key stays in an Azure Container Apps secret. To keep the Copilot on
+your own infrastructure instead, `deploy/azure/llm.sh` runs Qwen3-4B-Instruct as a second
+container app and points the backend at it ([self-hosted model](self-hosted-llm.md)).
 
 The supplied `Weekly Forecast for -06 -13October 2026.docx` is retained unchanged
 as `templates/icpac_weekly_reference.docx`. Word drafts patch its identified text

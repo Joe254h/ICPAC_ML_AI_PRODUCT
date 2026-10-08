@@ -97,24 +97,20 @@ def test_frozen_map_survives_a_reset_disk(tmp_path, monkeypatch):
         service.transition(draft["id"], "approve", review)
 
 
-def test_drafts_keep_every_sentence_when_the_language_model_drops_some(tmp_path, monkeypatch):
+def test_drafts_keep_every_sentence_without_asking_the_language_model(tmp_path, monkeypatch):
     monkeypatch.setenv("RUN_ROOT", str(tmp_path / "runs"))
     monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
-
-    def endpoint(url, **kwargs):
-        content = '{"sentence_ids":["forecast"]}'
-        return httpx.Response(
-            200,
-            request=httpx.Request("POST", url),
-            json={"choices": [{"message": {"content": content}}]},
-        )
-
-    monkeypatch.setattr(httpx, "post", endpoint)
+    calls = []
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: calls.append(args))
     platform = Platform(Repository(f"sqlite:///{tmp_path / 'test.db'}"))
     draft = BulletinService(platform).generate(Selection(country="Kenya"))
-    assert draft["sentence_ids"][0] == "forecast"
-    assert set(draft["sentence_ids"]) == set(draft["sentences"])
+    # A draft states every approved sentence, so there is nothing for a model to choose.
+    assert calls == [] and draft["provider"] == "deterministic"
+    assert draft["sentence_ids"] == list(draft["sentences"])
     assert check_consistency(draft)["status"] == "PASS"
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    draft = BulletinService(platform).generate(Selection(country="Kenya"))
+    assert draft["provider"] == "deterministic" and draft["fallback"] is None
 
 
 # ---------------------------------------------------------------- weekly bulletin drafts

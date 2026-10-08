@@ -1,5 +1,8 @@
 # Free Groq configuration
 
+To use no outside AI service at all, run the Copilot's model yourself instead: see
+[the self-hosted model guide](self-hosted-llm.md).
+
 Create a free Groq account at https://console.groq.com and create an API key at
 https://console.groq.com/keys. Stay on the Free plan. Qwen 3.8 27B is a preview model;
 the published free quotas include 30 requests/minute, 1,000 requests/day and

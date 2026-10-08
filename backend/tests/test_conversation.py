@@ -155,23 +155,23 @@ def test_llm_gets_conversation_history_with_fresh_approved_facts(env, fast_maps,
             request=httpx.Request("POST", url),
             json={
                 "choices": [
-                    {
-                        "message": {
-                            "content": json.dumps(
-                                {"sentence_ids": list(payload["approved_sentences"])}
-                            )
-                        }
-                    }
+                    {"message": {"content": json.dumps({"sentence_ids": payload["answer_ids"]})}}
                 ]
             },
         )
 
     monkeypatch.setattr(httpx, "post", endpoint)
-    first = ask(env, "Explain the forecast for Kenya")
+    first = ask(env, "Compare MBC and the hybrid for Kenya")
     second = ask(env, "And Somalia?", first["session_id"])
     assert second["provider"] == "openai_compatible"
-    assert calls[1]["conversation"][0]["content"] == "Explain the forecast for Kenya"
-    assert "Somalia" in calls[1]["approved_sentences"]["rainfall"]
+    assert calls[1]["conversation"][0]["content"] == "Compare MBC and the hybrid for Kenya"
+    # The model chooses among the answers; the labels are shown with every answer.
+    assert calls[1]["answer_ids"] == ["Somalia_raw", "Somalia_mbc", "Somalia_hybrid"]
+    assert "Somalia" in calls[1]["answer_sentences"]["Somalia_hybrid"]
+    assert set(calls[1]["always_shown"]) == {"scope", "input", "model_status", "comparison_scope"}
+    # A question with one possible answer needs no model call.
+    third = ask(env, "Explain the forecast for Kenya", first["session_id"])
+    assert third["provider"] == "deterministic" and len(calls) == 2
 
 
 def test_greetings_and_explanations_work_without_forecast_and_history_is_retained(tmp_path):

@@ -1,6 +1,6 @@
 import re
 
-from fastapi import Depends, FastAPI, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, Query
 from fastapi.responses import Response
 
 from backend.app.schemas import (
@@ -17,6 +17,7 @@ from backend.app.services.bulletins import WEEKLY, BulletinService
 from backend.app.services.ingestion import ObservationIngestion
 from backend.app.services.jobs import Jobs
 from backend.app.services.registry import ModelRegistry
+from chatbot.providers import warm_up
 from chatbot.retrieval import ReferenceIndex
 from chatbot.service import Copilot
 
@@ -82,7 +83,9 @@ def install(app: FastAPI, dependency):
         return Copilot(platform).answer(body)
 
     @app.get("/chat/sessions")
-    def sessions(platform=Depends(dependency)) -> list[dict]:
+    def sessions(background: BackgroundTasks, platform=Depends(dependency)) -> list[dict]:
+        # The Copilot page lists sessions when it opens: wake a model that scaled to zero.
+        background.add_task(warm_up)
         return [
             {
                 "id": s["id"],

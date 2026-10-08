@@ -28,6 +28,7 @@ arrives as a new version.
 Documentation: [operational models](docs/operational_models.md) ·
 [forecast input format](docs/forecast_input_format.md) ·
 [deployment (Vercel, Azure or Cloud Run, Supabase)](docs/deployment.md) ·
+[self-hosted Copilot model](docs/self-hosted-llm.md) ·
 [HPC integration audit](docs/hpc_integration_audit.md) ·
 [integration report](docs/hpc_integration_report.md) ·
 [scientific safety](docs/scientific_safety.md) · [artifacts](artifacts/README.md)

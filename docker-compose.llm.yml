@@ -1,0 +1,28 @@
+# The Copilot's language model on the same server, with no outside service:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.llm.yml up -d
+#
+# Qwen3-4B-Instruct runs in the "llm" service (docker/llm.Dockerfile, CPU only). It is
+# reachable only on the compose network, so it needs no API key. See docs/self-hosted-llm.md.
+services:
+  llm:
+    image: ghcr.io/joe254h/icpac-llm:latest
+    build: {context: ., dockerfile: docker/llm.Dockerfile}
+    # The server uses every CPU it sees. On a shared server, limit it with "cpus: 4" here and
+    # add LLAMA_ARG_THREADS: "4" under environment.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+  backend:
+    environment:
+      LLM_PROVIDER: openai_compatible
+      LLM_BASE_URL: http://llm:8080/v1
+      LLM_MODEL: qwen3-4b-instruct
+      LLM_API_KEY: ""
+      LLM_REASONING_EFFORT: ""
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-120}
+      LLM_HISTORY_MESSAGES: ${LLM_HISTORY_MESSAGES:-4}
+    depends_on:
+      llm: {condition: service_healthy}
