@@ -8,17 +8,23 @@
 #
 # The image comes from the GitHub Container Registry (built by the "Publish backend image"
 # workflow), so nothing is built in Azure: registry builds are not available on Azure for
-# Students subscriptions. Running the script again updates the app to the latest image.
+# Students subscriptions. Product packages (NetCDF, maps, countries, verification) are kept
+# in Blob Storage, so the app needs no mounted disk: Azure for Students creates "express"
+# Container Apps environments, which cannot mount Azure Files. Running the script again
+# updates the app to the latest image.
 #
 # Settings (environment variables, all optional):
 #   LOCATION      Azure region (default southafricanorth). Azure for Students allows a fixed
-#                 list of regions; if this one is refused, rerun with an allowed one.
+#                 list of regions; if this one is refused, rerun with an allowed one. List them:
+#                 az policy assignment list --disable-scope-strict-match \
+#                   --query "[].parameters.listOfAllowedLocations.value" -o tsv
 #   DATABASE_URL  PostgreSQL connection string, e.g. Supabase's (paste it as Supabase shows
 #                 it, with your password). Without it the database lives inside the
 #                 container and is emptied whenever the app restarts or scales to zero.
 #   SYNTHETIC     "true" (default) allows labelled synthetic test forecasts; set "false" once
 #                 real ECMWF input is connected.
 #   IMAGE         Container image (default ghcr.io/joe254h/icpac-backend:latest).
+#   CPU, MEMORY   Container size (default 2 and 4Gi; a full-grid forecast needs about 1 GB).
 #   GROUP, APP, ENVIRONMENT  Resource names (defaults icpac, icpac-api, icpac-env).
 set -euo pipefail
 
@@ -29,9 +35,9 @@ ENVIRONMENT=${ENVIRONMENT:-icpac-env}
 IMAGE=${IMAGE:-ghcr.io/joe254h/icpac-backend:latest}
 SYNTHETIC=${SYNTHETIC:-true}
 DATABASE_URL=${DATABASE_URL:-}
-SHARE=forecast-data
-STORAGE_LINK=forecast-data
-MOUNT=/mnt/data
+CPU=${CPU:-2}
+MEMORY=${MEMORY:-4Gi}
+PACKAGES=forecast-packages
 
 step() { printf '\n==> %s\n' "$*"; }
 
@@ -44,9 +50,13 @@ for namespace in Microsoft.App Microsoft.OperationalInsights Microsoft.Storage; 
 done
 
 step "Resource group $GROUP in $LOCATION"
-if ! az group create --name "$GROUP" --location "$LOCATION" --output none; then
-  echo "The region $LOCATION was refused. Azure for Students allows a fixed list of regions;"
-  echo "rerun with one of them, for example: LOCATION=westeurope bash backend.sh"
+if az group show --name "$GROUP" --output none 2>/dev/null; then
+  echo "Using the existing resource group $GROUP"
+elif ! az group create --name "$GROUP" --location "$LOCATION" --output none; then
+  echo "The region $LOCATION was refused. Azure for Students allows a fixed list of regions:"
+  az policy assignment list --disable-scope-strict-match \
+    --query "[].parameters.listOfAllowedLocations.value" --output tsv || true
+  echo "Rerun with one of them, for example: LOCATION=switzerlandnorth bash backend.sh"
   exit 1
 fi
 
@@ -54,52 +64,50 @@ fi
 SUFFIX=$(az account show --query id --output tsv | tr -d '-' | cut -c1-12)
 STORAGE=${STORAGE:-icpac$SUFFIX}
 
-step "Storage account $STORAGE and file share $SHARE (forecast packages and inputs)"
+step "Storage account $STORAGE (forecast packages in the blob container $PACKAGES)"
 if ! az storage account show --name "$STORAGE" --resource-group "$GROUP" --output none 2>/dev/null; then
   az storage account create --name "$STORAGE" --resource-group "$GROUP" \
     --location "$LOCATION" --sku Standard_LRS --kind StorageV2 \
     --min-tls-version TLS1_2 --allow-blob-public-access false --output none
 fi
-if ! az storage share-rm show --resource-group "$GROUP" --storage-account "$STORAGE" \
-  --name "$SHARE" --output none 2>/dev/null; then
-  az storage share-rm create --resource-group "$GROUP" --storage-account "$STORAGE" \
-    --name "$SHARE" --quota 20 --output none
-fi
-KEY=$(az storage account keys list --resource-group "$GROUP" --account-name "$STORAGE" \
-  --query "[0].value" --output tsv)
+CONNECTION=$(az storage account show-connection-string --name "$STORAGE" \
+  --resource-group "$GROUP" --query connectionString --output tsv)
 
 step "Container Apps environment $ENVIRONMENT"
 if ! az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" --output none 2>/dev/null; then
   az containerapp env create --name "$ENVIRONMENT" --resource-group "$GROUP" \
     --location "$LOCATION" --output none
 fi
-az containerapp env storage set --name "$ENVIRONMENT" --resource-group "$GROUP" \
-  --storage-name "$STORAGE_LINK" --azure-file-account-name "$STORAGE" \
-  --azure-file-account-key "$KEY" --azure-file-share-name "$SHARE" \
-  --access-mode ReadWrite --output none
 ENVIRONMENT_ID=$(az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" \
   --query id --output tsv)
 
 step "Container app $APP from $IMAGE"
-APP_EXISTS=false
 KEEP_DATABASE=false
-CURRENT_APP_ENV='[]'
+CURRENT_ENV='[]'
+CURRENT_SECRETS='[]'
 if az containerapp show --name "$APP" --resource-group "$GROUP" --output none 2>/dev/null; then
-  APP_EXISTS=true
-  CURRENT_APP_ENV=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
-    --query 'properties.template.containers[0].env' --output json)
   # A rerun without DATABASE_URL keeps the database connection stored earlier.
-  if [ -z "$DATABASE_URL" ] && [ -n "$(az containerapp secret list --name "$APP" \
-    --resource-group "$GROUP" --query "[?name=='database-url'].name" --output tsv)" ]; then
-    KEEP_DATABASE=true
+  if [ -z "$DATABASE_URL" ]; then
+    DATABASE_URL=$(az containerapp secret list --name "$APP" --resource-group "$GROUP" \
+      --show-values --query "[?name=='database-url'].value | [0]" --output tsv)
+    [ -n "$DATABASE_URL" ] && KEEP_DATABASE=true
   fi
+  # Copilot settings added in the portal (LLM_*, see docs/groq-setup.md) and the secrets
+  # they reference are carried over: the update below replaces the whole definition.
+  CURRENT_ENV=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
+    --query "properties.template.containers[0].env" --output json)
+  CURRENT_SECRETS=$(az containerapp secret list --name "$APP" --resource-group "$GROUP" \
+    --show-values --output json)
 fi
-DEFINITION=$(mktemp --suffix .yaml)
+DEFINITION=$(mktemp --suffix .json)
 trap 'rm -f "$DEFINITION"' EXIT
-# JSON is valid YAML; python writes it so passwords need no escaping.
+# The definition goes to the Azure API as it is (az rest): the CLI's create path adds null
+# fields that express environments reject. Python writes it so passwords need no escaping.
 APP="$APP" LOCATION="$LOCATION" ENVIRONMENT_ID="$ENVIRONMENT_ID" IMAGE="$IMAGE" \
-  SYNTHETIC="$SYNTHETIC" DATABASE_URL="$DATABASE_URL" KEEP_DATABASE="$KEEP_DATABASE" \
-  STORAGE_LINK="$STORAGE_LINK" MOUNT="$MOUNT" CURRENT_APP_ENV="$CURRENT_APP_ENV" python3 - "$DEFINITION" <<'PY'
+  SYNTHETIC="$SYNTHETIC" DATABASE_URL="$DATABASE_URL" \
+  CONNECTION="$CONNECTION" PACKAGES="$PACKAGES" CPU="$CPU" MEMORY="$MEMORY" \
+  CURRENT_ENV="$CURRENT_ENV" CURRENT_SECRETS="$CURRENT_SECRETS" \
+  python3 - "$DEFINITION" <<'PY'
 import json
 import os
 import sys
@@ -107,44 +115,47 @@ import time
 
 e = os.environ
 env = [
+    # A changed value makes every run a new revision, which pulls the latest image
+    # (express environments do not accept revision suffixes).
+    {"name": "DEPLOYED_AT", "value": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
     {"name": "ALLOW_SYNTHETIC_FORECASTS", "value": e["SYNTHETIC"]},
     {"name": "AUTO_REGISTER_MODELS", "value": "true"},
-    {"name": "RUN_ROOT", "value": e["MOUNT"]},
-    {"name": "FORECAST_INPUT_ROOT", "value": e["MOUNT"] + "/inputs/ecmwf"},
-    {"name": "DATA_ROOT", "value": e["MOUNT"] + "/inputs/chirps"},
-    # Azure Files (SMB) does not support the HDF5 file locks used by NetCDF writers.
-    {"name": "HDF5_USE_FILE_LOCKING", "value": "FALSE"},
+    # Packages are written to the container disk and copied to Blob Storage, from which a
+    # restarted replica fetches them again.
+    {"name": "PACKAGE_STORE_CONNECTION", "secretRef": "package-store"},
+    {"name": "PACKAGE_STORE_CONTAINER", "value": e["PACKAGES"]},
 ]
-secrets = []
+secrets = [{"name": "package-store", "value": e["CONNECTION"]}]
 if e["DATABASE_URL"]:
     secrets.append({"name": "database-url", "value": e["DATABASE_URL"]})
-elif e["KEEP_DATABASE"] == "true":
-    secrets.append({"name": "database-url"})  # the update keeps the stored value
-if secrets:
     env.append({"name": "DATABASE_URL", "secretRef": "database-url"})
-for setting in json.loads(e["CURRENT_APP_ENV"]) or []:
-    if setting.get("name", "").startswith("LLM_"):
-        env.append(setting)
-        secret_name = setting.get("secretRef")
-        if secret_name and secret_name not in {s["name"] for s in secrets}:
-            secrets.append({"name": secret_name})  # preserve the existing stored key
+stored = {s["name"]: s.get("value") for s in json.loads(e["CURRENT_SECRETS"] or "[]") or []}
+for setting in json.loads(e["CURRENT_ENV"] or "[]") or []:
+    if not setting.get("name", "").startswith("LLM_"):
+        continue
+    reference = setting.get("secretRef")
+    if reference and not stored.get(reference):
+        print(f"Skipping {setting['name']}: its secret {reference} has no stored value")
+        continue
+    env.append({k: setting[k] for k in ("name", "value", "secretRef") if setting.get(k)})
+    if reference and reference not in {s["name"] for s in secrets}:
+        secrets.append({"name": reference, "value": stored[reference]})
 definition = {
     "location": e["LOCATION"],
     "properties": {
-        "managedEnvironmentId": e["ENVIRONMENT_ID"],
+        "environmentId": e["ENVIRONMENT_ID"],
+        # Only settings express environments support: single revision (built in), HTTP
+        # ingress on a fixed port, app secrets, TCP probes, replica limits.
         "configuration": {
-            "activeRevisionsMode": "Single",
-            "ingress": {"external": True, "targetPort": 8000, "transport": "auto"},
+            "ingress": {"external": True, "targetPort": 8000},
             "secrets": secrets,
         },
         "template": {
-            # A new suffix makes every run a new revision, which pulls the latest image.
-            "revisionSuffix": time.strftime("r%Y%m%d%H%M%S"),
             "containers": [
                 {
                     "name": e["APP"],
                     "image": e["IMAGE"],
-                    "resources": {"cpu": 2.0, "memory": "4Gi"},
+                    "resources": {"cpu": float(e["CPU"]), "memory": e["MEMORY"]},
                     "env": env,
                     "probes": [
                         # Startup verifies every artifact and loads the model.
@@ -155,31 +166,33 @@ definition = {
                             "failureThreshold": 30,
                         }
                     ],
-                    "volumeMounts": [{"volumeName": "data", "mountPath": e["MOUNT"]}],
                 }
             ],
             # One replica: forecasts run one at a time and the app keeps one database.
             "scale": {"minReplicas": 0, "maxReplicas": 1},
-            "volumes": [
-                {
-                    "name": "data",
-                    "storageType": "AzureFile",
-                    "storageName": e["STORAGE_LINK"],
-                    # The image runs as user 1000 (climate).
-                    "mountOptions": "dir_mode=0777,file_mode=0777,uid=1000,gid=1000",
-                }
-            ],
         },
     },
 }
 with open(sys.argv[1], "w") as stream:
     json.dump(definition, stream, indent=2)
 PY
-if [ "$APP_EXISTS" = true ]; then
-  az containerapp update --name "$APP" --resource-group "$GROUP" --yaml "$DEFINITION" --output none
-else
-  az containerapp create --name "$APP" --resource-group "$GROUP" --yaml "$DEFINITION" --output none
-fi
+APP_ID="${ENVIRONMENT_ID%/managedEnvironments/*}/containerApps/$APP"
+az rest --method put --url "https://management.azure.com$APP_ID?api-version=2025-07-01" \
+  --body "@$DEFINITION" --output none
+for _ in $(seq 1 60); do
+  STATE=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
+    --query properties.provisioningState --output tsv 2>/dev/null || true)
+  case "$STATE" in
+    Succeeded) break ;;
+    Failed | Canceled)
+      echo "The container app reported $STATE:"
+      az containerapp show --name "$APP" --resource-group "$GROUP" \
+        --query "properties.{state:provisioningState, revision:latestRevisionName}" --output table
+      exit 1
+      ;;
+  esac
+  sleep 10
+done
 FQDN=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
   --query properties.configuration.ingress.fqdn --output tsv)
 

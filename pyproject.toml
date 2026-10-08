@@ -9,9 +9,11 @@ requires-python = ">=3.12"
 dependencies = ["fastapi==0.142.2", "uvicorn>=0.35,<1", "pydantic>=2.13,<3", "numpy>=2.2,<3", "pandas>=2.2,<4", "xarray>=2025.1", "scipy>=1.15", "PyYAML==6.0.3", "SQLAlchemy==2.1.3", "httpx==0.28.1", "matplotlib>=3.10", "netCDF4>=1.7", "zarr>=3.1", "catboost==1.2.10"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff==0.16.10", "mypy==2.4.0", "types-PyYAML", "pandas-stubs"]
+dev = ["pytest>=8", "ruff==0.16.10", "mypy==2.4.0", "types-PyYAML", "pandas-stubs", "azure-storage-blob>=12.20"]
 models = ["lightgbm", "xgboost", "scikit-learn"]
 postgres = ["psycopg[binary]"]
+# Product packages in Azure Blob Storage (PACKAGE_STORE_CONNECTION).
+azure = ["azure-storage-blob>=12.20"]
 
 [tool.setuptools.packages.find]
 include = ["backend*", "climate_engine*", "chatbot*", "hpc*"]
