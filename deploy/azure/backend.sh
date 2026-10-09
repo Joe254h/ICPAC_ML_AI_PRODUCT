@@ -216,20 +216,36 @@ for _ in $(seq 1 60); do
 done
 FQDN=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
   --query properties.configuration.ingress.fqdn --output tsv)
+REVISION=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
+  --query properties.latestRevisionName --output tsv)
 
-step "Waiting for the API to start (first start pulls the image and loads the model)"
-for _ in $(seq 1 30); do
-  if curl -fsS --max-time 20 "https://$FQDN/health" > /dev/null 2>&1; then
+# The previous revision keeps answering until the new one is ready, so wait for Azure to
+# report the new revision ready before reading the health of the API.
+step "Waiting for the new revision $REVISION (pulls the image, verifies artifacts, loads the model)"
+READY=""
+for _ in $(seq 1 60); do
+  curl -fsS --max-time 20 "https://$FQDN/health" > /dev/null 2>&1 || true
+  READY=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
+    --query properties.latestReadyRevisionName --output tsv 2>/dev/null || true)
+  [ "$READY" = "$REVISION" ] && break
+  RUNNING=$(az containerapp revision show --name "$APP" --resource-group "$GROUP" \
+    --revision "$REVISION" --query properties.runningState --output tsv 2>/dev/null || true)
+  if [ "$RUNNING" = "Failed" ]; then
     break
   fi
   sleep 10
 done
+if [ "$READY" != "$REVISION" ]; then
+  echo "The new revision $REVISION is not ready; the previous version may still be answering."
+  az containerapp revision list --name "$APP" --resource-group "$GROUP" --output table || true
+  echo "Its startup log: az containerapp logs show -n $APP -g $GROUP --revision $REVISION --tail 80"
+fi
 curl -fsS --max-time 60 "https://$FQDN/health" | python3 -c '
 import json, sys
 health = json.load(sys.stdin)
-print("Status:", health["status"])
+print("Status:", health["status"], "| version:", health.get("version", "previous release"))
 for name, value in health["components"].items():
-    if name.startswith(("Operational", "Model", "Database", "Storage")):
+    if name.startswith(("Operational", "Model", "Database", "Storage", "ECMWF", "CHIRPS", "MBC")):
         print(f"  {name}: {value}")
 ' || echo "The API is not answering yet; check: az containerapp logs show -n $APP -g $GROUP --follow"
 

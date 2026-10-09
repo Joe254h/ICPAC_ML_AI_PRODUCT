@@ -8,6 +8,7 @@ import httpx
 from backend.app.services import forecasts, operational
 from chatbot.providers import MockLLMProvider, provider
 from climate_engine.core import ROOT, config
+from climate_engine.provenance import code_version
 
 
 def system_health(platform) -> dict:
@@ -83,5 +84,7 @@ def system_health(platform) -> dict:
         if any(value.startswith(("Unavailable", "Warning")) for value in components.values())
         else "Healthy",
         "mode": "operational",
+        # The deployed source revision, so a redeploy can confirm the new version is live.
+        "version": code_version(),
         "components": components,
     }

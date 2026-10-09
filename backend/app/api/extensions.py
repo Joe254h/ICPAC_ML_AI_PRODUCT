@@ -77,8 +77,14 @@ def install(app: FastAPI, dependency):
 
     @app.get("/bulletins")
     def bulletins(platform=Depends(dependency)) -> list[dict]:
-        """Weekly bulletin drafts (drafts of the retired demonstration are not listed)."""
-        return [b for b in reversed(platform.repo.list("bulletin")) if b.get("kind") == WEEKLY]
+        """Weekly bulletin drafts of real forecasts. Drafts of the retired demonstration and
+        of synthetic test input stay in older databases but are not listed."""
+        return [
+            b
+            for b in reversed(platform.repo.list("bulletin"))
+            if b.get("kind") == WEEKLY
+            and not ((b.get("facts") or {}).get("input") or {}).get("synthetic")
+        ]
 
     @app.post("/bulletins/generate")
     def generate_bulletin(

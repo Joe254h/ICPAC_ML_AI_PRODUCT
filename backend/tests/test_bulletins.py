@@ -128,5 +128,8 @@ def test_rejected_drafts_and_changed_facts_are_refused(env, fast_maps):
     assert check_consistency(changed)["status"] == "FAIL"
     # Drafts of the retired demonstration stay in old databases but are never listed.
     env.platform.repo.save("bulletin", {"title": "demo", "status": "draft"}, "old-demo")
+    # So are weekly drafts made from synthetic test input by earlier versions.
+    synthetic = {**draft, "facts": {**draft["facts"], "input": {"synthetic": True}}}
+    env.platform.repo.save("bulletin", {**synthetic, "id": "old-synthetic"}, "old-synthetic")
     assert [b["id"] for b in env.client.get("/bulletins").json()] == [draft["id"]]
     assert env.client.get("/bulletins/old-demo/export").status_code == 404
