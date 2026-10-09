@@ -1,5 +1,3 @@
-import type { Selection } from "@/types";
-
 /** An API failure with its HTTP status, so "nothing yet" (404) can be told apart. */
 export class ApiError extends Error {
   constructor(
@@ -31,10 +29,6 @@ export async function request<T>(
     );
   }
   return response.json();
-}
-
-export function query(selection: Selection) {
-  return new URLSearchParams(selection).toString();
 }
 
 export function mutate<T>(path: string, body: unknown) {

@@ -1,120 +1,71 @@
-import { test, expect } from "@playwright/test";
-test("Copilot calls tools and displays retrieved sources", async ({ page }) => {
-  await page.goto("/copilot");
-  await page
-    .getByLabel("Ask Forecaster Copilot")
-    .fill("What observation datasets are available?");
-  await page.getByRole("button", { name: "Send", exact: true }).click();
-  await expect(page.locator(".chat-message.assistant")).toContainText(
-    "CHIRPS",
-    { timeout: 60000 },
-  );
-  await expect(page.locator(".chat-message.assistant")).toContainText("TAMSAT");
+import { expect, test, type Page } from "@playwright/test";
+
+async function review(page: Page, action: string, comment: string) {
+  await page.getByRole("button", { name: action, exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  const confirm = dialog.getByRole("button", { name: action, exact: true });
+  await expect(confirm).toBeDisabled();
+  await dialog.getByLabel("Reviewer name").fill("Browser reviewer");
+  await dialog.getByLabel("Justification").fill(comment);
+  await dialog.getByRole("checkbox").check();
+  await confirm.click();
+  await expect(dialog).toBeHidden();
+}
+
+test("a bulletin goes from draft to review, approval and publication", async ({
+  page,
+}) => {
+  await page.goto("/bulletin");
   await expect(
-    page.getByText("Inspect tool evidence", { exact: false }),
+    page.getByRole("heading", { name: "Total Rainfall" }),
   ).toBeVisible();
-  await expect(page.locator(".reference-list").last()).toContainText(
-    "Prototype verification guide",
+  await expect(
+    page.getByRole("heading", { name: "Products in progress" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Create draft for review" }).click();
+  await page.waitForURL(/\/bulletins\?id=/, { timeout: 60_000 });
+  await expect(page.getByText("Draft", { exact: true }).first()).toBeVisible();
+  await review(
+    page,
+    "Submit for review",
+    "Checked the maps, wording and valid dates",
   );
-  await page.getByLabel("Ask Forecaster Copilot").fill("What does RMSE mean?");
-  await page.getByLabel("Ask Forecaster Copilot").press("Enter");
-  await expect(page.locator(".chat-message.assistant").last()).toContainText(
-    "forecast errors",
+  await review(page, "Approve", "The narrative matches the forecast");
+  await review(page, "Publish", "Released through the ICPAC channels");
+  await expect(
+    page.getByText("Published", { exact: true }).first(),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Word" })).toHaveAttribute(
+    "href",
+    /\/api\/bulletins\/.+\/export\?format=docx/,
   );
 });
-test("Bulletin requires a named review before approval", async ({ page }) => {
-  await page.goto("/bulletins");
-  await page
-    .getByRole("button", { name: "Generate draft", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Submit for review", exact: true }),
-  ).toBeVisible({ timeout: 60000 });
-  await page
-    .getByRole("button", { name: "Submit for review", exact: true })
-    .click();
-  await page
-    .getByLabel("Reviewer name", { exact: true })
-    .fill("Browser test forecaster");
-  await page
-    .getByLabel("Review justification", { exact: true })
-    .fill("Checked synthetic sources, units and valid dates");
-  await page.getByRole("checkbox").check();
-  await page
-    .getByRole("button", { name: "Confirm action", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Approve bulletin", exact: true }),
-  ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Approve bulletin", exact: true })
-    .click();
-  await page
-    .getByLabel("Reviewer name", { exact: true })
-    .fill("Browser test forecaster");
-  await page
-    .getByLabel("Review justification", { exact: true })
-    .fill("Narrative matches frozen tool evidence");
-  await page.getByRole("checkbox").check();
-  await page
-    .getByRole("button", { name: "Confirm action", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Record demo publication", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: "Export HTML", exact: true }),
-  ).toBeVisible();
-});
-test("Local executor completes and exposes logs", async ({ page }) => {
-  await page.goto("/jobs");
-  await page.getByLabel("Job executor", { exact: true }).selectOption("local");
-  await page.getByRole("button", { name: "Run pipeline", exact: true }).click();
-  await expect(
-    page
-      .locator("tbody tr")
-      .filter({ hasText: "products" })
-      .filter({ hasText: "local" })
-      .first(),
-  ).toContainText("success", { timeout: 60000 });
-});
-test("Model promotion requires explicit confirmation and can roll back", async ({
+
+test("the model registry shows the candidate and guards promotion", async ({
   page,
 }) => {
   await page.goto("/models");
-  const raw = page.locator(".product-card").filter({
-    has: page.getByRole("heading", { name: "Raw ECMWF", exact: true }),
-  });
-  await raw.getByRole("button", { name: "Promote", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Confirm action", exact: true }),
-  ).toBeDisabled();
-  await page
-    .getByLabel("Reviewer name", { exact: true })
-    .fill("Browser reviewer");
-  await page
-    .getByLabel("Review justification", { exact: true })
-    .fill("Prototype comparison reviewed for UI validation");
-  await page.getByRole("checkbox").check();
-  await page
-    .getByRole("button", { name: "Confirm action", exact: true })
-    .click();
-  const mock = page.locator(".product-card").filter({
-    has: page.getByRole("heading", { name: "Mock correction", exact: true }),
-  });
-  await expect(
-    mock.getByRole("button", { name: "Rollback", exact: true }),
+    page.getByRole("heading", { name: "MBC + Atmos37 CatBoost" }),
   ).toBeVisible();
-  await mock.getByRole("button", { name: "Rollback", exact: true }).click();
-  await page
-    .getByLabel("Reviewer name", { exact: true })
-    .fill("Browser reviewer");
-  await page
-    .getByLabel("Review justification", { exact: true })
-    .fill("Restore the original demonstration production version");
-  await page.getByRole("checkbox").check();
-  await page
-    .getByRole("button", { name: "Confirm action", exact: true })
-    .click();
-  await expect(raw.getByText("retired", { exact: true })).toBeVisible();
+  await expect(page.getByText("AI/ML layer in progress.")).toBeVisible();
+  await page.getByRole("button", { name: "Promote to production" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+});
+
+test("operations lists the weekly cycle with who ran it", async ({ page }) => {
+  await page.goto("/data/runs");
+  const row = page
+    .locator("tbody tr")
+    .filter({ hasText: "Weekly cycle" })
+    .first();
+  await expect(row).toContainText("complete");
+  await expect(row).toContainText("Browser forecaster");
+  await row.getByRole("button", { name: "Details" }).click();
+  await expect(
+    page.getByRole("link", { name: "Open forecast →" }).first(),
+  ).toBeVisible();
 });

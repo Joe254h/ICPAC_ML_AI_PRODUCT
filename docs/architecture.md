@@ -1,13 +1,26 @@
 # Architecture
 
-Frontend -> FastAPI -> application services -> independent scientific engine. Models, sources, persistence, executors and interpretation providers are replaceable. See README's Mermaid diagram.
+Next.js frontend (`frontend/`) → FastAPI (`backend/app/`) → application services →
+independent scientific engine (`climate_engine/`). The frontend computes nothing
+scientific: every number, map and label comes from the API.
 
-Forecast and observation arrival are independent. scripts/run_pipeline.py --trigger forecast produces forecast products; --trigger observation runs verification. Each event retains a separate state file, checks for changes, uses an exclusive lock and updates state atomically only after success. Generated files live below data/runs. No retention ever targets source code.
+* **Inputs** (`climate_engine/inputs/`): the ECMWF Open Data ensemble download and the
+  CHIRPS daily reader, configured in `config/data_sources.yaml`. Planned sources (TAMSAT,
+  RFE 2.0, ARC 2.0, GPM IMERG) are listed there without readers.
+* **Forecast** (`climate_engine/operational/`): Week-2 processing on the authoritative
+  800 × 700, 0.05° grid; MBC; the Atmos37 feature builder and CatBoost residual model,
+  used once its pressure-level inputs exist.
+* **Products** (`climate_engine/products/`, `climate_engine/cartography/`): the package of
+  each forecast (NetCDF, ICPAC maps, map overlays, country statistics, verification,
+  provenance) and the weekly bulletin.
+* **Operations** (`backend/app/services/operations.py`): the weekly cycle and its steps run
+  as background tasks, one at a time, each recorded with who started it.
+* **Records**: SQLAlchemy's repository stores typed records by kind (model, forecast,
+  ECMWF input, CHIRPS week, operation, bulletin, approval, chat session, audit) in SQLite or
+  PostgreSQL (`DATABASE_URL`). Packages live under `RUN_ROOT` and, with
+  `PACKAGE_STORE_CONNECTION`, in Blob Storage.
+* **Copilot** (`chatbot/`): grounded answers from the forecast's own values, with a
+  self-hosted or compatible language model choosing among approved sentences.
 
-Scientific settings are versioned in config/science.yaml. Metadata and QC gates precede accumulation. Alignment is exact and rejects differing coordinates. The API serializes only bounded summary arrays/GeoJSON; it never passes a NetCDF dataset to the browser. Small immutable computations are cached by full selector values. Mutating registry/ingestion workflows must invalidate caches.
-
-SQLAlchemy's Repository persists typed-service payloads by entity kind: forecast_cycle, dataset, model, verification, product_run, job, bulletin, approval, chat_session and audit. This deliberately small prototype uses a generic record table. Production should migrate these to normalized tables with unique constraints, immutable audit records and role enforcement. Database URL accepts PostgreSQL using the optional psycopg extra.
-
-Natural Earth boundaries are public-domain demonstration geography; replace them with the locked ICPAC mask/grid before scientific deployment. Country aggregation uses cell centres with cosine-latitude weights. Map bounds cover 21E–52E and 12S–24N, including full Somalia.
-
-Code is built as a monorepo to keep deterministic science independent of presentation. The file/ starter directory is preserved. No production data, trained model or credentials were present to migrate.
+See [operations](operations.md), [operational models](operational_models.md) and
+[deployment](deployment.md).

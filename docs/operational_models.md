@@ -1,8 +1,8 @@
 # Operational Week-2 forecasting: MBC + Atmos37 CatBoost
 
 This path reproduces the validated HPC inference chain on the authoritative ICPAC-11
-domain. The synthetic demonstration grid of the first release is separate
-([models.md](models.md)) and stays available under Workspace › Demonstration.
+domain. The weekly operations that feed it (ECMWF Open Data download, CHIRPS
+verification) are described in [operations.md](operations.md).
 
 ```text
 ECMWF S2S tp (perturbed members)       ECMWF pressure levels (perturbed members)
@@ -106,11 +106,13 @@ status history (`status_history`), the basis for checking imported packages.
 
 ## Running a forecast
 
-* Web/API: `POST /forecasts/run {"initialization": "2026-10-05", "source": "ecmwf_files",
-  "actor": "..."}` reads the files described in
+* Weekly cycle (Operations page, `POST /operations {"action": "cycle", "actor": "..."}` or
+  `python -m scripts.operational_cycle`): downloads the newest ECMWF ensemble from ECMWF
+  Open Data, runs the forecast and verifies what is due; see [operations.md](operations.md).
+* Web/API: `POST /forecasts/run {"initialization": "2026-10-05", "source":
+  "ecmwf_opendata", "actor": "..."}` runs from a downloaded (or, if needed, freshly
+  fetched) Open Data run; `"source": "ecmwf_files"` reads the files described in
   [forecast_input_format.md](forecast_input_format.md) from `FORECAST_INPUT_ROOT`.
-  `"source": "synthetic_fixture"` runs the real model on labelled synthetic input where
-  `ALLOW_SYNTHETIC_FORECASTS=true`.
 * HPC: `python -m scripts.run_operational --init-date 2026-10-05 --descriptor
   config/model_registry/<model>.yaml --rainfall <tp file> --pressure <pl file> --output
   <RUN_ROOT>/forecasts [--model-status candidate|production]`, then

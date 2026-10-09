@@ -1,205 +1,197 @@
 "use client";
-/** Bulletin › Weekly product: the forecast's product package and the bulletin status. */
-import { FileWarning } from "lucide-react";
+/** The weekly bulletin of the latest (or a chosen) forecast, as forecasters will issue it. */
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { FileDown, FilePlus2 } from "lucide-react";
 import {
+  Button,
   Card,
-  CardContent,
-  CardHeader,
   ErrorState,
-  KeyValues,
+  InProgress,
   LinkButton,
-  PageHeader,
+  MapFigure,
+  Notice,
+  PageBanner,
   Skeleton,
 } from "@/components/ui";
 import type { PageProps } from "@/features/view";
+import { useActor } from "@/lib/actor";
+import { validDays } from "@/lib/format";
+import { mutate } from "@/services/api";
+import { useApi } from "@/services/hooks";
+import type { BulletinStatus, ForecastDetail } from "@/types/operational";
+import type { Bulletin as Draft } from "@/types/workflows";
 import {
-  Downloads,
-  ForecastBadges,
   NoForecast,
-  forecastSubtitle,
+  forecastFacts,
   useForecast,
 } from "@/features/operational/shared";
-import { dateTime, validDays } from "@/lib/format";
-import { useApi } from "@/services/hooks";
-import type { BulletinStatus } from "@/types/operational";
 
-export default function Bulletin({ id }: PageProps) {
-  const forecast = useForecast(id);
-  const status = useApi<BulletinStatus>(
-    forecast.data ? `/forecasts/${forecast.data.forecast_id}/bulletin` : null,
-  );
-  if (forecast.loading && !forecast.data) return <Skeleton className="h-96" />;
-  if (forecast.status === 404) return <NoForecast />;
-  if (forecast.error || !forecast.data)
+type Section = NonNullable<BulletinStatus["sections"]>[number];
+
+function Rich({ text, lead }: { text: string; lead?: string }) {
+  if (lead && text.startsWith(lead))
     return (
-      <ErrorState
-        message={forecast.error ?? "Forecast unavailable"}
-        retry={forecast.reload}
-      />
+      <>
+        <strong>{lead}</strong>
+        {text.slice(lead.length)}
+      </>
     );
-  const detail = forecast.data;
-  const generator = status.data?.generator;
+  return <>{text}</>;
+}
+
+function Bullets({ section }: { section: Section }) {
+  return (
+    <ul style={{ margin: 0, paddingLeft: 20 }}>
+      {section.text.map((text, i) => (
+        <li key={i} style={{ marginBottom: 10 }}>
+          <Rich text={text} lead={section.leads?.[i]} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Product({ section, eyebrow }: { section: Section; eyebrow: string }) {
+  return (
+    <Card>
+      <div className="split" style={{ alignItems: "start", gap: 32 }}>
+        <div>
+          <p className="eyebrow">{eyebrow}</p>
+          <h2 style={{ fontSize: 26, marginBottom: 16 }}>{section.title}</h2>
+          <Bullets section={section} />
+        </div>
+        {section.map && (
+          <MapFigure src={"/api" + section.map} alt={section.title + " map"} />
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function Body({ detail }: { detail: ForecastDetail }) {
+  const status = useApi<BulletinStatus>(
+    `/forecasts/${detail.forecast_id}/bulletin`,
+  );
+  const router = useRouter();
+  const [actor] = useActor();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const sections = status.data?.sections ?? [];
+  const get = (key: string) => sections.find((s) => s.key === key);
+  const headline = get("headline");
+  const note = get("decision_support");
+  const pending = sections.filter((s) => s.missing_dependency);
+  const draft = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const record = await mutate<Draft>("/bulletins/generate", {
+        forecast_id: detail.forecast_id,
+        actor: actor || "Forecaster",
+      });
+      router.push(`/bulletins?id=${record.id}`);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  };
   return (
     <>
-      <PageHeader
-        title="Weekly forecast bulletin"
-        description={forecastSubtitle(detail)}
-        badges={<ForecastBadges detail={detail} />}
+      <PageBanner
+        title={status.data?.title ?? "Weekly Forecast"}
+        crumbs={[{ label: "Bulletin" }, { label: "Weekly bulletin" }]}
+        subtitle={`The ICPAC weekly bulletin for ${validDays(detail.valid_start, detail.valid_end)}, written from the forecast with the template's wording. It is released after forecaster review.`}
+        facts={forecastFacts(detail)}
         actions={
           <>
-            {generator?.status === "ready" && status.data?.export && (
-              <LinkButton href={"/api" + status.data.export}>
-                Download Word draft
+            <Button variant="amber" onClick={draft} disabled={busy}>
+              <FilePlus2 size={18} />{" "}
+              {busy ? "Preparing draft…" : "Create draft for review"}
+            </Button>
+            {status.data?.export && (
+              <LinkButton
+                href={"/api" + status.data.export}
+                variant="ghost-light"
+              >
+                <FileDown size={18} /> Word document
               </LinkButton>
             )}
-            <LinkButton href="/bulletins">Bulletin drafts</LinkButton>
           </>
         }
       />
-      {status.data?.sections && (
-        <article
-          className="bulletin-paper"
-          aria-label="Weekly forecast bulletin preview"
-        >
-          <header>
-            <p className="bulletin-organization">
-              IGAD Climate Prediction and Applications Centre
-            </p>
-            <h1>
-              {status.data.title ??
-                `Weekly Forecast for ${validDays(detail.valid_start, detail.valid_end)}`}
-            </h1>
-            <p>
-              Draft for forecaster review
-              {detail.synthetic ? " · Synthetic test inputs" : ""}
-            </p>
-          </header>
-          {status.data.sections.map((section) => (
-            <section key={section.key}>
-              <h2>{section.title}</h2>
-              {section.text.map((text, index) => {
-                if (!text) return null;
-                // The reference's bold lead ("Heavy rainfall (above 200 mm)").
-                const lead = section.leads?.[index] ?? "";
-                return (
-                  <p key={index}>
-                    {lead && text.startsWith(lead) ? (
-                      <>
-                        <strong>{lead}</strong>
-                        {text.slice(lead.length)}
-                      </>
-                    ) : (
-                      text
-                    )}
-                  </p>
-                );
-              })}
-              {section.map ? (
-                // Scientific images are served through the binary API proxy.
-                <img
-                  src={"/api" + section.map}
-                  alt={`${section.title} for this forecast`}
-                  loading="lazy"
-                />
-              ) : section.missing_dependency ? (
-                <div className="bulletin-missing-map">
-                  <strong>{section.title} map unavailable</strong>
-                  <p>{section.missing_dependency}</p>
-                </div>
-              ) : null}
-            </section>
-          ))}
-          <footer>
-            IGAD | ICPAC · Forecast {detail.forecast_id} · Human review required
-            before release
-          </footer>
-        </article>
+      {error && <ErrorState message={error} />}
+      {status.loading && <Skeleton height={480} />}
+      {status.error && (
+        <ErrorState message={status.error} retry={status.reload} />
       )}
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader
-            title="Product package"
-            description={`Forecast ${detail.forecast_id} · generated ${dateTime(detail.generation_time)}`}
-          />
-          <CardContent className="pt-3">
-            <Downloads detail={detail} />
-          </CardContent>
+      {headline && (
+        <Card eyebrow="This week" title="Headline" className="headline-card">
+          {headline.text.map((text, i) => (
+            <p key={i} style={{ fontSize: 18, margin: "0 0 8px" }}>
+              <Rich text={text} lead={headline.leads?.[i]} />
+            </p>
+          ))}
         </Card>
-        <div className="grid min-w-0 grid-cols-1 content-start gap-6">
-          <Card>
-            <CardHeader
-              title={
-                <span className="inline-flex items-center gap-2">
-                  <FileWarning size={17} /> Word bulletin
-                </span>
-              }
-              description="Draft in the supplied ICPAC weekly bulletin format"
-            />
-            <CardContent className="pt-3">
-              {status.loading && !status.data ? (
-                <Skeleton className="h-20" />
-              ) : status.error ? (
-                <ErrorState message={status.error} retry={status.reload} />
-              ) : generator?.status === "ready" ? (
-                <div className="space-y-3">
-                  <p>
-                    Uses the supplied bulletin's headings, page settings,
-                    header, footer and figure positions.
-                  </p>
-                  <p className="text-muted-foreground">{generator.review}</p>
-                  <p className="text-muted-foreground">
-                    {generator.layout_validation}
-                  </p>
-                  {status.data?.export && (
-                    <a
-                      className="inline-flex items-center rounded-md border border-border px-3 py-2 font-medium hover:bg-muted"
-                      href={"/api" + status.data.export}
-                    >
-                      Download Word draft
-                    </a>
-                  )}
-                </div>
-              ) : generator ? (
-                <KeyValues
-                  items={[
-                    [
-                      "Status",
-                      generator.status === "unavailable"
-                        ? "Unavailable"
-                        : generator.status,
-                    ],
-                    ["Missing dependency", generator.missing_dependency],
-                    ["To enable", generator.how_to_supply],
-                  ]}
-                />
-              ) : null}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader
-              title="Interpretation inputs"
-              description="Facts a forecaster or the Copilot can use; no narrative is generated"
-            />
-            <CardContent className="pt-3">
-              <KeyValues
-                items={[
-                  ["Method", detail.interpretation.method.label],
-                  ["Model role", detail.interpretation.model.role],
-                  ["Input", detail.interpretation.input.label],
-                  [
-                    "Anomaly",
-                    `unavailable · ${detail.interpretation.anomaly.missing_dependency}`,
-                  ],
-                  [
-                    "Category",
-                    `unavailable · ${detail.interpretation.category.missing_dependency}`,
-                  ],
-                ]}
-              />
-            </CardContent>
-          </Card>
+      )}
+      {note && (
+        <div className="notice green" style={{ display: "block" }}>
+          <Rich text={note.text[0]} lead={note.leads?.[0]} />
         </div>
-      </div>
+      )}
+      {get("rainfall") && (
+        <Product
+          section={get("rainfall") as Section}
+          eyebrow="Regional outlook"
+        />
+      )}
+      {get("somalia") && !get("somalia")?.missing_dependency && (
+        <Product section={get("somalia") as Section} eyebrow="Country focus" />
+      )}
+      {pending.length > 0 && (
+        <Card
+          eyebrow="Coming soon"
+          title="Products in progress"
+          subtitle="These sections keep their place in the bulletin and say what they need; nothing is inferred for them."
+        >
+          <div className="grid-3">
+            {pending.map((section) => (
+              <InProgress key={section.key} title={section.title}>
+                Requires {section.missing_dependency}.
+              </InProgress>
+            ))}
+          </div>
+        </Card>
+      )}
+      {status.data?.generator.status !== "ready" && status.data && (
+        <Notice title="Word document unavailable.">
+          {status.data.generator.missing_dependency}
+        </Notice>
+      )}
     </>
+  );
+}
+
+export default function Bulletin({ id }: PageProps) {
+  const forecast = useForecast(id);
+  return (
+    <div className="page">
+      <div className="wrap">
+        {forecast.loading && <Skeleton height={520} />}
+        {forecast.status === 404 && (
+          <>
+            <PageBanner
+              title="Weekly Bulletin"
+              crumbs={[{ label: "Bulletin" }]}
+            />
+            <NoForecast />
+          </>
+        )}
+        {forecast.error && forecast.status !== 404 && (
+          <ErrorState message={forecast.error} retry={forecast.reload} />
+        )}
+        {forecast.data && <Body detail={forecast.data} />}
+      </div>
+    </div>
   );
 }

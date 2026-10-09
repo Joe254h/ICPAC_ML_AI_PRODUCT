@@ -4,7 +4,7 @@ import * as echarts from "echarts";
 export default function Chart({
   option,
   height = 230,
-  label = "Computed synthetic climate comparison chart",
+  label = "Chart",
 }: {
   option: echarts.EChartsOption;
   height?: number;

@@ -14,16 +14,15 @@ services:
       LLM_MODEL: ${LLM_MODEL:-qwen-prototype}
       LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
       ARTIFACT_ROOT: /app/artifacts
-      DATA_ROOT: /app/observations
+      # Downloaded ECMWF ensembles and CHIRPS weeks, and the product packages, are kept
+      # in the data volume.
+      DATA_ROOT: /app/data/observations
       RUN_ROOT: /app/data/runs
-      FORECAST_INPUT_ROOT: /app/forecasts
-      ALLOW_SYNTHETIC_FORECASTS: ${ALLOW_SYNTHETIC_FORECASTS:-true}
+      FORECAST_INPUT_ROOT: /app/data/forecasts
       LLM_API_KEY: ${LLM_API_KEY:-}
     volumes:
       - climate-data:/app/data
       - ./artifacts:/app/artifacts:ro
-      - ./observations:/app/observations:ro
-      - ./forecasts:/app/forecasts:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s

@@ -1,123 +1,226 @@
 "use client";
-/** One forecast layer (raw ECMWF, MBC or MBC + AI) with how it is computed. */
+/** One forecast layer (raw ECMWF, MBC or MBC + AI/ML): how it is made and its map. */
 import Link from "next/link";
 import {
   Card,
-  CardContent,
-  CardHeader,
   ErrorState,
-  MapImage,
-  PageHeader,
+  InProgress,
+  LinkButton,
+  MapFigure,
+  PageBanner,
   Skeleton,
   Stat,
-  Table,
 } from "@/components/ui";
 import type { PageProps } from "@/features/view";
 import { countrySlug } from "@/features/routes";
+import { SERIES, num, validDays } from "@/lib/format";
+import { useApp } from "@/components/shell";
+import type { ForecastDetail, Variant } from "@/types/operational";
 import {
-  ForecastBadges,
+  LAYER_TEXT,
   NoForecast,
-  forecastSubtitle,
+  forecastFacts,
+  layersOf,
   mapUrl,
   useForecast,
 } from "@/features/operational/shared";
-import { SERIES, num } from "@/lib/format";
-import type { ForecastDetail, Variant } from "@/types/operational";
 
-function explanation(variant: Variant, detail: ForecastDetail): string[] {
-  const p = detail.provenance;
-  if (variant === "raw")
-    return [
-      `ECMWF S2S extended-range ensemble, ${p.ensemble_members} perturbed members (the control member is left out, as in training).`,
-      "Week-2 total per member: accumulated tp at 336 h minus tp at 168 h.",
-      "The ensemble mean is feature X_mean; the population standard deviation is X_spread.",
-    ];
-  if (variant === "mbc")
-    return [
-      "MBC = max(0, raw × R[month, cell]), the locked multiplicative bias correction.",
-      `R holds 12 monthly ratios per domain cell (clipped to 0.05–20) from the locked MBC artifact; month ${p.mbc_month} is the initialization month.`,
-      "MBC is feature 37 (MBC_forecast) and the baseline of the residual model.",
-    ];
-  return [
-    `${p.model.algorithm} (${p.model.trees} trees) predicts the residual CHIRPS − MBC from ${detail.model.feature_count ?? 37} features: rainfall mean and spread, location, season and the Atmos37 atmospheric fields (humidity, winds, moisture transport, temperature, geopotential, shear).`,
-    "MBC + AI = max(MBC + predicted residual, 0): a hybrid, residual-corrected forecast.",
-    `Model ${p.model_id} (${detail.model_status}); trained ${detail.model.training_period ?? "?"}, validated ${detail.model.validation_period ?? "?"}.`,
-  ];
+const STEPS: Record<Variant, string[]> = {
+  raw: [
+    "Download the 00 UTC ECMWF ensemble from ECMWF Open Data: total precipitation of the 50 perturbed members at 168 h and 336 h.",
+    "Week-2 total per member = precipitation at 336 h minus precipitation at 168 h.",
+    "Average the 0.25° fields to the 1.5° grid of the ECMWF S2S forecasts the models were trained on, then interpolate bilinearly to the 0.05° ICPAC grid.",
+    "Ensemble mean (the raw forecast) and spread over the members.",
+  ],
+  mbc: [
+    "Start from the raw ECMWF ensemble mean.",
+    "Multiply each cell by its locked ratio of CHIRPS to ECMWF rainfall for the initialization month (fitted on 2005–2021, clipped to 0.05–20).",
+    "Keep the result at or above zero: MBC = max(0, raw × ratio).",
+  ],
+  hybrid: [
+    "Build 37 predictors per cell: ensemble rainfall mean and spread, location, season, the MBC forecast and atmospheric fields at 850, 700, 500 and 200 hPa (humidity, winds, moisture transport, temperature, geopotential, shear).",
+    "A CatBoost model (378 trees) predicts what MBC still gets wrong: the residual CHIRPS − MBC.",
+    "MBC + AI/ML = max(MBC + predicted residual, 0).",
+  ],
+};
+
+function Body({
+  detail,
+  variant,
+}: {
+  detail: ForecastDetail;
+  variant: Variant;
+}) {
+  const { config } = useApp();
+  const text = LAYER_TEXT[variant];
+  const available = layersOf(detail).includes(variant);
+  const reason =
+    detail.products?.hybrid?.reason ??
+    config.data?.operational.hybrid.reason ??
+    undefined;
+  const mean = detail.interpretation.domain_mean_mm[variant];
+  const rows = [...detail.countries].sort(
+    (a, b) => (b[variant]?.mean_mm ?? 0) - (a[variant]?.mean_mm ?? 0),
+  );
+  return (
+    <>
+      <PageBanner
+        title={`${text.title} Week-2 Rainfall`}
+        crumbs={[
+          { label: "Forecasts", href: "/forecasts" },
+          { label: text.title },
+        ]}
+        subtitle={text.method}
+        facts={forecastFacts(detail)}
+      />
+      {!available ? (
+        <>
+          <InProgress title="MBC + AI/ML hybrid">
+            {reason
+              ? `${reason[0].toUpperCase()}${reason.slice(1)}. Forecasts are issued from MBC until then.`
+              : "The AI/ML model's inputs are not available yet, so forecasts are issued from MBC."}
+          </InProgress>
+          <Card title="What is needed to complete it">
+            <ol
+              style={{ margin: 0, paddingLeft: 22, display: "grid", gap: 10 }}
+            >
+              <li>
+                The seven Week-2 forecast steps at which the training code read
+                the pressure-level fields (
+                <code>ecmwf.pressure.week2_steps_hours</code> in{" "}
+                <code>config/operational.yaml</code>), taken from the HPC
+                feature script.
+              </li>
+              <li>
+                ECMWF ensemble fields of specific humidity, winds, temperature
+                and geopotential at 850, 700, 500 and 200 hPa for those steps.
+              </li>
+              <li>
+                With both, every run adds the hybrid layer automatically; until
+                then the model artifacts are verified but not used for the
+                forecast.
+              </li>
+            </ol>
+            <p style={{ margin: "18px 0 0" }}>
+              <Link className="link-amber" href="/forecasts/mbc">
+                See the MBC forecast in use →
+              </Link>
+            </p>
+          </Card>
+        </>
+      ) : (
+        <>
+          <div className="stats">
+            <Stat
+              label="Regional mean"
+              value={num(mean)}
+              unit="mm"
+              hint="Area mean, days 8–14"
+            />
+            <Stat
+              label="Wettest country"
+              value={rows[0]?.country ?? "—"}
+              hint={`${num(rows[0]?.[variant]?.mean_mm)} mm`}
+              tone="amber"
+            />
+            <Stat
+              label="Driest country"
+              value={rows.at(-1)?.country ?? "—"}
+              hint={`${num(rows.at(-1)?.[variant]?.mean_mm)} mm`}
+            />
+          </div>
+          <div className="split" style={{ alignItems: "start" }}>
+            <MapFigure
+              src={mapUrl(detail, variant)}
+              alt={`${text.title} Week-2 rainfall map`}
+              caption={`${SERIES[variant].label} · valid ${validDays(detail.valid_start, detail.valid_end)}`}
+            />
+            <Card title="How it is made">
+              <ol
+                style={{ margin: 0, paddingLeft: 22, display: "grid", gap: 12 }}
+              >
+                {STEPS[variant].map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+            </Card>
+          </div>
+          <Card
+            title="By country"
+            subtitle={`${text.title} area mean and range (mm).`}
+          >
+            <div className="table-wrap">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>Country</th>
+                    <th className="num">Mean</th>
+                    <th className="num">Median</th>
+                    <th className="num">Min</th>
+                    <th className="num">Max</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr key={row.country}>
+                      <td className="strong">
+                        <Link href={"/countries/" + countrySlug(row.country)}>
+                          {row.country}
+                        </Link>
+                      </td>
+                      <td className="num strong">
+                        {num(row[variant]?.mean_mm)}
+                      </td>
+                      <td className="num">{num(row[variant]?.median_mm)}</td>
+                      <td className="num">{num(row[variant]?.min_mm)}</td>
+                      <td className="num">{num(row[variant]?.max_mm)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </>
+      )}
+      <p style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        {(["raw", "mbc", "hybrid"] as Variant[])
+          .filter((v) => v !== variant)
+          .map((v) => (
+            <LinkButton
+              key={v}
+              href={`/forecasts/${v}`}
+              variant="outline"
+              size="sm"
+            >
+              {LAYER_TEXT[v].title}
+            </LinkButton>
+          ))}
+      </p>
+    </>
+  );
 }
 
 export default function Layer({ route, id }: PageProps) {
-  const variant = (route.param ?? "hybrid") as Variant;
+  const variant = (route.param ?? "mbc") as Variant;
   const forecast = useForecast(id);
-  if (forecast.loading && !forecast.data)
-    return <Skeleton className="h-[36rem]" />;
-  if (forecast.status === 404) return <NoForecast />;
-  if (forecast.error || !forecast.data)
-    return (
-      <ErrorState
-        message={forecast.error ?? "Forecast unavailable"}
-        retry={forecast.reload}
-      />
-    );
-  const detail = forecast.data;
-  const label = SERIES[variant].label;
   return (
-    <>
-      <PageHeader
-        title={`${route.title} · Week-2 rainfall`}
-        description={forecastSubtitle(detail)}
-        badges={<ForecastBadges detail={detail} />}
-      />
-      <div className="grid gap-6 xl:grid-cols-3">
-        <Card className="xl:col-span-2">
-          <CardContent>
-            <MapImage
-              src={mapUrl(detail, variant)}
-              alt={`${label} Week-2 rainfall map`}
+    <div className="page">
+      <div className="wrap">
+        {forecast.loading && <Skeleton height={520} />}
+        {forecast.status === 404 && (
+          <>
+            <PageBanner
+              title={`${LAYER_TEXT[variant].title} Week-2 Rainfall`}
+              subtitle={LAYER_TEXT[variant].method}
             />
-          </CardContent>
-        </Card>
-        <div className="grid content-start gap-4">
-          <Stat
-            series={variant}
-            label={`${label} · domain mean`}
-            value={num(detail.interpretation.domain_mean_mm[variant])}
-            unit="mm/week"
-          />
-          <Card>
-            <CardHeader title="How this layer is computed" />
-            <CardContent className="pt-3">
-              <ul className="m-0 grid gap-2.5 pl-4">
-                {explanation(variant, detail).map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        </div>
+            <NoForecast />
+          </>
+        )}
+        {forecast.error && forecast.status !== 404 && (
+          <ErrorState message={forecast.error} retry={forecast.reload} />
+        )}
+        {forecast.data && <Body detail={forecast.data} variant={variant} />}
       </div>
-      <Card>
-        <CardHeader title={`${label} by country`} />
-        <CardContent>
-          <Table head={["Country", "Mean", "Median", "Min", "Max"]}>
-            {detail.countries.map((row) => (
-              <tr key={row.country} className="tabular">
-                <td>
-                  <Link
-                    className="font-medium hover:underline"
-                    href={"/countries/" + countrySlug(row.country)}
-                  >
-                    {row.country}
-                  </Link>
-                </td>
-                <td className="font-medium">{num(row[variant].mean_mm)} mm</td>
-                <td>{num(row[variant].median_mm)} mm</td>
-                <td>{num(row[variant].min_mm)} mm</td>
-                <td>{num(row[variant].max_mm)} mm</td>
-              </tr>
-            ))}
-          </Table>
-        </CardContent>
-      </Card>
-    </>
+    </div>
   );
 }

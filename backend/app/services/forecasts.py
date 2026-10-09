@@ -385,7 +385,20 @@ class ForecastService:
                 name: f"{base}/package/{name}"
                 for name in ("manifest.json", *packages.package_files(layers))
             },
+            "overlays": {
+                layer: f"{base}/overlay?layer={layer}"
+                for layer in ("hybrid", "mbc", "raw")
+                if layer in layers
+            },
+            "overlay_bounds": self._overlay_bounds(),
         }
+
+    @staticmethod
+    def _overlay_bounds() -> list[float]:
+        from climate_engine.cartography import overlay
+
+        grid = operational.authoritative_grid()
+        return overlay.bounds(grid.latitude, grid.longitude)
 
     def countries(self, forecast_id: str) -> list[dict[str, Any]]:
         return self._read(forecast_id, "countries.json")
@@ -443,6 +456,27 @@ class ForecastService:
             finally:
                 partial.unlink(missing_ok=True)
         return path.read_bytes()
+
+    def overlay_png(self, forecast_id: str, layer: str) -> bytes:
+        """A rainfall layer as a transparent Web Mercator overlay for the interactive map."""
+        from climate_engine.cartography import overlay
+
+        if layer not in {"raw", "mbc", "hybrid"}:
+            raise ValueError("Overlay layers: raw, mbc, hybrid")
+        self.repo.get(KIND, forecast_id)
+        directory = self.directory(forecast_id)
+        if layer not in packages.manifest_layers(packages.read_manifest(directory)):
+            raise Unavailable(f"Forecast {forecast_id} has no {layer} layer")
+        cache = package_root().parent / "map-previews" / forecast_id / f"overlay-v1-{layer}.png"
+        if not cache.exists():
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            with xr.open_dataset(self._path(forecast_id, "forecast.nc")) as data:
+                values = data[layer].values.astype(np.float64)
+                latitude, longitude = data.latitude.values, data.longitude.values
+            partial = cache.with_name(f".{cache.name}.partial")
+            partial.write_bytes(overlay.mercator_png(values, latitude, longitude))
+            partial.replace(cache)
+        return cache.read_bytes()
 
     def bulletin(self, forecast_id: str) -> dict[str, Any]:
         self.repo.get(KIND, forecast_id)

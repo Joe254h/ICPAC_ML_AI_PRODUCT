@@ -4,21 +4,32 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import Shell from "@/components/shell";
 
 export const metadata: Metadata = {
-  title: { default: "ICPAC Climate AI", template: "%s · ICPAC Climate AI" },
+  title: {
+    default: "Week-2 Rainfall Forecasts | ICPAC",
+    template: "%s | ICPAC Week-2 Forecasts",
+  },
   description:
-    "Week-2 rainfall forecasts for the ICPAC region: raw ECMWF, MBC and MBC + Atmos37 CatBoost",
+    "Week-2 (days 8-14) rainfall forecasts for Eastern Africa from the IGAD Climate " +
+    "Prediction and Applications Centre: the ECMWF ensemble with bias correction, " +
+    "verified against CHIRPS.",
 };
-
-// Applies the saved theme before the first paint, so dark mode never flashes.
-const theme = `try{if(localStorage.getItem("icpac-theme")==="dark")document.documentElement.classList.add("dark")}catch(e){}`;
 
 export default function Layout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" data-scroll-behavior="smooth">
       <head>
-        <script dangerouslySetInnerHTML={{ __html: theme }} />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          rel="preconnect"
+          href="https://fonts.gstatic.com"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap"
+        />
       </head>
       <body>
         <Shell>{children}</Shell>

@@ -1,10 +1,12 @@
 """A local ECMWF Open Data mirror for tests: real GRIB2 files and .index files laid out as
 on data.ecmwf.int, served over HTTP so the official client runs unchanged."""
 
+import argparse
 import json
+import shutil
 import threading
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -136,3 +138,24 @@ class _RangeHandler(_Quiet):
         import io
 
         return io.BytesIO(chunk)
+
+
+def main() -> None:
+    """Build and serve a mirror holding yesterday's run, the newest a forecaster would find
+    (browser tests point ECMWF_OPENDATA_MIRRORS at it)."""
+    parser = argparse.ArgumentParser(description=main.__doc__)
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--port", type=int, default=8998)
+    parser.add_argument("--date", type=date.fromisoformat, default=None)
+    parser.add_argument("--members", type=int, default=3)
+    args = parser.parse_args()
+    day = args.date or datetime.now(timezone.utc).date() - timedelta(days=1)
+    shutil.rmtree(args.root, ignore_errors=True)
+    build(args.root, day, args.members)
+    handler = partial(_RangeHandler, directory=str(args.root))
+    print(f"ECMWF mirror of the {day} 00 UTC run on http://127.0.0.1:{args.port}", flush=True)
+    ThreadingHTTPServer(("127.0.0.1", args.port), handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()

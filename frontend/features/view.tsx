@@ -5,79 +5,38 @@ import { findRoute } from "@/features/routes";
 import type { PageKey, Route } from "@/features/routes";
 import { Skeleton } from "@/components/ui";
 
-/** id: an optional forecast identifier from the URL (?id=). */
+/** id: an optional identifier from the URL (?id=), e.g. a forecast. */
 export type PageProps = { route: Route; id?: string };
 
 // Views fetch their data in the browser, so they render there only: a control never
 // appears before it works (no clicks lost to hydration).
-const loading = () => <Skeleton className="h-96" />;
+const loading = () => (
+  <div className="page">
+    <div className="wrap">
+      <Skeleton height={420} />
+    </div>
+  </div>
+);
+const view = (
+  load: () => Promise<{ default: React.ComponentType<PageProps> }>,
+) => dynamic(load, { loading, ssr: false });
+
 const PAGES: Record<PageKey, React.ComponentType<PageProps>> = {
-  overview: dynamic(() => import("@/features/operational/overview"), {
-    loading,
-    ssr: false,
-  }),
-  forecast: dynamic(() => import("@/features/operational/forecast"), {
-    loading,
-    ssr: false,
-  }),
-  runs: dynamic(() => import("@/features/operational/runs"), {
-    loading,
-    ssr: false,
-  }),
-  layer: dynamic(() => import("@/features/operational/layer"), {
-    loading,
-    ssr: false,
-  }),
-  maps: dynamic(() => import("@/features/operational/maps"), {
-    loading,
-    ssr: false,
-  }),
-  country: dynamic(() => import("@/features/operational/country"), {
-    loading,
-    ssr: false,
-  }),
-  verification: dynamic(() => import("@/features/operational/verification"), {
-    loading,
-    ssr: false,
-  }),
-  models: dynamic(() => import("@/features/operational/models"), {
-    loading,
-    ssr: false,
-  }),
-  "data-ecmwf": dynamic(() => import("@/features/operational/data-ecmwf"), {
-    loading,
-    ssr: false,
-  }),
-  "data-chirps": dynamic(() => import("@/features/operational/data-chirps"), {
-    loading,
-    ssr: false,
-  }),
-  "data-runs": dynamic(() => import("@/features/operational/runs"), {
-    loading,
-    ssr: false,
-  }),
-  bulletin: dynamic(() => import("@/features/operational/bulletin"), {
-    loading,
-    ssr: false,
-  }),
-  system: dynamic(() => import("@/features/operational/system"), {
-    loading,
-    ssr: false,
-  }),
-  copilot: dynamic(() => import("@/features/workspace"), {
-    loading,
-    ssr: false,
-  }),
-  drafts: dynamic(() => import("@/features/workspace"), {
-    loading,
-    ssr: false,
-  }),
-  jobs: dynamic(() => import("@/features/workspace"), { loading, ssr: false }),
-  settings: dynamic(() => import("@/features/workspace"), {
-    loading,
-    ssr: false,
-  }),
-  demo: dynamic(() => import("@/features/demo"), { loading, ssr: false }),
+  home: view(() => import("@/features/home")),
+  forecast: view(() => import("@/features/operational/forecast")),
+  archive: view(() => import("@/features/operational/archive")),
+  layer: view(() => import("@/features/operational/layer")),
+  maps: view(() => import("@/features/operational/maps")),
+  country: view(() => import("@/features/operational/country")),
+  verification: view(() => import("@/features/operational/verification")),
+  models: view(() => import("@/features/operational/models")),
+  data: view(() => import("@/features/operational/data")),
+  source: view(() => import("@/features/operational/source")),
+  operations: view(() => import("@/features/operational/operations")),
+  bulletin: view(() => import("@/features/operational/bulletin")),
+  drafts: view(() => import("@/features/bulletins")),
+  copilot: view(() => import("@/features/copilot")),
+  system: view(() => import("@/features/operational/system")),
 };
 
 export default function View({ path, id }: { path: string; id?: string }) {

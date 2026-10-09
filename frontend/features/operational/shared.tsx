@@ -1,24 +1,18 @@
 "use client";
-/** Pieces shared by the operational forecast views. */
+/** Pieces shared by the forecast pages. */
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { CalendarClock, CloudOff, Download, ShieldAlert } from "lucide-react";
+import { useMemo } from "react";
+import { Download } from "lucide-react";
 import Chart from "@/components/chart";
 import {
-  Badge,
   Card,
-  CardContent,
-  CardHeader,
   EmptyState,
+  InProgress,
   KeyValues,
   LinkButton,
-  ModelStatus,
-  SeriesSwatch,
-  SyntheticBadge,
-  Table,
-  TestStatus,
+  Notice,
+  Status,
 } from "@/components/ui";
-import { useApp } from "@/components/shell";
 import { countrySlug } from "@/features/routes";
 import {
   SERIES,
@@ -29,72 +23,108 @@ import {
   signed,
   validDays,
 } from "@/lib/format";
-import type { SeriesKey } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type {
   CountryRow,
   ForecastDetail,
+  ForecastRun,
   Metrics,
   Variant,
-  Verification,
 } from "@/types/operational";
 
 export const VARIANTS: Variant[] = ["raw", "mbc", "hybrid"];
+
+export const LAYER_TEXT: Record<Variant, { title: string; method: string }> = {
+  raw: {
+    title: "Raw ECMWF",
+    method:
+      "The ECMWF ensemble mean of Week-2 total rainfall: 50 perturbed members, accumulated between forecast hours 168 and 336, averaged to the 1.5° training grid and interpolated to the 0.05° ICPAC grid.",
+  },
+  mbc: {
+    title: "MBC",
+    method:
+      "Multiplicative bias correction: the ECMWF ensemble mean times the locked 2005–2021 ratio of CHIRPS to ECMWF rainfall for the same calendar month and grid cell. On the 2022–2024 independent test it reduced RMSE by 11.2% against raw ECMWF.",
+  },
+  hybrid: {
+    title: "MBC + AI/ML",
+    method:
+      "The MBC forecast plus a CatBoost correction learned from 37 predictors (ensemble rainfall and atmospheric fields at 850, 700, 500 and 200 hPa): max(MBC + residual, 0).",
+  },
+};
 
 /** The forecast named in the URL (?id=), else the latest one. */
 export function useForecast(id?: string) {
   return useApi<ForecastDetail>(id ? "/forecasts/" + id : "/forecasts/latest");
 }
 
+export function layersOf(run: Pick<ForecastRun, "layers">): Variant[] {
+  const layers = run.layers ?? ["hybrid", "mbc", "raw"];
+  return VARIANTS.filter((v) => layers.includes(v));
+}
+
+export function primaryOf(run: Pick<ForecastRun, "primary_layer">): Variant {
+  return run.primary_layer ?? "hybrid";
+}
+
+export function methodName(run: Pick<ForecastRun, "primary_layer">): string {
+  return primaryOf(run) === "mbc"
+    ? "ECMWF ensemble + MBC"
+    : "MBC + AI/ML hybrid";
+}
+
 export function NoForecast() {
   return (
-    <Card>
-      <EmptyState
-        icon={<CloudOff size={30} />}
-        title="No operational forecast yet"
-        action={
-          <LinkButton href="/data/runs" variant="primary">
-            Go to forecast runs
-          </LinkButton>
-        }
-      >
-        A forecast appears here after a run on ECMWF S2S input (or an imported
-        HPC product package). Nothing is shown until the backend has produced
-        one.
-      </EmptyState>
-    </Card>
+    <EmptyState
+      title="No forecast has been issued yet"
+      action={
+        <LinkButton href="/data/runs" variant="amber">
+          Run the weekly forecast
+        </LinkButton>
+      }
+    >
+      <p style={{ margin: 0 }}>
+        The first forecast appears here once the latest ECMWF ensemble has been
+        downloaded and processed. Operations runs both steps in one go.
+      </p>
+    </EmptyState>
   );
 }
 
-export function ForecastBadges({ detail }: { detail: ForecastDetail }) {
-  return (
-    <>
-      <ModelStatus status={detail.model_status} />
-      <TestStatus status={detail.model.test_status} />
-      {detail.synthetic && <SyntheticBadge />}
-      {detail.protected_test_period && (
-        <Badge tone="warning" icon={<ShieldAlert size={13} />}>
-          2022–2024 test period · display only
-        </Badge>
-      )}
-      <Badge
-        tone={detail.verification_status === "available" ? "good" : "neutral"}
-      >
-        {detail.verification_status === "available"
-          ? "Verified against CHIRPS"
-          : "Not yet verified"}
-      </Badge>
-    </>
-  );
+export function forecastFacts(detail: ForecastRun): string[] {
+  return [
+    `Valid ${validDays(detail.valid_start, detail.valid_end)}`,
+    `ECMWF run ${day(detail.initialization)}, 00 UTC`,
+    methodName(detail),
+  ];
 }
 
-export function forecastSubtitle(detail: ForecastDetail) {
+export function ProductStatusList({ detail }: { detail: ForecastRun }) {
+  const products = detail.products ?? {};
   return (
-    <span className="inline-flex flex-wrap items-center gap-x-2">
-      <CalendarClock size={16} className="text-subtle" />
-      Initialised {day(detail.initialization)} 00 UTC · valid{" "}
-      {validDays(detail.valid_start, detail.valid_end)} (Days 8–14)
-    </span>
+    <div className="grid-3">
+      {VARIANTS.map((variant) => {
+        const state =
+          products[variant]?.status ??
+          (layersOf(detail).includes(variant) ? "available" : "in_progress");
+        return state === "available" ? (
+          <div
+            key={variant}
+            className="pending-card"
+            style={{ borderStyle: "solid", background: "#fff" }}
+          >
+            <Status tone="ok">Available</Status>
+            <h3>{LAYER_TEXT[variant].title}</h3>
+            <p>{LAYER_TEXT[variant].method}</p>
+          </div>
+        ) : (
+          <InProgress key={variant} title={LAYER_TEXT[variant].title}>
+            {products[variant]?.reason
+              ? `Waiting for ${products[variant]?.reason}.`
+              : "Its inputs are not available yet."}
+          </InProgress>
+        );
+      })}
+    </div>
   );
 }
 
@@ -103,22 +133,19 @@ export function ForecastFacts({ detail }: { detail: ForecastDetail }) {
   return (
     <KeyValues
       items={[
-        ["Initialization", `${day(detail.initialization)} 00 UTC`],
+        ["ECMWF run", `${day(detail.initialization)}, 00 UTC`],
         [
           "Valid period",
-          `${validDays(detail.valid_start, detail.valid_end)} · Days 8–14`,
+          `${validDays(detail.valid_start, detail.valid_end)} (days 8–14)`,
         ],
-        ["Lead", "Week-2: forecast hours 168–336"],
-        ["Baseline", detail.baseline],
-        ["ML method", `${detail.algorithm} residual on the MBC baseline`],
-        [
-          "Feature family",
-          `${detail.family} · ${detail.model.feature_count ?? "?"} features`,
-        ],
-        ["Hybrid rainfall", "max(MBC + predicted residual, 0)"],
-        ["Model", `${detail.model_id} · ${detail.model_version}`],
+        ["Lead time", "Week-2: forecast hours 168–336"],
+        ["Issued from", methodName(detail)],
         ["Ensemble", `${p.ensemble_members} perturbed members`],
         ["Input", detail.input_label],
+        [
+          "Model registry entry",
+          `${detail.model_id} · ${detail.model_version} (${detail.model_status})`,
+        ],
         ["Generated", dateTime(detail.generation_time)],
         ["Forecast ID", <code key="id">{detail.forecast_id}</code>],
       ]}
@@ -126,8 +153,7 @@ export function ForecastFacts({ detail }: { detail: ForecastDetail }) {
   );
 }
 
-/** A forecast map. The API's map URLs name the current style, so a new style gives new
- * URLs and browsers never show an image cached under an older one. */
+/** A bulletin-style map image of a layer (optionally one country). */
 export function mapUrl(
   detail: ForecastDetail,
   layer: string,
@@ -141,87 +167,93 @@ export function mapUrl(
   );
 }
 
-export function CountryTable({ rows }: { rows: CountryRow[] }) {
+export function CountryTable({
+  rows,
+  layers,
+}: {
+  rows: CountryRow[];
+  layers: Variant[];
+}) {
+  const main = layers.includes("hybrid") ? "hybrid" : "mbc";
   return (
-    <Table
-      head={[
-        "Country",
-        <span key="raw" className="inline-flex items-center gap-1.5">
-          <SeriesSwatch series="raw" /> Raw mean
-        </span>,
-        <span key="mbc" className="inline-flex items-center gap-1.5">
-          <SeriesSwatch series="mbc" /> MBC mean
-        </span>,
-        <span key="hybrid" className="inline-flex items-center gap-1.5">
-          <SeriesSwatch series="hybrid" /> MBC + AI mean
-        </span>,
-        "Median",
-        "Min",
-        "Max",
-        "Cells",
-      ]}
-    >
-      {rows.map((row) => (
-        <tr key={row.country} className="tabular">
-          <td>
-            <Link
-              className="font-medium hover:underline"
-              href={"/countries/" + countrySlug(row.country)}
-            >
-              {row.country}
-            </Link>
-          </td>
-          <td>{num(row.raw.mean_mm)}</td>
-          <td>{num(row.mbc.mean_mm)}</td>
-          <td className="font-medium">{num(row.hybrid.mean_mm)}</td>
-          <td>{num(row.hybrid.median_mm)}</td>
-          <td>{num(row.hybrid.min_mm)}</td>
-          <td>{num(row.hybrid.max_mm)}</td>
-          <td className="text-muted-foreground">
-            {row.cell_count.toLocaleString("en-GB")}
-          </td>
-        </tr>
-      ))}
-    </Table>
+    <div className="table-wrap">
+      <table className="data">
+        <thead>
+          <tr>
+            <th>Country</th>
+            {layers.map((layer) => (
+              <th key={layer} className="num">
+                {SERIES[layer].label} mean
+              </th>
+            ))}
+            <th className="num">Median</th>
+            <th className="num">Min</th>
+            <th className="num">Max</th>
+            <th className="num">Grid cells</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const stats = row[main];
+            return (
+              <tr key={row.country}>
+                <td className="strong">
+                  <Link href={"/countries/" + countrySlug(row.country)}>
+                    {row.country}
+                  </Link>
+                </td>
+                {layers.map((layer) => (
+                  <td
+                    key={layer}
+                    className={layer === main ? "num strong" : "num"}
+                  >
+                    {num(row[layer]?.mean_mm)}
+                  </td>
+                ))}
+                <td className="num">{num(stats?.median_mm)}</td>
+                <td className="num">{num(stats?.min_mm)}</td>
+                <td className="num">{num(stats?.max_mm)}</td>
+                <td className="num" style={{ color: "var(--muted)" }}>
+                  {row.cell_count.toLocaleString("en-GB")}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
-function useSeriesColors() {
-  const { dark } = useApp();
-  const [colors, setColors] = useState<Record<SeriesKey, string>>({
-    raw: "#2a78d6",
-    mbc: "#eb6834",
-    hybrid: "#1baf7a",
-  });
-  useEffect(() => {
-    const style = getComputedStyle(document.documentElement);
-    setColors({
-      raw: style.getPropertyValue("--series-raw").trim(),
-      mbc: style.getPropertyValue("--series-mbc").trim(),
-      hybrid: style.getPropertyValue("--series-hybrid").trim(),
-    });
-  }, [dark]);
-  return { colors, dark };
-}
+const COLOURS: Record<Variant, string> = {
+  raw: "#2a78d6",
+  mbc: "#e0802f",
+  hybrid: "#1baf7a",
+};
 
-/** Country means of raw, MBC and hybrid rainfall (mm/week) as grouped bars. */
-export function CountryChart({ rows }: { rows: CountryRow[] }) {
-  const { colors, dark } = useSeriesColors();
+/** Country means (mm/week) as grouped horizontal bars. */
+export function CountryChart({
+  rows,
+  layers,
+}: {
+  rows: CountryRow[];
+  layers: Variant[];
+}) {
   const option = useMemo(() => {
+    const main = layers.includes("hybrid") ? "hybrid" : "mbc";
     const sorted = [...rows].sort(
-      (a, b) => a.hybrid.mean_mm - b.hybrid.mean_mm,
+      (a, b) => (a[main]?.mean_mm ?? 0) - (b[main]?.mean_mm ?? 0),
     );
-    const ink = dark ? "#c3c2b7" : "#52514e";
-    const grid = dark ? "#2c2c2a" : "#e1e0d9";
     return {
-      grid: { left: 92, right: 24, top: 36, bottom: 28 },
+      textStyle: { fontFamily: "Open Sans, Arial, sans-serif" },
+      grid: { left: 96, right: 28, top: 40, bottom: 30 },
       legend: {
         top: 0,
         left: 0,
-        itemWidth: 10,
-        itemHeight: 10,
-        icon: "circle",
-        textStyle: { color: ink },
+        itemWidth: 12,
+        itemHeight: 12,
+        icon: "roundRect",
+        textStyle: { color: "#474c51" },
       },
       tooltip: {
         trigger: "axis" as const,
@@ -230,33 +262,33 @@ export function CountryChart({ rows }: { rows: CountryRow[] }) {
       },
       xAxis: {
         type: "value" as const,
-        name: "mm/week",
-        nameTextStyle: { color: ink },
-        axisLabel: { color: ink },
-        splitLine: { lineStyle: { color: grid } },
+        name: "mm / week",
+        nameTextStyle: { color: "#7d848b" },
+        axisLabel: { color: "#7d848b" },
+        splitLine: { lineStyle: { color: "#e4e8eb" } },
       },
       yAxis: {
         type: "category" as const,
         data: sorted.map((row) => row.country),
-        axisLabel: { color: ink },
+        axisLabel: { color: "#212529", fontWeight: 600 },
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: grid } },
+        axisLine: { lineStyle: { color: "#cfd6db" } },
       },
-      series: (["raw", "mbc", "hybrid"] as SeriesKey[]).map((key) => ({
+      series: layers.map((key) => ({
         name: SERIES[key].label,
         type: "bar" as const,
-        barMaxWidth: 9,
-        barGap: "25%",
-        itemStyle: { color: colors[key], borderRadius: [0, 4, 4, 0] },
-        data: sorted.map((row) => row[key].mean_mm),
+        barMaxWidth: 10,
+        barGap: "30%",
+        itemStyle: { color: COLOURS[key], borderRadius: [0, 4, 4, 0] },
+        data: sorted.map((row) => row[key]?.mean_mm ?? null),
       })),
     };
-  }, [rows, colors, dark]);
+  }, [rows, layers]);
   return (
     <Chart
       option={option}
-      height={Math.max(320, rows.length * 36 + 70)}
-      label="Country mean Week-2 rainfall: raw ECMWF, MBC and MBC + AI (table below)"
+      height={Math.max(340, rows.length * 38 + 80)}
+      label="Country mean Week-2 rainfall by forecast layer (values in the table)"
     />
   );
 }
@@ -267,97 +299,135 @@ export function MetricsTable({
   metrics: Partial<Record<Variant, Metrics>>;
 }) {
   return (
-    <Table head={["Forecast", "MAE", "RMSE", "Bias", "Pearson r", "Cells"]}>
-      {VARIANTS.filter((v) => metrics[v]).map((variant) => {
-        const m = metrics[variant] as Metrics;
-        return (
-          <tr key={variant} className="tabular">
-            <td>
-              <span className="inline-flex items-center gap-2 font-medium">
-                <SeriesSwatch series={variant} />
-                {SERIES[variant].label}
-              </span>
-            </td>
-            <td>{num(m.mae, 2)} mm</td>
-            <td>{num(m.rmse, 2)} mm</td>
-            <td>{signed(m.bias, 2)} mm</td>
-            <td>{num(m.correlation, 3)}</td>
-            <td className="text-muted-foreground">
-              {m.sample_count.toLocaleString("en-GB")}
-              {m.cases ? ` · ${m.cases} forecasts` : ""}
-            </td>
+    <div className="table-wrap">
+      <table className="data">
+        <thead>
+          <tr>
+            <th>Forecast</th>
+            <th className="num">MAE</th>
+            <th className="num">RMSE</th>
+            <th className="num">Bias</th>
+            <th className="num">Pearson r</th>
+            <th className="num">Cells</th>
           </tr>
-        );
-      })}
-    </Table>
+        </thead>
+        <tbody>
+          {VARIANTS.filter((v) => metrics[v]).map((variant) => {
+            const m = metrics[variant] as Metrics;
+            return (
+              <tr key={variant}>
+                <td className="strong">
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 3,
+                        background: COLOURS[variant],
+                      }}
+                    />
+                    {SERIES[variant].label}
+                  </span>
+                </td>
+                <td className="num">{num(m.mae, 2)} mm</td>
+                <td className="num">{num(m.rmse, 2)} mm</td>
+                <td className="num">{signed(m.bias, 2)} mm</td>
+                <td className="num">{num(m.correlation, 3)}</td>
+                <td className="num" style={{ color: "var(--muted)" }}>
+                  {m.sample_count.toLocaleString("en-GB")}
+                  {m.cases ? ` · ${m.cases} forecasts` : ""}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
-export function VerificationCard({
-  verification,
-  forecastId,
-}: {
-  verification: Verification;
-  forecastId: string;
-}) {
+export function VerificationSummary({ detail }: { detail: ForecastDetail }) {
+  const verification = detail.verification;
+  if (verification.status === "available" && verification.domain)
+    return (
+      <>
+        <p style={{ marginTop: 0 }}>
+          Verified against CHIRPS{" "}
+          {verification.observation?.file
+            ? `(${verification.observation.file})`
+            : ""}
+          . Spatial scores over the 205,999-cell domain for this single week;
+          they do not by themselves establish forecast skill.
+        </p>
+        <MetricsTable metrics={verification.domain} />
+      </>
+    );
   return (
-    <Card>
-      <CardHeader
-        title="Verification against CHIRPS"
-        description={
-          verification.status === "available"
-            ? `Spatial metrics over the domain · ${verification.season} · ${verification.use}`
-            : "Metrics appear once the observed Week-2 total for this window is supplied"
-        }
-      />
-      <CardContent>
-        {verification.status === "available" && verification.domain ? (
-          <MetricsTable metrics={verification.domain} />
-        ) : (
-          <div className="grid gap-2 text-muted-foreground">
-            <p className="m-0">{verification.reason}</p>
-            <p className="m-0 text-[0.9rem]">Needs: {verification.required}</p>
-            <div>
-              <LinkButton href={"/verification?id=" + forecastId}>
-                Add observations
-              </LinkButton>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+    <Notice title="Not verified yet.">
+      CHIRPS covers the window {validDays(detail.valid_start, detail.valid_end)}{" "}
+      about two days after it ends; the forecast is then verified automatically
+      by the weekly cycle in <Link href="/data/runs">Operations</Link>.
+    </Notice>
   );
 }
+
+const FILES: [string, string][] = [
+  ["forecast.nc", "Gridded forecast fields (NetCDF4)"],
+  ["countries.csv", "Country statistics (CSV)"],
+  ["maps/mbc.png", "Map: MBC"],
+  ["maps/hybrid.png", "Map: MBC + AI/ML"],
+  ["maps/raw.png", "Map: raw ECMWF"],
+  ["maps/residual.png", "Map: AI/ML residual"],
+  ["verification.json", "Verification scores"],
+  ["provenance.json", "Provenance record"],
+  ["manifest.json", "Package manifest with checksums"],
+];
 
 export function Downloads({ detail }: { detail: ForecastDetail }) {
-  const names: [string, string][] = [
-    ["manifest.json", "Package manifest (checksums, labels)"],
-    ["forecast.nc", "Gridded fields: raw, MBC, residual, hybrid (NetCDF4)"],
-    ["countries.csv", "Country statistics (CSV)"],
-    ["verification.json", "Verification metrics"],
-    ["interpretation_inputs.json", "Technical inputs for the bulletin"],
-    ["provenance.json", "Provenance record"],
-    ["model.json", "Model metadata"],
-    ["maps/hybrid.png", "Map: MBC + AI"],
-    ["maps/mbc.png", "Map: MBC"],
-    ["maps/raw.png", "Map: raw ECMWF"],
-    ["maps/residual.png", "Map: CatBoost residual"],
-  ];
+  const available = new Set(Object.keys(detail.files ?? {}));
   return (
-    <ul className="m-0 grid min-w-0 grid-cols-1 list-none gap-1 p-0">
-      {names.map(([name, label]) => (
+    <ul
+      style={{
+        listStyle: "none",
+        margin: 0,
+        padding: 0,
+        display: "grid",
+        gap: 4,
+      }}
+    >
+      {FILES.filter(([name]) => available.has(name)).map(([name, label]) => (
         <li key={name}>
           <a
-            className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 hover:bg-muted"
             href={`/api/forecasts/${detail.forecast_id}/package/${name}`}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              padding: "10px 12px",
+              borderRadius: 10,
+              color: "var(--ink)",
+            }}
+            className="hover:bg-[var(--green-50)]"
           >
-            <span className="min-w-0">
-              <span className="block truncate font-medium">{label}</span>
-              <code className="break-all text-[0.8rem] text-subtle">
+            <span>
+              <strong style={{ display: "block", fontWeight: 600 }}>
+                {label}
+              </strong>
+              <code style={{ fontSize: 12.5, color: "var(--muted)" }}>
                 {name}
               </code>
             </span>
-            <Download size={15} className="shrink-0 text-subtle" />
+            <Download
+              size={17}
+              style={{ color: "var(--green-700)", flex: "none" }}
+            />
           </a>
         </li>
       ))}
@@ -367,35 +437,23 @@ export function Downloads({ detail }: { detail: ForecastDetail }) {
 
 export function ProvenanceList({ detail }: { detail: ForecastDetail }) {
   const p = detail.provenance;
-  const overrides = Object.entries(p.configuration_overrides ?? {});
   return (
     <>
       <KeyValues
         items={[
           [
-            "Model checksum",
-            <code key="m">{shortHash(p.model_checksum, 16)}</code>,
-          ],
-          [
-            "MBC artifact checksum",
-            <code key="b">{shortHash(p.mbc_artifact_checksum, 16)}</code>,
-          ],
-          [
-            "Feature schema",
-            <span key="f">
-              {p.feature_schema} ·{" "}
-              <code>{shortHash(p.feature_schema_checksum, 12)}</code>
-            </span>,
-          ],
-          [
             "Grid",
-            `${p.grid_definition.shape.join(" × ")} (latitude × longitude)`,
+            `${p.grid_definition.shape.join(" × ")} cells (latitude × longitude), 0.05°`,
           ],
           [
             "Domain",
             `${p.domain_definition.cells.toLocaleString("en-GB")} cells · ${p.domain_definition.name}`,
           ],
           ["MBC month", String(p.mbc_month)],
+          [
+            "MBC artifact",
+            <code key="b">{shortHash(p.mbc_artifact_checksum, 16)}</code>,
+          ],
           [
             "Input files",
             p.input_source.inputs.map((i) => i.path).join(", ") || "—",
@@ -406,27 +464,45 @@ export function ProvenanceList({ detail }: { detail: ForecastDetail }) {
           ],
         ]}
       />
-      {overrides.length > 0 && (
-        <div className="mt-4 rounded-lg border border-status-serious/50 bg-status-serious/10 px-4 py-3 text-status-serious-ink">
-          <strong>Configuration overridden for this run:</strong>
-          <ul className="mb-0 mt-1 pl-5">
-            {overrides.map(([key, value]) => (
-              <li key={key}>
-                <code>{key}</code> = {JSON.stringify(value.value)} —{" "}
-                {value.reason}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <details className="mt-4">
-        <summary className="cursor-pointer font-medium text-muted-foreground">
+      <details style={{ marginTop: 16 }}>
+        <summary
+          style={{
+            cursor: "pointer",
+            fontWeight: 600,
+            color: "var(--green-700)",
+          }}
+        >
           Full provenance record
         </summary>
-        <pre className="mt-2 max-h-96 overflow-auto rounded-lg bg-muted p-3 text-[0.8rem]">
+        <pre
+          style={{
+            marginTop: 10,
+            maxHeight: 380,
+            overflow: "auto",
+            background: "var(--ground)",
+            borderRadius: 12,
+            padding: 14,
+            fontSize: 12.5,
+          }}
+        >
           {JSON.stringify(p, null, 2)}
         </pre>
       </details>
     </>
+  );
+}
+
+export function NotesCard({ detail }: { detail: ForecastDetail }) {
+  if (!detail.notes?.length) return null;
+  return (
+    <Card title="Notes on this forecast">
+      <ul style={{ margin: 0, paddingLeft: 20 }}>
+        {detail.notes.map((note) => (
+          <li key={note} style={{ marginBottom: 6 }}>
+            {note}
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }

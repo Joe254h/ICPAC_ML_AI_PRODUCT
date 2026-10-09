@@ -12,7 +12,9 @@ export function num(value: number | null | undefined, digits = 1): string {
 
 export function signed(value: number | null | undefined, digits = 1): string {
   if (value == null || !Number.isFinite(value)) return UNAVAILABLE;
-  return (value > 0 ? "+" : value < 0 ? "−" : "") + num(Math.abs(value), digits);
+  return (
+    (value > 0 ? "+" : value < 0 ? "−" : "") + num(Math.abs(value), digits)
+  );
 }
 
 const DAY = new Intl.DateTimeFormat("en-GB", {
@@ -54,13 +56,15 @@ export function dateTime(iso: string | null | undefined): string {
 }
 
 export function shortHash(value: unknown, length = 12): string {
-  return typeof value === "string" && value ? value.slice(0, length) : UNAVAILABLE;
+  return typeof value === "string" && value
+    ? value.slice(0, length)
+    : UNAVAILABLE;
 }
 
 export const SERIES = {
   raw: { label: "Raw ECMWF", token: "--series-raw" },
   mbc: { label: "MBC", token: "--series-mbc" },
-  hybrid: { label: "MBC + AI", token: "--series-hybrid" },
+  hybrid: { label: "MBC + AI/ML", token: "--series-hybrid" },
 } as const;
 
 export type SeriesKey = keyof typeof SERIES;

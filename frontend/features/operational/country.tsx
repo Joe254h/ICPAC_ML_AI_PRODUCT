@@ -1,184 +1,163 @@
 "use client";
-/** One country: forecast statistics, verification and the missing references. */
-import { CircleSlash } from "lucide-react";
+/** One member state: its Week-2 rainfall map, statistics and verification. */
+import Link from "next/link";
+import { useState } from "react";
 import {
   Card,
-  CardContent,
-  CardHeader,
-  EmptyState,
   ErrorState,
-  MapImage,
-  PageHeader,
-  SeriesSwatch,
+  MapFigure,
+  PageBanner,
   Skeleton,
   Stat,
-  Table,
+  Tabs,
 } from "@/components/ui";
 import type { PageProps } from "@/features/view";
+import { COUNTRIES, countrySlug } from "@/features/routes";
+import { SERIES, num, validDays } from "@/lib/format";
+import type { ForecastDetail, Variant } from "@/types/operational";
 import {
-  ForecastBadges,
   MetricsTable,
   NoForecast,
-  VARIANTS,
-  forecastSubtitle,
+  forecastFacts,
+  layersOf,
   mapUrl,
+  primaryOf,
   useForecast,
 } from "@/features/operational/shared";
-import { SERIES, num } from "@/lib/format";
 
-export default function Country({ route, id }: PageProps) {
-  const name = route.param ?? route.title;
-  const forecast = useForecast(id);
-  if (forecast.loading && !forecast.data)
-    return <Skeleton className="h-[30rem]" />;
-  if (forecast.status === 404)
-    return (
-      <>
-        <PageHeader title={name} description="Week-2 rainfall outlook" />
-        <NoForecast />
-      </>
-    );
-  if (forecast.error || !forecast.data)
-    return (
-      <ErrorState
-        message={forecast.error ?? "Forecast unavailable"}
-        retry={forecast.reload}
-      />
-    );
-  const detail = forecast.data;
-  const row = detail.countries.find((c) => c.country === name);
-  if (!row)
-    return (
-      <Card>
-        <EmptyState title={`${name} is not in this forecast`}>
-          The authoritative country mapping of this forecast has no cells for{" "}
-          {name}.
-        </EmptyState>
-      </Card>
-    );
-  const verification = detail.verification.countries?.[name];
+function Body({
+  detail,
+  country,
+}: {
+  detail: ForecastDetail;
+  country: string;
+}) {
+  const layers = layersOf(detail);
+  const [layer, setLayer] = useState<Variant>(primaryOf(detail));
+  const row = detail.countries.find((r) => r.country === country);
+  const stats = row?.[layer];
+  const rank =
+    [...detail.countries]
+      .sort((a, b) => (b[layer]?.mean_mm ?? 0) - (a[layer]?.mean_mm ?? 0))
+      .findIndex((r) => r.country === country) + 1;
+  const verified = detail.verification.countries?.[country];
   return (
     <>
-      <PageHeader
-        title={name}
-        description={forecastSubtitle(detail)}
-        badges={<ForecastBadges detail={detail} />}
+      <PageBanner
+        title={country}
+        crumbs={[{ label: "Countries" }, { label: country }]}
+        subtitle={`Week-2 (days 8–14) rainfall outlook for ${country}, valid ${validDays(detail.valid_start, detail.valid_end)}.`}
+        facts={forecastFacts(detail)}
       />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <Tabs
+        label="Forecast layer"
+        value={layer}
+        onChange={setLayer}
+        options={layers.map((v) => ({ value: v, label: SERIES[v].label }))}
+      />
+      <div className="stats">
         <Stat
-          series="hybrid"
-          label="MBC + AI · mean"
-          value={num(row.hybrid.mean_mm)}
-          unit="mm/week"
-          hint={`Cos-latitude weighted over ${row.cell_count.toLocaleString("en-GB")} cells`}
+          label="Area mean"
+          value={num(stats?.mean_mm)}
+          unit="mm"
+          hint={SERIES[layer].label}
+        />
+        <Stat label="Median" value={num(stats?.median_mm)} unit="mm" />
+        <Stat
+          label="Wettest cell"
+          value={num(stats?.max_mm, 0)}
+          unit="mm"
+          tone="amber"
         />
         <Stat
-          label="MBC + AI · median"
-          value={num(row.hybrid.median_mm)}
-          unit="mm/week"
-        />
-        <Stat
-          label="MBC + AI · minimum"
-          value={num(row.hybrid.min_mm)}
-          unit="mm/week"
-        />
-        <Stat
-          label="MBC + AI · maximum"
-          value={num(row.hybrid.max_mm)}
-          unit="mm/week"
+          label="Regional rank"
+          value={rank ? `${rank} of ${detail.countries.length}` : "—"}
+          hint="By area mean, wettest first"
         />
       </div>
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader
-            title="Raw ECMWF, MBC and MBC + AI"
-            description="Week-2 totals over the country's cells (mm/week)"
-          />
-          <CardContent>
-            <Table head={["Forecast", "Mean", "Median", "Min", "Max"]}>
-              {VARIANTS.map((variant) => (
-                <tr key={variant} className="tabular">
-                  <td>
-                    <span className="inline-flex items-center gap-2 font-medium">
-                      <SeriesSwatch series={variant} />
-                      {SERIES[variant].label}
-                    </span>
-                  </td>
-                  <td className="font-medium">{num(row[variant].mean_mm)}</td>
-                  <td>{num(row[variant].median_mm)}</td>
-                  <td>{num(row[variant].min_mm)}</td>
-                  <td>{num(row[variant].max_mm)}</td>
+      <div className="split" style={{ alignItems: "start" }}>
+        <MapFigure
+          src={mapUrl(detail, layer, country)}
+          alt={`${SERIES[layer].label} Week-2 rainfall over ${country}`}
+          caption={`${SERIES[layer].label} · ${country} · valid ${validDays(detail.valid_start, detail.valid_end)}`}
+        />
+        <Card title="All layers">
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Layer</th>
+                  <th className="num">Mean</th>
+                  <th className="num">Min</th>
+                  <th className="num">Max</th>
                 </tr>
-              ))}
-            </Table>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader
-            title="Anomaly and forecast category"
-            description="Not computed: their references are not among the HPC artifacts"
-          />
-          <CardContent className="grid gap-3">
-            {[
-              [
-                "Anomaly",
-                row.anomaly.reason,
-                detail.interpretation.anomaly.missing_dependency,
-              ],
-              [
-                "Category (tercile)",
-                row.category.reason,
-                detail.interpretation.category.missing_dependency,
-              ],
-            ].map(([label, reason, needs]) => (
-              <div key={label} className="flex gap-3">
-                <CircleSlash
-                  size={18}
-                  className="mt-0.5 shrink-0 text-subtle"
-                />
-                <div>
-                  <div className="font-medium">{label}: unavailable</div>
-                  <div className="text-muted-foreground">
-                    {reason} · needs {needs}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-      <Card>
-        <CardHeader
-          title={`Verification over ${name}`}
-          description={
-            verification
-              ? `Against CHIRPS · ${detail.verification.season} · ${detail.verification.use}`
-              : "Appears once this forecast is verified against CHIRPS"
-          }
-        />
-        <CardContent>
-          {verification ? (
-            <MetricsTable metrics={verification} />
+              </thead>
+              <tbody>
+                {layers.map((v) => (
+                  <tr key={v}>
+                    <td className="strong">{SERIES[v].label}</td>
+                    <td className="num">{num(row?.[v]?.mean_mm)} mm</td>
+                    <td className="num">{num(row?.[v]?.min_mm)}</td>
+                    <td className="num">{num(row?.[v]?.max_mm)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 0 }}>
+            {row?.cell_count.toLocaleString("en-GB")} grid cells of 0.05°.
+            Anomalies and tercile categories need a Week-2 climatology and are
+            not produced yet.
+          </p>
+          <h3 style={{ margin: "26px 0 12px" }}>Verification</h3>
+          {verified ? (
+            <MetricsTable metrics={verified} />
           ) : (
-            <p className="m-0 text-muted-foreground">
-              No observed Week-2 total has been supplied for this window yet.
+            <p style={{ margin: 0 }}>
+              Not verified yet: scores appear once CHIRPS covers this
+              forecast&apos;s week.
             </p>
           )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader
-          title={`MBC + AI over ${name}`}
-          description="Total rainfall in the ICPAC weekly bulletin's map style"
-        />
-        <CardContent>
-          <MapImage
-            src={mapUrl(detail, "hybrid", name)}
-            alt={`MBC + AI Week-2 rainfall over ${name}`}
-            className="mx-auto max-w-3xl"
-          />
-        </CardContent>
+        </Card>
+      </div>
+      <Card title="Other member states">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          {COUNTRIES.filter((c) => c !== country).map((c) => (
+            <Link
+              key={c}
+              className="btn btn-outline btn-sm"
+              href={"/countries/" + countrySlug(c)}
+            >
+              {c}
+            </Link>
+          ))}
+        </div>
       </Card>
     </>
+  );
+}
+
+export default function Country({ route, id }: PageProps) {
+  const country = route.param ?? "Kenya";
+  const forecast = useForecast(id);
+  return (
+    <div className="page">
+      <div className="wrap">
+        {forecast.loading && <Skeleton height={520} />}
+        {forecast.status === 404 && (
+          <>
+            <PageBanner
+              title={country}
+              crumbs={[{ label: "Countries" }, { label: country }]}
+            />
+            <NoForecast />
+          </>
+        )}
+        {forecast.error && forecast.status !== 404 && (
+          <ErrorState message={forecast.error} retry={forecast.reload} />
+        )}
+        {forecast.data && <Body detail={forecast.data} country={country} />}
+      </div>
+    </div>
   );
 }

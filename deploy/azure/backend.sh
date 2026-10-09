@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Deploy the ICPAC backend (FastAPI + MBC + Atmos37 CatBoost) to Azure Container Apps.
+# Deploy the ICPAC backend (FastAPI, ECMWF Open Data and CHIRPS downloads, MBC and the
+# Atmos37 CatBoost registry) to Azure Container Apps.
 #
 # Run it in Azure Cloud Shell (Bash) at https://shell.azure.com:
 #
@@ -21,8 +22,6 @@
 #   DATABASE_URL  PostgreSQL connection string, e.g. Supabase's (paste it as Supabase shows
 #                 it, with your password). Without it the database lives inside the
 #                 container and is emptied whenever the app restarts or scales to zero.
-#   SYNTHETIC     "true" (default) allows labelled synthetic test forecasts; set "false" once
-#                 real ECMWF input is connected.
 #   IMAGE         Container image (default ghcr.io/joe254h/icpac-backend:latest).
 #   CPU, MEMORY   Container size (default 2 and 4Gi; a full-grid forecast needs about 1 GB).
 #   GROUP, APP, ENVIRONMENT  Resource names (defaults icpac, icpac-api, icpac-env).
@@ -35,7 +34,6 @@ GROUP=${GROUP:-icpac}
 APP=${APP:-icpac-api}
 ENVIRONMENT=${ENVIRONMENT:-icpac-env}
 IMAGE=${IMAGE:-ghcr.io/joe254h/icpac-backend:latest}
-SYNTHETIC=${SYNTHETIC:-true}
 DATABASE_URL=${DATABASE_URL:-}
 CPU=${CPU:-2}
 MEMORY=${MEMORY:-4Gi}
@@ -106,7 +104,7 @@ trap 'rm -f "$DEFINITION"' EXIT
 # The definition goes to the Azure API as it is (az rest): the CLI's create path adds null
 # fields that express environments reject. Python writes it so passwords need no escaping.
 APP="$APP" LOCATION="$LOCATION" ENVIRONMENT_ID="$ENVIRONMENT_ID" IMAGE="$IMAGE" \
-  SYNTHETIC="$SYNTHETIC" DATABASE_URL="$DATABASE_URL" \
+  DATABASE_URL="$DATABASE_URL" \
   CONNECTION="$CONNECTION" PACKAGES="$PACKAGES" CPU="$CPU" MEMORY="$MEMORY" \
   CURRENT_ENV="$CURRENT_ENV" CURRENT_SECRETS="$CURRENT_SECRETS" \
   LLM_OVERRIDES="${LLM_OVERRIDES:-}" \
@@ -121,7 +119,6 @@ env = [
     # A changed value makes every run a new revision, which pulls the latest image
     # (express environments do not accept revision suffixes).
     {"name": "DEPLOYED_AT", "value": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
-    {"name": "ALLOW_SYNTHETIC_FORECASTS", "value": e["SYNTHETIC"]},
     {"name": "AUTO_REGISTER_MODELS", "value": "true"},
     # Packages are written to the container disk and copied to Blob Storage, from which a
     # restarted replica fetches them again.

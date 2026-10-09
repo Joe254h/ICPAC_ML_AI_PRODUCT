@@ -1,19 +1,18 @@
 import { expect, test } from "vitest";
 import {
   COUNTRIES,
-  GROUPS,
+  MENUS,
+  PLANNED_SOURCES,
   ROUTES,
   countrySlug,
   findRoute,
+  menuRoutes,
   resolveRoute,
 } from "../features/routes";
 
-test("every navigation group of the brief has pages", () => {
-  for (const group of GROUPS)
-    expect(
-      ROUTES.some((r) => r.group === group && r.nav !== false),
-      group,
-    ).toBe(true);
+test("every header menu has pages", () => {
+  for (const menu of MENUS)
+    expect(menuRoutes(menu).length, menu).toBeGreaterThan(0);
 });
 
 test("the eleven member states each have a country page", () => {
@@ -24,11 +23,22 @@ test("the eleven member states each have a country page", () => {
 });
 
 test("URLs resolve to routes and unknown ones do not", () => {
-  expect(resolveRoute(undefined)?.page).toBe("overview");
+  expect(resolveRoute(undefined)?.page).toBe("home");
   expect(resolveRoute(["forecasts", "hybrid"])?.param).toBe("hybrid");
   expect(resolveRoute(["maps", "skill"])?.page).toBe("maps");
   expect(resolveRoute(["countries", "south-sudan"])?.title).toBe("South Sudan");
+  expect(resolveRoute(["data", "chirps"])?.page).toBe("source");
   expect(resolveRoute(["nowhere"])).toBeUndefined();
+});
+
+test("planned data sources are listed as coming later", () => {
+  for (const source of PLANNED_SOURCES) {
+    const route = findRoute("data/" + source.id);
+    expect(route?.page, source.id).toBe("source");
+    expect(route?.soon, source.id).toBe(true);
+  }
+  expect(findRoute("data/ecmwf")?.soon).toBeFalsy();
+  expect(findRoute("data/chirps")?.soon).toBeFalsy();
 });
 
 test("earlier URLs keep working", () => {
@@ -38,13 +48,20 @@ test("earlier URLs keep working", () => {
     "jobs",
     "models",
     "verification",
-    "settings",
-    "monitoring",
-    "observations",
-    "products",
     "health",
   ])
     expect(findRoute(path), path).toBeDefined();
+});
+
+test("the retired demonstration pages are gone", () => {
+  for (const path of [
+    "demo",
+    "workspace",
+    "settings",
+    "observations",
+    "products",
+  ])
+    expect(findRoute(path), path).toBeUndefined();
 });
 
 test("paths are unique", () => {

@@ -1,214 +1,69 @@
 "use client";
-/**
- * Small shadcn/ui-style primitives (Card, Badge, Button, Stat, ...) on the design
- * tokens in app/globals.css. Status colour always comes with an icon and a label.
- */
+/** Building blocks of the ICPAC design system (styles: app/globals.css). */
 import Link from "next/link";
 import { useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
-  CircleDashed,
-  FlaskConical,
-  ImageOff,
-  LoaderCircle,
-  RefreshCw,
+  Clock3,
+  Info,
+  RotateCw,
   XCircle,
 } from "lucide-react";
-import type { SeriesKey } from "@/lib/format";
-import { SERIES } from "@/lib/format";
+export { PageBanner } from "@/components/banner";
 
 export function cx(...names: (string | false | null | undefined)[]) {
   return names.filter(Boolean).join(" ");
 }
 
-export function Card({
-  className,
-  children,
-  ...rest
-}: React.HTMLAttributes<HTMLElement>) {
-  return (
-    <section
-      className={cx(
-        "rounded-xl border border-border bg-card text-card-foreground",
-        className,
-      )}
-      {...rest}
-    >
-      {children}
-    </section>
-  );
-}
+export type Tone = "ok" | "progress" | "planned" | "bad" | "info";
 
-export function CardHeader({
-  title,
-  description,
-  action,
-  className,
-}: {
-  title: React.ReactNode;
-  description?: React.ReactNode;
-  action?: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cx(
-        "flex flex-wrap items-start justify-between gap-3 px-5 pt-5",
-        className,
-      )}
-    >
-      <div className="min-w-0">
-        <h2 className="text-[1.07rem] font-semibold tracking-tight">{title}</h2>
-        {description && (
-          <p className="mt-1 text-muted-foreground">{description}</p>
-        )}
-      </div>
-      {action}
-    </div>
-  );
-}
-
-export function CardContent({
-  className,
+export function Status({
+  tone,
   children,
 }: {
-  className?: string;
+  tone: Tone;
   children: React.ReactNode;
 }) {
-  return <div className={cx("p-5", className)}>{children}</div>;
-}
-
-export type Tone =
-  | "neutral"
-  | "good"
-  | "warning"
-  | "serious"
-  | "critical"
-  | "info";
-
-const TONES: Record<Tone, string> = {
-  neutral: "border-border bg-muted text-muted-foreground",
-  good: "border-status-good/40 bg-status-good/10 text-status-good-ink",
-  warning:
-    "border-status-warning/50 bg-status-warning/12 text-status-warning-ink",
-  serious:
-    "border-status-serious/50 bg-status-serious/12 text-status-serious-ink",
-  critical:
-    "border-status-critical/50 bg-status-critical/10 text-status-critical-ink",
-  info: "border-primary/30 bg-accent text-accent-foreground",
-};
-
-export function Badge({
-  tone = "neutral",
-  icon,
-  children,
-  className,
-}: {
-  tone?: Tone;
-  icon?: React.ReactNode;
-  children: React.ReactNode;
-  className?: string;
-}) {
   return (
-    <span
-      className={cx(
-        "inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[0.78rem] font-medium",
-        TONES[tone],
-        className,
-      )}
-    >
-      {icon}
+    <span className={cx("status", tone)}>
+      <span className="dot" aria-hidden />
       {children}
     </span>
   );
 }
 
-/** Model registry status, with icon and label (never colour alone). */
+/** Model registry status as a pill. */
 export function ModelStatus({ status }: { status?: string }) {
-  if (status === "production")
-    return (
-      <Badge tone="good" icon={<CheckCircle2 size={13} />}>
-        Production
-      </Badge>
-    );
-  if (status === "candidate")
-    return (
-      <Badge tone="warning" icon={<FlaskConical size={13} />}>
-        Candidate · not production
-      </Badge>
-    );
-  if (status === "experimental")
-    return (
-      <Badge tone="neutral" icon={<CircleDashed size={13} />}>
-        Experimental
-      </Badge>
-    );
-  return (
-    <Badge tone="neutral" icon={<CircleDashed size={13} />}>
-      {status ?? "Unknown"}
-    </Badge>
-  );
+  const tone: Tone =
+    status === "production"
+      ? "ok"
+      : status === "candidate"
+        ? "info"
+        : status === "retired"
+          ? "planned"
+          : "progress";
+  return <Status tone={tone}>{status ?? "unknown"}</Status>;
 }
 
-export function TestStatus({ status }: { status?: string }) {
-  if (status === "passed")
-    return (
-      <Badge tone="good" icon={<CheckCircle2 size={13} />}>
-        Independent test passed
-      </Badge>
-    );
-  if (status === "failed")
-    return (
-      <Badge tone="critical" icon={<XCircle size={13} />}>
-        Independent test failed
-      </Badge>
-    );
-  return (
-    <Badge tone="neutral" icon={<CircleDashed size={13} />}>
-      Independent test pending
-    </Badge>
-  );
-}
-
-export function SyntheticBadge() {
-  return (
-    <Badge tone="serious" icon={<AlertTriangle size={13} />}>
-      Synthetic input · not a real forecast
-    </Badge>
-  );
-}
-
-type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "secondary" | "ghost";
-  busy?: boolean;
-};
-
-const VARIANTS = {
-  primary: "bg-primary text-primary-foreground hover:brightness-110",
-  secondary: "border border-border bg-card hover:bg-muted",
-  ghost: "hover:bg-muted",
-};
+type ButtonVariant = "amber" | "green" | "outline" | "white" | "ghost-light";
 
 export function Button({
-  variant = "secondary",
-  busy,
+  variant = "green",
+  size,
   className,
   children,
-  disabled,
-  ...rest
-}: ButtonProps) {
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: ButtonVariant;
+  size?: "sm";
+}) {
   return (
     <button
-      className={cx(
-        "inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3.5 font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
-        VARIANTS[variant],
-        className,
-      )}
-      disabled={disabled || busy}
-      {...rest}
+      type="button"
+      className={cx("btn", `btn-${variant}`, size && "btn-sm", className)}
+      {...props}
     >
-      {busy && <LoaderCircle size={15} className="spin" />}
       {children}
     </button>
   );
@@ -216,123 +71,156 @@ export function Button({
 
 export function LinkButton({
   href,
-  variant = "secondary",
-  className,
+  variant = "green",
+  size,
+  external,
   children,
-  download,
+  className,
 }: {
   href: string;
-  variant?: "primary" | "secondary" | "ghost";
-  className?: string;
+  variant?: ButtonVariant;
+  size?: "sm";
+  external?: boolean;
   children: React.ReactNode;
-  download?: boolean;
+  className?: string;
 }) {
-  const classes = cx(
-    "inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3.5 font-medium transition",
-    VARIANTS[variant],
-    className,
-  );
-  return href.startsWith("/api/") || download ? (
-    <a className={classes} href={href} download={download || undefined}>
-      {children}
-    </a>
-  ) : (
+  const classes = cx("btn", `btn-${variant}`, size && "btn-sm", className);
+  if (external || href.startsWith("/api/") || href.startsWith("http"))
+    return (
+      <a
+        className={classes}
+        href={href}
+        {...(href.startsWith("http")
+          ? { target: "_blank", rel: "noreferrer" }
+          : {})}
+      >
+        {children}
+      </a>
+    );
+  return (
     <Link className={classes} href={href}>
       {children}
     </Link>
   );
 }
 
-export function SeriesSwatch({ series }: { series: SeriesKey }) {
+export function Card({
+  title,
+  subtitle,
+  eyebrow,
+  action,
+  children,
+  className,
+  flush,
+  id,
+}: {
+  title?: React.ReactNode;
+  subtitle?: React.ReactNode;
+  eyebrow?: string;
+  action?: React.ReactNode;
+  children?: React.ReactNode;
+  className?: string;
+  flush?: boolean;
+  id?: string;
+}) {
   return (
-    <span
-      aria-hidden
-      className="inline-block size-2.5 shrink-0 rounded-full"
-      style={{ background: `var(${SERIES[series].token})` }}
-    />
+    <section id={id} className={cx("card", flush && "flush", className)}>
+      {(title || action) && (
+        <div className="card-head">
+          <div>
+            {eyebrow && <p className="eyebrow">{eyebrow}</p>}
+            {title && <h2>{title}</h2>}
+            {subtitle && <p>{subtitle}</p>}
+          </div>
+          {action}
+        </div>
+      )}
+      {children}
+    </section>
   );
 }
 
-/** KPI tile: label, value and unit; an optional series swatch carries identity. */
 export function Stat({
   label,
   value,
   unit,
   hint,
-  series,
+  tone,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   unit?: string;
   hint?: React.ReactNode;
-  series?: SeriesKey;
+  tone?: "amber";
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        {series && <SeriesSwatch series={series} />}
-        <span>{label}</span>
+    <div className={cx("stat", tone)}>
+      <div className="label">{label}</div>
+      <div className="value">
+        {value}
+        {unit && <small>{unit}</small>}
       </div>
-      <div className="mt-2 flex items-baseline gap-1.5">
-        <span className="text-[1.9rem] font-semibold leading-none tracking-tight">
-          {value}
-        </span>
-        {unit && value !== "Unavailable" && (
-          <span className="text-muted-foreground">{unit}</span>
-        )}
-      </div>
-      {hint && <div className="mt-2 text-[0.86rem] text-subtle">{hint}</div>}
+      {hint && <div className="hint">{hint}</div>}
     </div>
   );
 }
 
-export function KeyValues({
-  items,
-  className,
-}: {
-  items: [string, React.ReactNode][];
-  className?: string;
-}) {
+export function KeyValues({ items }: { items: [string, React.ReactNode][] }) {
   return (
-    <dl
-      className={cx(
-        "grid grid-cols-[minmax(8rem,auto)_1fr] gap-x-4",
-        className,
-      )}
-    >
+    <dl className="kv">
       {items.map(([label, value]) => (
-        <div key={label} className="contents">
-          <dt className="border-b border-border py-2 text-muted-foreground">
-            {label}
-          </dt>
-          <dd className="m-0 min-w-0 border-b border-border py-2 [overflow-wrap:anywhere]">
-            {value}
-          </dd>
+        <div key={label} style={{ display: "contents" }}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
         </div>
       ))}
     </dl>
   );
 }
 
+export function Notice({
+  tone = "amber",
+  title,
+  children,
+}: {
+  tone?: "amber" | "green" | "red";
+  title?: string;
+  children?: React.ReactNode;
+}) {
+  const Icon =
+    tone === "green" ? CheckCircle2 : tone === "red" ? XCircle : Info;
+  return (
+    <div className={cx("notice", tone !== "amber" && tone)} role="note">
+      <Icon size={20} aria-hidden />
+      <div>
+        {title && <strong>{title} </strong>}
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export function EmptyState({
-  icon,
   title,
   children,
   action,
 }: {
-  icon?: React.ReactNode;
   title: string;
   children?: React.ReactNode;
   action?: React.ReactNode;
 }) {
   return (
-    <div className="grid justify-items-center gap-2 px-6 py-12 text-center">
-      {icon && <div className="text-subtle">{icon}</div>}
-      <h3 className="text-base font-semibold">{title}</h3>
+    <div className="card" style={{ textAlign: "center", padding: "56px 28px" }}>
+      <Clock3
+        size={40}
+        style={{ color: "var(--amber)", margin: "0 auto 14px" }}
+        aria-hidden
+      />
+      <h2 style={{ fontSize: 26 }}>{title}</h2>
       {children && (
-        <div className="max-w-xl text-muted-foreground">{children}</div>
+        <div style={{ maxWidth: 640, margin: "12px auto 0" }}>{children}</div>
       )}
-      {action && <div className="mt-2">{action}</div>}
+      {action && <div style={{ marginTop: 22 }}>{action}</div>}
     </div>
   );
 }
@@ -345,75 +233,58 @@ export function ErrorState({
   retry?: () => void;
 }) {
   return (
-    <div
-      role="alert"
-      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-status-critical/40 bg-status-critical/8 px-4 py-3 text-status-critical-ink"
-    >
-      <span className="flex items-center gap-2">
-        <XCircle size={16} />
-        {message}
-      </span>
+    <div className="notice red" role="alert">
+      <AlertTriangle size={20} aria-hidden />
+      <div style={{ flex: 1 }}>
+        <strong>The service could not load this information.</strong> {message}
+      </div>
       {retry && (
-        <Button onClick={retry}>
-          <RefreshCw size={14} />
-          Retry
+        <Button variant="outline" size="sm" onClick={retry}>
+          <RotateCw size={15} aria-hidden /> Retry
         </Button>
       )}
     </div>
   );
 }
 
-export function Notice({
-  tone = "info",
-  children,
+export function Skeleton({
+  height = 320,
+  className,
 }: {
-  tone?: Tone;
-  children: React.ReactNode;
+  height?: number;
+  className?: string;
 }) {
-  return (
-    <div
-      role="status"
-      className={cx("rounded-lg border px-4 py-3 text-[0.93rem]", TONES[tone])}
-    >
-      {children}
-    </div>
-  );
+  return <div className={cx("skeleton", className)} style={{ height }} />;
 }
 
-export function Skeleton({ className }: { className?: string }) {
-  return <div className={cx("animate-pulse rounded-lg bg-muted", className)} />;
-}
+export type TabOption<T extends string> = {
+  value: T;
+  label: React.ReactNode;
+  disabled?: boolean;
+  title?: string;
+};
 
-export function Segmented<T extends string>({
+export function Tabs<T extends string>({
   options,
   value,
   onChange,
   label,
 }: {
-  options: { value: T; label: string; disabled?: boolean }[];
+  options: TabOption<T>[];
   value: T;
   onChange: (value: T) => void;
   label: string;
 }) {
   return (
-    <div
-      role="tablist"
-      aria-label={label}
-      className="inline-flex flex-wrap gap-1 rounded-lg bg-muted p-1"
-    >
+    <div className="tabs" role="group" aria-label={label}>
       {options.map((option) => (
         <button
           key={option.value}
-          role="tab"
-          aria-selected={value === option.value}
+          type="button"
+          aria-pressed={option.value === value}
           disabled={option.disabled}
+          title={option.title}
           onClick={() => onChange(option.value)}
-          className={cx(
-            "rounded-md px-3 py-1.5 text-[0.9rem] font-medium transition disabled:opacity-40",
-            value === option.value
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
         >
           {option.label}
         </button>
@@ -422,105 +293,60 @@ export function Segmented<T extends string>({
   );
 }
 
-export function PageHeader({
-  title,
-  description,
-  badges,
-  actions,
-}: {
-  title: string;
-  description?: React.ReactNode;
-  badges?: React.ReactNode;
-  actions?: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-wrap items-end justify-between gap-4">
-      <div className="min-w-0">
-        <h1 className="text-[1.75rem] font-semibold leading-tight tracking-tight">
-          {title}
-        </h1>
-        {description && (
-          <p className="mt-1.5 max-w-3xl text-[1.02rem] text-muted-foreground">
-            {description}
-          </p>
-        )}
-        {badges && <div className="mt-3 flex flex-wrap gap-2">{badges}</div>}
-      </div>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
-    </div>
-  );
-}
-
-/** A backend-rendered ICPAC map (PNG) with loading and failure states. */
-export function MapImage({
+/** A server-rendered map image with a placeholder while it renders. */
+export function MapFigure({
   src,
   alt,
-  className,
+  caption,
 }: {
   src: string;
   alt: string;
-  className?: string;
+  caption?: React.ReactNode;
 }) {
-  const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
-  const [shown, setShown] = useState(src);
-  if (shown !== src) {
-    setShown(src);
-    setState("loading");
-  }
+  // The outcome is kept per source, so a new map starts loading without an effect that
+  // could overwrite the load event of an image already in the browser cache.
+  const [outcome, setOutcome] = useState<{ src: string; ok: boolean } | null>(
+    null,
+  );
+  const state =
+    outcome?.src !== src ? "loading" : outcome.ok ? "ready" : "failed";
+  const settle = (ok: boolean) => setOutcome({ src, ok });
   return (
-    <div
-      className={cx("relative overflow-hidden rounded-lg bg-white", className)}
-    >
-      {state === "loading" && (
-        <Skeleton className="absolute inset-0 rounded-none" />
-      )}
+    <figure className="figure">
+      {state === "loading" && <Skeleton height={420} />}
       {state === "failed" ? (
-        <div className="grid aspect-[5/4] place-items-center gap-2 text-muted-foreground">
-          <ImageOff size={28} />
-          <span>Map unavailable from the API</span>
-        </div>
+        <Notice tone="red">This map could not be rendered.</Notice>
       ) : (
-        // A backend-rendered product image, served as is (no optimisation pass).
         <img
           src={src}
           alt={alt}
-          className="relative block h-auto w-full"
-          onLoad={() => setState("ready")}
-          onError={() => setState("failed")}
+          ref={(img) => {
+            if (img?.complete && img.naturalWidth > 0 && state === "loading")
+              settle(true);
+          }}
+          onLoad={() => settle(true)}
+          onError={() => settle(false)}
+          style={state === "ready" ? undefined : { display: "none" }}
         />
       )}
-    </div>
+      {caption && <figcaption>{caption}</figcaption>}
+    </figure>
   );
 }
 
-export function Table({
-  head,
+/** A product that is not available yet, with what it needs. */
+export function InProgress({
+  title,
   children,
-  className,
 }: {
-  head: React.ReactNode[];
+  title: string;
   children: React.ReactNode;
-  className?: string;
 }) {
   return (
-    <div className={cx("overflow-x-auto", className)}>
-      <table className="w-full border-collapse text-[0.93rem]">
-        <thead>
-          <tr>
-            {head.map((cell, index) => (
-              <th
-                key={index}
-                className="whitespace-nowrap border-b border-border px-3 py-2 text-left text-[0.8rem] font-medium text-muted-foreground first:pl-0"
-              >
-                {cell}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="[&_td]:border-b [&_td]:border-border [&_td]:px-3 [&_td]:py-2.5 [&_td:first-child]:pl-0 [&_tr:last-child_td]:border-b-0">
-          {children}
-        </tbody>
-      </table>
+    <div className="pending-card">
+      <Status tone="progress">In progress</Status>
+      <h3>{title}</h3>
+      <p>{children}</p>
     </div>
   );
 }

@@ -1,14 +1,21 @@
 # ICPAC Climate AI · Week-2 rainfall forecasting
 
-Web platform for ICPAC Week-2 (Days 8–14) rainfall forecasts over the eleven member
-states. It runs the HPC-validated **MBC + Atmos37 CatBoost** residual model on the
-authoritative 800 × 700 grid (205,999-cell ICPAC-11 domain) and shows three forecasts
-side by side:
+Operational web service for ICPAC Week-2 (Days 8–14) rainfall forecasts over the eleven
+member states, designed after [icpac.net](https://www.icpac.net/). Each week it downloads
+the ECMWF ensemble from ECMWF Open Data, issues the forecast on the authoritative
+800 × 700 grid (205,999-cell ICPAC-11 domain), drafts the ICPAC weekly bulletin for
+review and verifies finished forecasts against CHIRPS. It shows three forecast layers:
 
-* **Raw ECMWF**: ECMWF S2S ensemble mean of the Week-2 total;
-* **MBC**: the locked multiplicative bias correction, `max(0, raw × R[month, cell])`;
+* **Raw ECMWF**: the ensemble mean of the Week-2 total (50 perturbed members);
+* **MBC**: the locked multiplicative bias correction, `max(0, raw × R[month, cell])`,
+  the forecast issued today;
 * **MBC + AI/ML**: the hybrid residual-corrected forecast,
-  `max(MBC + CatBoost residual, 0)`, from 37 rainfall and atmospheric features.
+  `max(MBC + CatBoost residual, 0)`, from 37 rainfall and atmospheric features. It is
+  **in progress**: it needs the pressure-level inputs described in
+  [weekly operations](docs/operations.md#the-mbc--aiml-hybrid-layer-in-progress).
+
+Observation datasets other than CHIRPS (TAMSAT, RFE 2.0, ARC 2.0, GPM IMERG) are listed as
+coming later; nothing is computed from them yet.
 
 The model in use is the **candidate** `mbc_atmos37_catboost_candidate_v1` (378 trees,
 trained 2008–2019, validated 2020–2021). It is not the production model: production
@@ -17,15 +24,17 @@ arrives as a new version.
 
 | Part | Where |
 |---|---|
-| Interface (Next.js 16, Tailwind 4, shadcn-style workspace) | `frontend/` |
+| Interface (Next.js 16, Tailwind 4, MapLibre; icpac.net design) | `frontend/` |
 | API (FastAPI) | `backend/app/` |
 | Science: grid, Week-2 processing, MBC, Atmos37 features, inference, verification | `climate_engine/` |
+| ECMWF Open Data and CHIRPS downloads | `climate_engine/inputs/`, `config/data_sources.yaml` |
 | ICPAC map standard | `climate_engine/cartography/icpac_maps.py` |
 | Product packages and bulletin interface | `climate_engine/products/` |
 | Verified HPC artifacts (checksummed) | `artifacts/`, `cartography/`, `fixtures/references/` |
 | Model descriptors | `config/model_registry/` |
 
-Documentation: [operational models](docs/operational_models.md) ·
+Documentation: [weekly operations and data sources](docs/operations.md) ·
+[operational models](docs/operational_models.md) ·
 [forecast input format](docs/forecast_input_format.md) ·
 [deployment (Vercel, Azure or Cloud Run, Supabase)](docs/deployment.md) ·
 [self-hosted Copilot model](docs/self-hosted-llm.md) ·
@@ -50,7 +59,7 @@ Without Docker (Python 3.12+, Node 22+, pnpm 11):
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
 pip install -e '.[dev]'
 python -m scripts.verify_artifacts                    # every HPC artifact against its SHA256
-ALLOW_SYNTHETIC_FORECASTS=true python -m uvicorn backend.app.main:app --port 8000
+python -m uvicorn backend.app.main:app --port 8000
 # second terminal
 cd frontend && corepack enable && pnpm install --frozen-lockfile && pnpm dev
 ```
@@ -68,19 +77,20 @@ python -m scripts.register_model \
   --descriptor config/model_registry/mbc_atmos37_catboost_candidate_v1.yaml --actor Joe254h
 ```
 
-## Run a test forecast
+## Issue this week's forecast
 
-The real model on labelled synthetic ECMWF input (the full chain, no HPC data needed):
+Open Data & Tools › Operations, enter your name and run the weekly cycle: it downloads the
+newest 00 UTC ECMWF ensemble, issues the forecast and verifies every earlier forecast that
+CHIRPS now covers. The same through the API:
 
 ```bash
-curl -X POST http://localhost:8000/forecasts/run -H 'Content-Type: application/json' \
-  -d '{"initialization": "2026-10-05", "source": "synthetic_fixture", "actor": "Joe254h"}'
+curl -X POST http://localhost:8000/operations -H 'Content-Type: application/json' \
+  -d '{"action": "cycle", "actor": "Joe254h"}'
 ```
 
-or Data › Forecast runs in the interface. With real ECMWF S2S files in
-`FORECAST_INPUT_ROOT`, use `"source": "ecmwf_files"`. Real Atmos37 runs currently stop
-at one missing setting, the seven Week-2 pressure-level steps used in training
-(`ecmwf.pressure.week2_steps_hours`), which the platform will not guess.
+or unattended: `python -m scripts.operational_cycle --actor "scheduled cycle"`. The API
+needs outbound HTTPS to ECMWF Open Data and the CHIRPS server; see
+[weekly operations](docs/operations.md).
 
 Each run writes a product package to `RUN_ROOT/forecasts/<forecast_id>/` (NetCDF, ICPAC
 maps, country statistics, verification, provenance, bulletin inputs). Replacing the
@@ -93,50 +103,50 @@ candidate with the refitted model is described in
 |---|---|
 | Models, model in use, registration | `GET /models`, `GET /models/current`, `POST /models/register` |
 | Independent test, promotion | `POST /models/{id}/independent-test`, `POST /models/{id}/promote` |
+| Weekly cycle and its steps | `POST /operations` (`cycle`, `fetch_ecmwf`, `run_forecast`, `verify_due`, `verify_forecast`), `GET /operations`, `GET /operations/{id}` |
+| Data sources | `GET /data/sources`, `GET /data/ecmwf`, `GET /data/chirps` |
 | Forecasts | `GET /forecasts`, `GET /forecasts/latest`, `POST /forecasts/run`, `POST /forecasts/import` |
-| One forecast | `GET /forecasts/{id}`, `/map?layer=hybrid\|mbc\|raw\|residual`, `/countries`, `/verification`, `/bulletin`, `/package/{file}` |
+| One forecast | `GET /forecasts/{id}`, `/map?layer=mbc\|raw`, `/overlay?layer=`, `/countries`, `/verification`, `/bulletin`, `/package/{file}` |
+| Weekly bulletin drafts | `GET /bulletins`, `POST /bulletins/generate`, `POST /bulletins/{id}/submit\|approve\|reject\|publish`, `GET /bulletins/{id}/export` |
 | Verification | `POST /forecasts/{id}/verification`, `GET /verification/seasonal`, `GET /verification/maps/{metric}` |
 | System health | `GET /health` |
 
 ## Development and tests
 
 ```bash
-ruff format --check backend climate_engine chatbot hpc scripts
-ruff check backend climate_engine chatbot hpc scripts
-mypy backend climate_engine chatbot hpc
-pytest -q                      # science, artifacts, maps, API, one end-to-end run
+ruff format --check backend climate_engine chatbot scripts
+ruff check backend climate_engine chatbot scripts
+mypy backend climate_engine chatbot
+pytest -q                      # science, artifacts, inputs, maps, API, end-to-end runs
 cd frontend
 pnpm lint && pnpm typecheck && pnpm test && pnpm build
 pnpm exec playwright install chromium && pnpm test:e2e
 ```
 
-Tests use tiny synthetic fixtures plus the committed artifacts; CI never downloads ECMWF or
-CHIRPS archives. The end-to-end tests run the real candidate on a synthetic fixture
-through the API (`backend/tests/test_end_to_end.py`) and through the interface
-(`frontend/e2e/operational.spec.ts`).
-
-## Demonstration workspace
-
-The first release's synthetic 60 × 60 demonstration grid remains under Workspace ›
-Demonstration, with the Forecaster Copilot, bulletin drafting with human review and the
-pipeline jobs. Everything there is labelled DEMO DATA and is not a forecast.
+Tests use tiny fixtures plus the committed artifacts; they never reach ECMWF or CHIRPS.
+The ECMWF download is tested against a local mirror of real GRIB2 files and indexes
+(`backend/tests/ecmwf_mirror.py`), CHIRPS against GeoTIFFs written in its format. The
+browser tests start that mirror, run the weekly cycle through the Operations page and
+check every page, the bulletin review and the Copilot (`frontend/e2e`).
 
 ## Screenshots
 
 ![Overview](docs/screenshots/overview.png)
 
 [Forecast](docs/screenshots/forecast.png) · [Maps](docs/screenshots/maps.png) ·
-[Country](docs/screenshots/country.png) · [Models](docs/screenshots/models.png) ·
-[Verification](docs/screenshots/verification.png) · [Weekly product](docs/screenshots/bulletins.png) ·
-[Copilot](docs/screenshots/copilot.png) · [Dark](docs/screenshots/dark.png) ·
-[Tablet](docs/screenshots/tablet.png). The forecast shown runs the real candidate on
-labelled synthetic input.
+[Country](docs/screenshots/country.png) · [Weekly bulletin](docs/screenshots/bulletin.png) ·
+[Verification](docs/screenshots/verification.png) · [Models](docs/screenshots/models.png) ·
+[Data sources](docs/screenshots/data.png) · [Operations](docs/screenshots/operations.png) ·
+[System status](docs/screenshots/system.png) · [Copilot](docs/screenshots/copilot.png) ·
+[Mobile](docs/screenshots/mobile.png). They were taken against the test mirror, whose
+rainfall is a made-up pattern (not weather), with the map basemap blocked by the capture
+environment's network.
 
 ## Scientific scope
 
 Every number in the interface comes from the API. Anomalies and tercile categories are
-reported as unavailable until a climatology and thresholds exist; the Word bulletin waits
-for the official template. The 2022–2024 period is the protected independent test: the
+reported as in progress until a Week-2 climatology and thresholds exist, as are the
+bulletin's temperature and heat-stress sections. The 2022–2024 period is the protected independent test: the
 platform never fits, tunes or selects models, and forecasts valid in that period are
 verified for display only. Open dependencies are listed in
 [operational models](docs/operational_models.md#missing-dependencies).

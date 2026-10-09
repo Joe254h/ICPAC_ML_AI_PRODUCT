@@ -1,18 +1,41 @@
-import { test, expect } from "@playwright/test";
-import path from "node:path";
+import { expect, test } from "@playwright/test";
 
-test("continuous chat sends on Enter, restores history, collapses evidence and retries failures", async ({
+test("the Copilot answers from the issued forecast", async ({ page }) => {
+  await page.goto("/copilot");
+  await expect(
+    page.getByRole("heading", { name: "Forecast in discussion" }),
+  ).toBeVisible();
+  const saved = page
+    .getByRole("navigation", { name: "Saved conversations" })
+    .getByRole("button");
+  await page
+    .getByRole("button", {
+      name: "Explain the forecast for Kenya.",
+      exact: true,
+    })
+    .click();
+  const answer = page.locator(".chat-message.assistant").last();
+  await expect(answer).toContainText("Kenya", { timeout: 60_000 });
+  await expect(answer).toContainText("mm");
+  await expect(page.getByLabel("Conversation country")).toHaveValue("Kenya");
+  // The new conversation is saved and listed first, as the current one.
+  await expect(saved.first()).toHaveAttribute("aria-current", "true");
+  await expect(saved.first()).toContainText("Explain the forecast for Kenya.");
+});
+
+test("continuous chat sends on Enter, restores history and retries failures", async ({
   page,
 }) => {
-  const fid = "w2-2026-10-08-12345678";
+  const fid = "w2-2026-10-07-12345678";
   const context = {
     mode: "operational",
     forecast_id: fid,
     model_id: "candidate_model",
     model_status: "candidate",
     country: "Kenya",
-    variant: "hybrid",
-    synthetic: true,
+    variant: "mbc",
+    valid_start: "2026-10-14T00:00:00Z",
+    valid_end: "2026-10-21T00:00:00Z",
   };
   const messages: Record<string, unknown>[] = [];
   const requests: Record<string, unknown>[] = [];
@@ -25,10 +48,19 @@ test("continuous chat sends on Enter, restores history, collapses evidence and r
     let data: unknown = {};
     if (path === "/config")
       data = {
-        science: { countries: ["Kenya", "Somalia"] },
-        forecasts: {},
+        operational: {
+          hybrid: { status: "in_progress", reason: "inputs missing" },
+          countries: ["Kenya", "Somalia"],
+          input_sources: ["ecmwf_opendata"],
+          map_layers: ["raw", "mbc"],
+          verification_maps: {},
+          pressure_steps_configured: false,
+        },
         models: [],
+        data_sources: [],
       };
+    else if (path === "/health")
+      data = { status: "Healthy", mode: "operational", components: {} };
     else if (path === "/models/current")
       data = {
         role: "candidate",
@@ -37,6 +69,9 @@ test("continuous chat sends on Enter, restores history, collapses evidence and r
     else if (path === "/forecasts/latest")
       data = {
         ...context,
+        initialization: "2026-10-07",
+        layers: ["raw", "mbc"],
+        primary_layer: "mbc",
         countries: [{ country: "Kenya" }, { country: "Somalia" }],
       };
     else if (path === "/chat/sessions")
@@ -53,12 +88,11 @@ test("continuous chat sends on Enter, restores history, collapses evidence and r
           ]
         : [];
     else if (path === "/chat/sessions/conversation-one") {
-      if (failRestore) {
+      if (failRestore)
         return route.fulfill({
           status: 503,
           json: { detail: "Temporary restore failure" },
         });
-      }
       data = { id: "conversation-one", messages, context };
     } else if (path === "/chat") {
       const body = route.request().postDataJSON();
@@ -75,7 +109,7 @@ test("continuous chat sends on Enter, restores history, collapses evidence and r
         role: "assistant",
         session_id: "conversation-one",
         context: { ...context },
-        text: `${context.country} rainfall for the same package. ${"Forecast explanation. ".repeat(45)}`,
+        text: `${context.country} rainfall for the same forecast. ${"Forecast explanation. ".repeat(45)}`,
         provider: "openai_compatible",
         sources: [
           {
@@ -114,21 +148,15 @@ test("continuous chat sends on Enter, restores history, collapses evidence and r
     "Kenya rainfall",
   );
   expect(requests[0].context_mode).toBe("operational");
-  await expect(page.locator(".chat-evidence")).not.toHaveAttribute("open", "");
-  await expect(page.locator(".tool-trace")).not.toHaveAttribute("open", "");
+  // Empty: the forecast's main layer, chosen by the service.
+  expect(requests[0].variant).toBeNull();
+  for (const details of await page.locator(".chat-details").all())
+    await expect(details).not.toHaveAttribute("open", "");
   await input.fill("And Somalia?");
   await input.press("Enter");
   await expect(page.locator(".chat-message.assistant")).toHaveCount(2);
   expect(requests[1].session_id).toBe("conversation-one");
   await expect(page.getByLabel("Conversation country")).toHaveValue("Somalia");
-  if (process.env.BULLETIN_QA_MAP_ROOT)
-    await page.screenshot({
-      path: path.join(
-        process.env.BULLETIN_QA_MAP_ROOT,
-        "continuous-chat-browser.png",
-      ),
-      fullPage: false,
-    });
   await expect
     .poll(() =>
       page
@@ -140,9 +168,8 @@ test("continuous chat sends on Enter, restores history, collapses evidence and r
     .toBeLessThan(20);
   failRestore = true;
   await page.reload();
-  // The composer is also disabled while restoring, so wait for the failure itself.
   const retry = page.getByRole("button", {
-    name: "Retry loading conversation",
+    name: "Retry loading the conversation",
   });
   await expect(retry).toBeVisible();
   await expect(input).toBeDisabled();
@@ -153,7 +180,7 @@ test("continuous chat sends on Enter, restores history, collapses evidence and r
   failNext = true;
   await input.fill("Tell me more");
   await input.press("Enter");
-  await expect(page.locator(".copilot-workspace [role=alert]")).toContainText(
+  await expect(page.locator(".chat-card [role=alert]")).toContainText(
     "Temporary endpoint failure",
   );
   await expect(input).toHaveValue("Tell me more");
@@ -165,207 +192,14 @@ test("continuous chat sends on Enter, restores history, collapses evidence and r
     .click();
   await expect(page.locator(".chat-message")).toHaveCount(0);
   await page
-    .getByRole("button", { name: "Conversations", exact: true })
-    .click();
-  await page
     .getByRole("navigation", { name: "Saved conversations" })
     .getByRole("button")
     .first()
     .click();
   await expect(page.locator(".chat-message.assistant")).toHaveCount(3);
   await page.setViewportSize({ width: 390, height: 844 });
-  if (process.env.BULLETIN_QA_MAP_ROOT)
-    await page.screenshot({
-      path: path.join(
-        process.env.BULLETIN_QA_MAP_ROOT,
-        "continuous-chat-mobile-browser.png",
-      ),
-      fullPage: false,
-    });
-  const overflow = await page.evaluate(() =>
-    Array.from(document.querySelectorAll("main *"))
-      .map((node) => ({
-        tag: node.tagName,
-        class: node.className,
-        right: Math.round(node.getBoundingClientRect().right),
-      }))
-      .filter((node) => node.right > window.innerWidth + 1)
-      .slice(0, 12),
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
   );
-  expect(overflow).toEqual([]);
-});
-
-test("weekly preview follows the supplied section order and links its own Word draft", async ({
-  page,
-}) => {
-  const fid = "w2-2026-10-08-12345678";
-  const headings = [
-    "Headline",
-    "Decision-Support Note",
-    "Total Rainfall",
-    "Rainfall Anomalies",
-    "Exceptional Rainfall",
-    "Mean Temperature",
-    "Temperature Anomaly",
-    "Somalia",
-    "Somalia Temperature",
-    "Heat Stress",
-  ];
-  await page.route("**/api/**", async (route) => {
-    const url = new URL(route.request().url());
-    const api = url.pathname.slice(4);
-    if (api.endsWith("/map")) {
-      const root = process.env.BULLETIN_QA_MAP_ROOT;
-      return route.fulfill(
-        root
-          ? {
-              contentType: "image/png",
-              path: path.join(
-                root,
-                url.searchParams.has("country")
-                  ? "somalia.png"
-                  : "regional.png",
-              ),
-            }
-          : {
-              contentType: "image/png",
-              body: Buffer.from(
-                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1cAAAAASUVORK5CYII=",
-                "base64",
-              ),
-            },
-      );
-    }
-    let data: unknown = {};
-    if (api === "/config")
-      data = {
-        science: { countries: ["Kenya", "Somalia"] },
-        forecasts: {},
-        models: [],
-      };
-    else if (api === "/models/current")
-      data = {
-        role: "candidate",
-        model: { model_id: "candidate_model", status: "candidate" },
-      };
-    else if (api.endsWith("/bulletin"))
-      data = {
-        forecast_id: fid,
-        title: "Weekly Forecast for 15-21 October 2026",
-        generator: {
-          status: "ready",
-          review: "DRAFT - human review required",
-          layout_validation: "Verify the draft in Word",
-        },
-        export: `/forecasts/${fid}/bulletin/export`,
-        sections: headings.map((title, index) => ({
-          key: String(index),
-          title,
-          text: [
-            index === 0
-              ? "SYNTHETIC TEST INPUT - NOT A FORECAST OF REAL WEATHER."
-              : index === 2
-                ? "Current package country means: Kenya 64.3 mm; Somalia 47.6 mm."
-                : "Current package evidence or an explicit missing-product statement.",
-          ],
-          ...(index === 2 || index === 7
-            ? {
-                map: `/forecasts/${fid}/map?layer=hybrid&style=weekly-v1${index === 7 ? "&country=Somalia" : ""}`,
-              }
-            : index > 2
-              ? { missing_dependency: "Required validated field unavailable" }
-              : {}),
-        })),
-      };
-    else if (api === `/forecasts/${fid}`)
-      data = {
-        forecast_id: fid,
-        model_id: "candidate_model",
-        model_status: "candidate",
-        model: { test_status: "untested" },
-        synthetic: true,
-        initialization: "2026-10-08",
-        valid_start: "2026-10-15T00:00:00Z",
-        valid_end: "2026-10-22T00:00:00Z",
-        generation_time: "2026-10-08T00:00:00Z",
-        verification_status: "unavailable",
-        interpretation: {
-          method: { label: "MBC + ATMOS37 CATBOOST" },
-          model: { role: "candidate" },
-          input: { label: "synthetic fixture" },
-          anomaly: { missing_dependency: "climatology" },
-          category: { missing_dependency: "thresholds" },
-        },
-      };
-    await route.fulfill({ json: data });
-  });
-  await page.goto(`/bulletin?id=${fid}`);
-  const paper = page.getByRole("article", {
-    name: "Weekly forecast bulletin preview",
-  });
-  await expect(paper).toBeVisible();
-  await expect(paper.getByRole("heading", { level: 1 })).toHaveText(
-    "Weekly Forecast for 15-21 October 2026",
-  );
-  await expect(paper.getByRole("heading", { level: 2 })).toHaveText(headings);
-  await expect(paper.getByRole("img")).toHaveCount(2);
-  await expect(
-    page.getByRole("link", { name: "Download Word draft" }).first(),
-  ).toHaveAttribute("href", `/api/forecasts/${fid}/bulletin/export`);
-  await expect(paper).toContainText("Heat Stress map unavailable");
-  await expect
-    .poll(() =>
-      paper
-        .getByRole("img")
-        .first()
-        .evaluate(
-          (img: HTMLImageElement) => img.complete && img.naturalWidth > 0,
-        ),
-    )
-    .toBe(true);
-  if (process.env.BULLETIN_QA_MAP_ROOT) {
-    await page.screenshot({
-      path: path.join(
-        process.env.BULLETIN_QA_MAP_ROOT,
-        "weekly-bulletin-browser.png",
-      ),
-      fullPage: true,
-    });
-    await paper.locator("section").nth(2).scrollIntoViewIfNeeded();
-    await page.screenshot({
-      path: path.join(
-        process.env.BULLETIN_QA_MAP_ROOT,
-        "weekly-bulletin-regional-browser.png",
-      ),
-      fullPage: false,
-    });
-    await paper.locator("section").nth(7).scrollIntoViewIfNeeded();
-    await page.screenshot({
-      path: path.join(
-        process.env.BULLETIN_QA_MAP_ROOT,
-        "weekly-bulletin-somalia-browser.png",
-      ),
-      fullPage: false,
-    });
-  }
-  await page.setViewportSize({ width: 390, height: 844 });
-  if (process.env.BULLETIN_QA_MAP_ROOT)
-    await page.screenshot({
-      path: path.join(
-        process.env.BULLETIN_QA_MAP_ROOT,
-        "weekly-bulletin-mobile-browser.png",
-      ),
-      fullPage: false,
-    });
-  const overflow = await page.evaluate(() =>
-    Array.from(document.querySelectorAll("main *"))
-      .map((node) => ({
-        tag: node.tagName,
-        class: node.className,
-        right: Math.round(node.getBoundingClientRect().right),
-      }))
-      .filter((node) => node.right > window.innerWidth + 1)
-      .slice(0, 12),
-  );
-  expect(overflow).toEqual([]);
+  expect(overflow).toBeLessThanOrEqual(1);
 });

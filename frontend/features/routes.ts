@@ -1,260 +1,242 @@
 /**
- * Every page of the workspace: path, navigation group and the view that renders it.
- * The server page validates URLs against this table; the sidebar is built from it.
+ * Every page of the site: path, the menu it sits in and the view that renders it.
+ * The server page validates URLs against this table; the header menus are built from it.
  */
 export type PageKey =
-  | "overview"
+  | "home"
   | "forecast"
-  | "runs"
+  | "archive"
   | "layer"
   | "maps"
   | "country"
   | "verification"
   | "models"
-  | "data-ecmwf"
-  | "data-chirps"
-  | "data-runs"
+  | "data"
+  | "source"
+  | "operations"
   | "bulletin"
-  | "system"
-  | "copilot"
   | "drafts"
-  | "jobs"
-  | "demo"
-  | "settings";
+  | "copilot"
+  | "system";
 
 export type Route = {
   path: string;
   title: string;
-  group: string;
+  /** Top-level menu (header navigation). */
+  menu: Menu;
   page: PageKey;
   param?: string;
+  /** Listed in the menus and search; false keeps an older URL working. */
   nav?: boolean;
+  /** Shown as "coming later" (planned data sources). */
+  soon?: boolean;
 };
 
-/** ICPAC member states in the order of the navigation brief. */
+export type Menu =
+  | "Home"
+  | "Forecasts"
+  | "Maps"
+  | "Countries"
+  | "Verification"
+  | "Bulletin"
+  | "Models"
+  | "Data & Tools"
+  | "Copilot";
+
+/** ICPAC member states, alphabetical. */
 export const COUNTRIES = [
-  "Kenya",
-  "Ethiopia",
-  "Somalia",
-  "Uganda",
-  "Tanzania",
-  "Rwanda",
   "Burundi",
-  "South Sudan",
-  "Sudan",
   "Djibouti",
   "Eritrea",
+  "Ethiopia",
+  "Kenya",
+  "Rwanda",
+  "Somalia",
+  "South Sudan",
+  "Sudan",
+  "Tanzania",
+  "Uganda",
 ] as const;
 
 export const countrySlug = (name: string) =>
   name.toLowerCase().replaceAll(" ", "-");
 
-export const GROUPS = [
-  "Overview",
+/** Header menus, in the order of the ICPAC website's navigation. */
+export const MENUS: Menu[] = [
   "Forecasts",
   "Maps",
   "Countries",
   "Verification",
-  "Models",
-  "Data",
   "Bulletin",
-  "System",
-  "Workspace",
+  "Models",
+  "Data & Tools",
+  "Copilot",
+];
+
+/** Planned observation sources: listed now, readers come later. */
+export const PLANNED_SOURCES = [
+  { id: "tamsat", title: "TAMSAT" },
+  { id: "rfe2", title: "RFE 2.0" },
+  { id: "arc2", title: "ARC 2.0" },
+  { id: "imerg", title: "GPM IMERG" },
 ] as const;
 
 export const ROUTES: Route[] = [
-  { path: "", title: "Overview", group: "Overview", page: "overview" },
+  { path: "", title: "Home", menu: "Home", page: "home" },
   {
     path: "forecasts",
     title: "Latest forecast",
-    group: "Forecasts",
+    menu: "Forecasts",
     page: "forecast",
-  },
-  {
-    path: "forecasts/week-2",
-    title: "Week-2",
-    group: "Forecasts",
-    page: "runs",
   },
   {
     path: "forecasts/raw",
     title: "Raw ECMWF",
-    group: "Forecasts",
+    menu: "Forecasts",
     page: "layer",
     param: "raw",
   },
   {
     path: "forecasts/mbc",
     title: "MBC",
-    group: "Forecasts",
+    menu: "Forecasts",
     page: "layer",
     param: "mbc",
   },
   {
     path: "forecasts/hybrid",
     title: "MBC + AI/ML",
-    group: "Forecasts",
+    menu: "Forecasts",
     page: "layer",
     param: "hybrid",
   },
   {
+    path: "forecasts/archive",
+    title: "Forecast archive",
+    menu: "Forecasts",
+    page: "archive",
+  },
+  {
     path: "maps/rainfall",
-    title: "Rainfall",
-    group: "Maps",
+    title: "Rainfall maps",
+    menu: "Maps",
     page: "maps",
     param: "rainfall",
   },
   {
     path: "maps/bias",
     title: "Bias",
-    group: "Maps",
+    menu: "Maps",
     page: "maps",
     param: "bias",
   },
   {
     path: "maps/rmse",
     title: "RMSE",
-    group: "Maps",
+    menu: "Maps",
     page: "maps",
     param: "rmse",
   },
   {
     path: "maps/correlation",
     title: "Correlation",
-    group: "Maps",
+    menu: "Maps",
     page: "maps",
     param: "correlation",
   },
   {
     path: "maps/skill",
     title: "Skill",
-    group: "Maps",
+    menu: "Maps",
     page: "maps",
     param: "skill",
   },
   ...COUNTRIES.map((name) => ({
     path: "countries/" + countrySlug(name),
     title: name,
-    group: "Countries",
+    menu: "Countries" as const,
     page: "country" as const,
     param: name,
   })),
   {
     path: "verification",
     title: "Verification",
-    group: "Verification",
+    menu: "Verification",
     page: "verification",
   },
   {
-    path: "models",
-    title: "Model registry",
-    group: "Models",
-    page: "models",
-    param: "registry",
-  },
-  {
-    path: "models/candidate",
-    title: "Candidate models",
-    group: "Models",
-    page: "models",
-    param: "candidate",
-  },
-  {
-    path: "models/production",
-    title: "Production models",
-    group: "Models",
-    page: "models",
-    param: "production",
-  },
-  { path: "data/ecmwf", title: "ECMWF", group: "Data", page: "data-ecmwf" },
-  { path: "data/chirps", title: "CHIRPS", group: "Data", page: "data-chirps" },
-  {
-    path: "data/runs",
-    title: "Forecast runs",
-    group: "Data",
-    page: "data-runs",
-  },
-  {
     path: "bulletin",
-    title: "Weekly product",
-    group: "Bulletin",
+    title: "Weekly bulletin",
+    menu: "Bulletin",
     page: "bulletin",
   },
   {
-    path: "system/data",
-    title: "Data status",
-    group: "System",
-    page: "system",
-    param: "data",
+    path: "bulletins",
+    title: "Bulletin drafts and review",
+    menu: "Bulletin",
+    page: "drafts",
+  },
+  { path: "models", title: "Model registry", menu: "Models", page: "models" },
+  { path: "data", title: "Data sources", menu: "Data & Tools", page: "data" },
+  {
+    path: "data/ecmwf",
+    title: "ECMWF ensemble",
+    menu: "Data & Tools",
+    page: "source",
+    param: "ecmwf",
   },
   {
-    path: "system/models",
-    title: "Model status",
-    group: "System",
-    page: "system",
-    param: "models",
+    path: "data/chirps",
+    title: "CHIRPS",
+    menu: "Data & Tools",
+    page: "source",
+    param: "chirps",
+  },
+  ...PLANNED_SOURCES.map((source) => ({
+    path: "data/" + source.id,
+    title: source.title,
+    menu: "Data & Tools" as const,
+    page: "source" as const,
+    param: source.id,
+    soon: true,
+  })),
+  {
+    path: "data/runs",
+    title: "Operations",
+    menu: "Data & Tools",
+    page: "operations",
   },
   {
-    path: "system/processing",
-    title: "Processing status",
-    group: "System",
+    path: "system",
+    title: "System status",
+    menu: "Data & Tools",
     page: "system",
-    param: "processing",
   },
   {
     path: "copilot",
     title: "Forecaster Copilot",
-    group: "Workspace",
+    menu: "Copilot",
     page: "copilot",
   },
-  {
-    path: "bulletins",
-    title: "Bulletin drafts",
-    group: "Workspace",
-    page: "drafts",
-  },
-  { path: "jobs", title: "Pipeline jobs", group: "Workspace", page: "jobs" },
-  {
-    path: "demo",
-    title: "Demonstration",
-    group: "Workspace",
-    page: "demo",
-    param: "overview",
-  },
-  { path: "settings", title: "Settings", group: "Workspace", page: "settings" },
-  // Earlier URLs keep working without a place in the navigation.
-  {
-    path: "monitoring",
-    title: "Demonstration · monitoring",
-    group: "Workspace",
-    page: "demo",
-    param: "monitoring",
+  // Earlier URLs keep working without a place in the menus.
+  ...(
+    [
+      ["forecasts/week-2", "Forecast archive", "Forecasts", "archive"],
+      ["models/candidate", "Model registry", "Models", "models"],
+      ["models/production", "Model registry", "Models", "models"],
+      ["system/data", "System status", "Data & Tools", "system"],
+      ["system/models", "System status", "Data & Tools", "system"],
+      ["system/processing", "System status", "Data & Tools", "system"],
+      ["health", "System status", "Data & Tools", "system"],
+      ["jobs", "Operations", "Data & Tools", "operations"],
+    ] as const
+  ).map(([path, title, menu, page]) => ({
+    path,
+    title,
+    menu,
+    page,
     nav: false,
-  },
-  {
-    path: "observations",
-    title: "Demonstration · observations",
-    group: "Workspace",
-    page: "demo",
-    param: "observations",
-    nav: false,
-  },
-  {
-    path: "products",
-    title: "Demonstration · products",
-    group: "Workspace",
-    page: "demo",
-    param: "products",
-    nav: false,
-  },
-  {
-    path: "health",
-    title: "System health",
-    group: "System",
-    page: "system",
-    param: "all",
-    nav: false,
-  },
+  })),
 ];
 
 export function findRoute(path: string): Route | undefined {
@@ -267,4 +249,8 @@ export function resolveRoute(segments?: string[]): Route | undefined {
 
 export function href(route: Route) {
   return "/" + route.path;
+}
+
+export function menuRoutes(menu: Menu): Route[] {
+  return ROUTES.filter((r) => r.menu === menu && r.nav !== false);
 }

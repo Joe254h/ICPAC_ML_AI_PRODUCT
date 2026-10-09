@@ -1,12 +1,3 @@
-import type { FeatureCollection } from "geojson";
-export type Selection = {
-  cycle: string;
-  observation: string;
-  model: string;
-  provider: string;
-  country: string;
-  layer: string;
-};
 export type Model = {
   id: string;
   model_id: string;
@@ -19,62 +10,13 @@ export type Model = {
   training_period: string;
   validation_period: string;
   checksum: string;
-  /** "week2_operational" models run on the ICPAC-11 grid, not the demo grid. */
+  /** "week2_operational": a Week-2 model on the ICPAC 0.05° grid. */
   task?: string;
   [key: string]: unknown;
 };
 export type Config = {
-  science: {
-    countries: string[];
-    domain: number[];
-    grid_shape: number[];
-    version: string;
-  };
-  forecasts: { cycles: string[]; sources: string[] };
-  observations: string[];
+  /** What this deployment can do (inputs, hybrid status, countries). */
+  operational: import("@/types/operational").Capabilities;
   models: Model[];
-  /** What this deployment can do (synthetic runs, configured inputs, countries). */
-  operational?: import("@/types/operational").Capabilities;
-  label: string;
-};
-export type Country = {
-  country: string;
-  mean_rainfall_mm: number | null;
-  anomaly_percent: number | null;
-  rmse?: number;
-  bias?: number;
-  correlation?: number | null;
-  cell_count: number;
-};
-export type Analysis = {
-  selection: Selection;
-  label: string;
-  period: string;
-  metrics: {
-    rmse: number;
-    mae: number;
-    bias: number;
-    correlation: number | null;
-    sample_count: number;
-  };
-  mean_rainfall_mm: number | null;
-  anomaly_percent: number | null;
-  countries: Country[];
-  model_comparison: {
-    model: string;
-    rmse: number;
-    mae: number;
-    bias: number;
-  }[];
-  observation_comparison: { source: string; rmse: number; bias: number }[];
-  timeseries: { date: string; raw: number; observed: number }[];
-  map: FeatureCollection;
-  provenance: Record<string, unknown>;
-  qc: {
-    status: string;
-    dataset: string;
-    checks: Record<string, unknown>;
-    errors: string[];
-    warnings: string[];
-  }[];
+  data_sources: import("@/types/operational").DataSource[];
 };

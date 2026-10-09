@@ -41,6 +41,11 @@ export type CurrentModel = {
   note?: string;
 };
 
+export type ProductStatus = {
+  status: "available" | "in_progress";
+  reason?: string;
+};
+
 export type ForecastRun = {
   id: string;
   forecast_id: string;
@@ -66,6 +71,10 @@ export type ForecastRun = {
   created_at: string;
   created_by: string;
   notes: string[];
+  /** Rainfall layers the forecast holds (hybrid only when the AI/ML inputs exist). */
+  layers?: string[];
+  primary_layer?: Variant;
+  products?: Partial<Record<Variant, ProductStatus>>;
 };
 
 export type Stats = {
@@ -80,7 +89,7 @@ export type CountryRow = {
   cell_count: number;
   raw: Stats;
   mbc: Stats;
-  hybrid: Stats;
+  hybrid?: Stats;
   anomaly: { status: string; reason: string };
   category: { status: string; reason: string };
 };
@@ -105,12 +114,14 @@ export type Verification = {
   scope?: string;
   protected_test_period?: boolean;
   observation?: { file: string; sha256: string };
-  domain?: Record<Variant, Metrics>;
-  countries?: Record<string, Record<Variant, Metrics>>;
+  domain?: Partial<Record<Variant, Metrics>>;
+  countries?: Record<string, Partial<Record<Variant, Metrics>>>;
 };
 
 export type Interpretation = {
-  domain_mean_mm: Record<Variant | "residual", number>;
+  domain_mean_mm: Partial<Record<Variant | "residual", number>>;
+  primary_layer?: Variant;
+  layers?: string[];
   method: { label: string; description: string; baseline: string };
   model: {
     model_id: string;
@@ -170,11 +181,13 @@ export type ForecastDetail = ForecastRun & {
   interpretation: Interpretation;
   maps: Record<string, string>;
   files: Record<string, string>;
+  overlays?: Partial<Record<Variant, string>>;
+  overlay_bounds?: [number, number, number, number];
 };
 
 export type Seasonal = {
   model_id: string;
-  seasons: Record<string, Record<Variant, Metrics>>;
+  seasons: Record<string, Partial<Record<Variant, Metrics>>>;
   forecasts: string[];
   excluded_protected_period: number;
   scope: string;
@@ -191,6 +204,8 @@ export type MapsStatus = {
     { title: string; min_cases: number; available: boolean }
   >;
   variants: Variant[];
+  cases_by_variant?: Partial<Record<Variant, number>>;
+  default_variant?: Variant;
 };
 
 export type BulletinStatus = {
@@ -224,14 +239,80 @@ export type Health = {
   status: string;
   mode: string;
   components: Record<string, string>;
-  label: string;
 };
 
 export type Capabilities = {
-  synthetic_runs_allowed: boolean;
   pressure_steps_configured: boolean;
+  hybrid: { status: "available" | "in_progress"; reason: string | null };
+  input_sources: string[];
   map_layers: string[];
   verification_maps: Record<string, string>;
   countries: string[];
   protected_test_period: string;
+};
+
+export type EcmwfInput = {
+  id: string;
+  initialization: string;
+  file: string;
+  mirror: string;
+  members: number;
+  steps_hours: number[];
+  grib_sha256: string;
+  grib_bytes: number;
+  bytes: number;
+  fetched_at: string;
+  fetched_by: string;
+};
+
+export type ChirpsWindow = {
+  id: string;
+  valid_start: string;
+  valid_end: string;
+  products: string[];
+  file: string;
+  fetched_at: string;
+  fetched_by: string;
+  days: {
+    day: string;
+    product: string;
+    url: string;
+    sha256: string;
+    missing_domain_cells: number;
+  }[];
+};
+
+export type DataSource = {
+  id: string;
+  name: string;
+  role: string;
+  status: "active" | "planned";
+  description: string;
+  provider: string;
+  url: string;
+  fetched?: number;
+  latest?: (EcmwfInput | ChirpsWindow) | null;
+};
+
+export type OperationAction =
+  | "fetch_ecmwf"
+  | "run_forecast"
+  | "verify_due"
+  | "verify_forecast"
+  | "cycle";
+
+export type Operation = {
+  id: string;
+  action: OperationAction;
+  title: string;
+  status: "queued" | "running" | "complete" | "failed" | "interrupted";
+  initialization: string | null;
+  forecast_id: string | null;
+  created_at: string;
+  created_by: string;
+  started_at?: string;
+  finished_at?: string;
+  messages: { time: string; text: string }[];
+  result: Record<string, unknown> | null;
+  error: string | null;
 };

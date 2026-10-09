@@ -1,196 +1,232 @@
 "use client";
-/** Maps: forecast rainfall, and gridded verification metrics over verified forecasts. */
+/** Rainfall maps of the latest forecast and verification maps over verified forecasts. */
+import Link from "next/link";
 import { useState } from "react";
-import { MapPinned } from "lucide-react";
 import {
   Card,
-  CardContent,
-  CardHeader,
-  EmptyState,
   ErrorState,
-  LinkButton,
-  MapImage,
+  InProgress,
+  MapFigure,
   Notice,
-  PageHeader,
-  Segmented,
-  SeriesSwatch,
+  PageBanner,
   Skeleton,
+  Tabs,
 } from "@/components/ui";
 import type { PageProps } from "@/features/view";
+import { COUNTRIES } from "@/features/routes";
+import { SERIES, validDays } from "@/lib/format";
+import { useApi } from "@/services/hooks";
+import type { ForecastDetail, MapsStatus, Variant } from "@/types/operational";
 import {
-  ForecastBadges,
+  LAYER_TEXT,
   NoForecast,
-  VARIANTS,
-  forecastSubtitle,
+  forecastFacts,
+  layersOf,
   mapUrl,
   useForecast,
 } from "@/features/operational/shared";
-import { SERIES } from "@/lib/format";
-import { useApi } from "@/services/hooks";
-import type { MapsStatus, Variant } from "@/types/operational";
 
-const ABOUT: Record<string, string> = {
-  bias: "Mean of forecast − CHIRPS in each cell over the verified forecasts (mm/week). Positive: the forecast is too wet.",
-  rmse: "Root mean square error in each cell over the verified forecasts (mm/week).",
-  correlation:
-    "Pearson correlation between forecast and CHIRPS in each cell across the verified forecasts.",
-  skill:
-    "Relative RMSE improvement over raw ECMWF in each cell: 1 − RMSE / RMSE(raw ECMWF). Positive values beat the raw forecast.",
+const METRICS: Record<string, { title: string; text: string }> = {
+  bias: {
+    title: "Bias",
+    text: "Mean forecast minus observed Week-2 rainfall per cell: positive where the forecast is too wet, negative where it is too dry.",
+  },
+  rmse: {
+    title: "RMSE",
+    text: "Root-mean-square error per cell: the typical size of the Week-2 rainfall error, weighting large errors more.",
+  },
+  correlation: {
+    title: "Correlation",
+    text: "Pearson correlation between forecast and observed Week-2 rainfall across verified weeks, per cell.",
+  },
+  skill: {
+    title: "Skill",
+    text: "RMSE improvement over raw ECMWF per cell: where the correction helps (positive) or hurts (negative).",
+  },
 };
 
-function RainfallMaps({ id }: { id?: string }) {
-  const forecast = useForecast(id);
-  if (forecast.loading && !forecast.data)
-    return <Skeleton className="h-[36rem]" />;
-  if (forecast.status === 404) return <NoForecast />;
-  if (forecast.error || !forecast.data)
-    return (
-      <ErrorState
-        message={forecast.error ?? "Forecast unavailable"}
-        retry={forecast.reload}
-      />
-    );
-  const detail = forecast.data;
+function RainfallMaps({ detail }: { detail: ForecastDetail }) {
+  const layers = layersOf(detail);
+  const [country, setCountry] = useState("");
   return (
     <>
-      <PageHeader
-        title="Rainfall maps"
-        description={forecastSubtitle(detail)}
-        badges={<ForecastBadges detail={detail} />}
+      <PageBanner
+        title="Rainfall Maps"
+        crumbs={[{ label: "Maps" }, { label: "Rainfall" }]}
+        subtitle="Week-2 total rainfall in the ICPAC weekly bulletin's colour classes, for the region or one member state."
+        facts={forecastFacts(detail)}
       />
-      <div className="grid gap-6 lg:grid-cols-2">
-        {[...VARIANTS].reverse().map((variant) => (
-          <Card key={variant}>
-            <CardHeader
-              title={
-                <span className="inline-flex items-center gap-2">
-                  <SeriesSwatch series={variant} />
-                  {SERIES[variant].label}
-                </span>
-              }
-            />
-            <CardContent>
-              <MapImage
-                src={mapUrl(detail, variant)}
-                alt={`${SERIES[variant].label} Week-2 rainfall`}
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 14,
+          alignItems: "end",
+        }}
+      >
+        <label className="field" style={{ minWidth: 260 }}>
+          Area
+          <select value={country} onChange={(e) => setCountry(e.target.value)}>
+            <option value="">Eastern Africa (all eleven countries)</option>
+            {COUNTRIES.map((name) => (
+              <option key={name}>{name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="grid-3">
+        {(["raw", "mbc", "hybrid"] as Variant[]).map((variant) =>
+          layers.includes(variant) ? (
+            <Card
+              key={variant}
+              eyebrow={SERIES[variant].label}
+              title={LAYER_TEXT[variant].title}
+            >
+              <MapFigure
+                src={mapUrl(detail, variant, country || undefined)}
+                alt={`${LAYER_TEXT[variant].title} Week-2 rainfall${country ? ` over ${country}` : ""}`}
+                caption={`Valid ${validDays(detail.valid_start, detail.valid_end)}`}
               />
-            </CardContent>
-          </Card>
-        ))}
-        <Card>
-          <CardHeader
-            title="Predicted residual"
-            description="CatBoost correction added to MBC"
-          />
-          <CardContent>
-            <MapImage
-              src={mapUrl(detail, "residual")}
-              alt="Predicted residual"
-            />
-          </CardContent>
-        </Card>
+            </Card>
+          ) : (
+            <InProgress key={variant} title={LAYER_TEXT[variant].title}>
+              {detail.products?.hybrid?.reason
+                ? `Waiting for ${detail.products.hybrid.reason}.`
+                : "Its inputs are not available yet."}
+            </InProgress>
+          ),
+        )}
       </div>
     </>
   );
 }
 
-function VerificationMap({ metric, title }: { metric: string; title: string }) {
-  const [variant, setVariant] = useState<Variant>("hybrid");
-  const [protectedPeriod, setProtectedPeriod] = useState(false);
+function VerificationMap({ metric }: { metric: string }) {
+  const [includeTest, setIncludeTest] = useState(false);
   const status = useApi<MapsStatus>(
-    "/verification/maps?include_protected=" + protectedPeriod,
+    `/verification/maps?include_protected=${includeTest}`,
   );
-  const info = status.data?.metrics[metric];
-  const shown = metric === "skill" && variant === "raw" ? "hybrid" : variant;
+  const [variant, setVariant] = useState<Variant | null>(null);
+  const info = METRICS[metric];
+  const data = status.data;
+  const entry = data?.metrics[metric];
+  const shown =
+    variant &&
+    data?.variants.includes(variant) &&
+    !(metric === "skill" && variant === "raw")
+      ? variant
+      : (data?.default_variant ?? "mbc");
   return (
     <>
-      <PageHeader
-        title={`${title} map`}
-        description={ABOUT[metric]}
-        actions={
-          <label className="inline-flex items-center gap-2 text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={protectedPeriod}
-              onChange={(e) => setProtectedPeriod(e.target.checked)}
-              className="accent-primary"
-            />
-            Include the 2022–2024 test period (display only)
-          </label>
-        }
+      <PageBanner
+        title={`${info.title} Maps`}
+        crumbs={[
+          { label: "Maps", href: "/maps/rainfall" },
+          { label: info.title },
+        ]}
+        subtitle={info.text}
       />
-      {status.loading && !status.data ? (
-        <Skeleton className="h-[30rem]" />
-      ) : status.status === 404 ? (
-        <Card>
-          <EmptyState
-            icon={<MapPinned size={30} />}
-            title="No operational model"
+      {status.loading && <Skeleton height={420} />}
+      {status.error && (
+        <ErrorState message={status.error} retry={status.reload} />
+      )}
+      {data && entry && (
+        <>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 14,
+              alignItems: "center",
+            }}
           >
-            Register an operational model first.
-          </EmptyState>
-        </Card>
-      ) : status.error || !status.data || !info ? (
-        <ErrorState
-          message={status.error ?? "Unavailable"}
-          retry={status.reload}
-        />
-      ) : !info.available ? (
-        <Card>
-          <EmptyState
-            icon={<MapPinned size={30} />}
-            title={`${title} needs ${info.min_cases} verified forecast${info.min_cases > 1 ? "s" : ""}`}
-            action={
-              <LinkButton href="/verification">Verify forecasts</LinkButton>
-            }
-          >
-            {status.data.cases} verified forecast
-            {status.data.cases === 1 ? "" : "s"} of {status.data.model_id} so
-            far
-            {status.data.excluded_protected_period
-              ? ` (${status.data.excluded_protected_period} more in the protected test period)`
-              : ""}
-            . A forecast is verified once the observed CHIRPS Week-2 total for
-            its window is supplied.
-          </EmptyState>
-        </Card>
-      ) : (
-        <Card>
-          <CardHeader
-            title={`${title} · ${SERIES[shown].label}`}
-            description={`${status.data.cases} verified forecasts of ${status.data.model_id}`}
-            action={
-              <Segmented
-                label="Forecast"
-                value={shown}
-                onChange={setVariant}
-                options={VARIANTS.map((v) => ({
-                  value: v,
-                  label: SERIES[v].label,
-                  disabled: metric === "skill" && v === "raw",
-                }))}
-              />
-            }
-          />
-          <CardContent className="grid gap-3">
-            {protectedPeriod && (
-              <Notice tone="warning">
-                Includes forecasts valid in the protected 2022–2024 test period:
-                for display only, never for model selection.
-              </Notice>
-            )}
-            <MapImage
-              src={`/api/verification/maps/${metric}?variant=${shown}&include_protected=${protectedPeriod}`}
-              alt={`${title} map for ${SERIES[shown].label}`}
+            <Tabs
+              label="Forecast layer"
+              value={shown}
+              onChange={setVariant}
+              options={(["raw", "mbc", "hybrid"] as Variant[]).map((v) => ({
+                value: v,
+                label: SERIES[v].label,
+                disabled:
+                  !data.variants.includes(v) ||
+                  (metric === "skill" && v === "raw"),
+              }))}
             />
-          </CardContent>
-        </Card>
+            <label
+              style={{
+                display: "inline-flex",
+                gap: 8,
+                alignItems: "center",
+                fontSize: 15,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={includeTest}
+                onChange={(e) => setIncludeTest(e.target.checked)}
+              />
+              Include the 2022–2024 independent test period (display only)
+            </label>
+          </div>
+          {entry.available ? (
+            <Card
+              title={`${info.title} · ${SERIES[shown].label}`}
+              subtitle={`${data.cases} verified forecasts of ${data.model_id}`}
+            >
+              <MapFigure
+                src={`/api/verification/maps/${metric}?variant=${shown}&include_protected=${includeTest}`}
+                alt={`${info.title} of ${SERIES[shown].label} over verified forecasts`}
+              />
+            </Card>
+          ) : (
+            <>
+              <InProgress title={`${info.title} map`}>
+                A per-cell {info.title.toLowerCase()} needs at least{" "}
+                {entry.min_cases} verified forecasts; {data.cases}{" "}
+                {data.cases === 1 ? "is" : "are"} verified so far. Each weekly
+                forecast is verified once CHIRPS covers its week.
+              </InProgress>
+              <Notice tone="green">
+                Verification runs automatically in the weekly cycle (
+                <Link href="/data/runs">Operations</Link>); see{" "}
+                <Link href="/verification">Verification</Link> for single-week
+                scores.
+              </Notice>
+            </>
+          )}
+        </>
       )}
     </>
   );
 }
 
 export default function Maps({ route, id }: PageProps) {
-  if (route.param === "rainfall") return <RainfallMaps id={id} />;
-  return <VerificationMap metric={route.param ?? "rmse"} title={route.title} />;
+  const metric = route.param ?? "rainfall";
+  const forecast = useForecast(metric === "rainfall" ? id : undefined);
+  return (
+    <div className="page">
+      <div className="wrap">
+        {metric !== "rainfall" ? (
+          <VerificationMap metric={metric} />
+        ) : (
+          <>
+            {forecast.loading && <Skeleton height={520} />}
+            {forecast.status === 404 && (
+              <>
+                <PageBanner
+                  title="Rainfall Maps"
+                  crumbs={[{ label: "Maps" }]}
+                />
+                <NoForecast />
+              </>
+            )}
+            {forecast.error && forecast.status !== 404 && (
+              <ErrorState message={forecast.error} retry={forecast.reload} />
+            )}
+            {forecast.data && <RainfallMaps detail={forecast.data} />}
+          </>
+        )}
+      </div>
+    </div>
+  );
 }

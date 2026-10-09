@@ -94,6 +94,19 @@ def install(app: FastAPI, dependency) -> None:
         png = ForecastService(platform).map_png(forecast_id, layer, style, country)
         return Response(png, media_type="image/png", headers=IMMUTABLE)
 
+    @app.get("/forecasts/{forecast_id}/overlay")
+    def forecast_overlay(
+        forecast_id: str = ForecastId,
+        layer: str = Query("mbc", pattern=r"^(raw|mbc|hybrid)$"),
+        platform=Depends(dependency),
+    ):
+        """A rainfall layer as a transparent Web Mercator PNG on ``overlay_bounds``."""
+        return Response(
+            ForecastService(platform).overlay_png(forecast_id, layer),
+            media_type="image/png",
+            headers=IMMUTABLE,
+        )
+
     @app.get("/forecasts/{forecast_id}/countries")
     def forecast_countries(
         forecast_id: str = ForecastId,

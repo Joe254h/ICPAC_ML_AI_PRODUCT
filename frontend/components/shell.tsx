@@ -1,64 +1,34 @@
 "use client";
 /**
- * Workspace shell (Studio Admin layout): grouped, collapsible sidebar; breadcrumb
- * header with the model in use, date and theme; shared configuration context.
+ * Site shell after www.icpac.net: the IGAD seal and ICPAC name over a satellite image
+ * under a green veil, utility links (status, search, run forecast), the uppercase menu
+ * with drop-down panels, the page banner and the footer.
  */
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import {
-  Activity,
-  Boxes,
-  Briefcase,
-  ChevronDown,
-  CloudRain,
-  Database,
-  FileText,
-  Globe2,
-  LayoutDashboard,
-  Map as MapIcon,
-  Moon,
-  PanelLeft,
-  ShieldCheck,
-  Sun,
-  X,
-} from "lucide-react";
-import { GROUPS, ROUTES, findRoute, href } from "@/features/routes";
-import type { Route } from "@/features/routes";
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { ChevronDown, Menu as MenuIcon, Search, X } from "lucide-react";
+import { BannerSlot } from "@/components/banner";
+import { cx } from "@/components/ui";
+import { MENUS, ROUTES, findRoute, href, menuRoutes } from "@/features/routes";
+import type { Menu, Route } from "@/features/routes";
 import { useApi } from "@/services/hooks";
 import type { Loaded } from "@/services/hooks";
-import type { Config, Selection } from "@/types";
-import type { CurrentModel } from "@/types/operational";
-import { ModelStatus, cx } from "@/components/ui";
-
-const ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
-  Overview: LayoutDashboard,
-  Forecasts: CloudRain,
-  Maps: MapIcon,
-  Countries: Globe2,
-  Verification: ShieldCheck,
-  Models: Boxes,
-  Data: Database,
-  Bulletin: FileText,
-  System: Activity,
-  Workspace: Briefcase,
-};
-
-export const DEMO_SELECTION: Selection = {
-  cycle: "2026-09-28",
-  observation: "CHIRPS",
-  model: "mock-v1",
-  provider: "ECMWF S2S",
-  country: "GHA",
-  layer: "corrected",
-};
+import type { Config } from "@/types";
+import type { CurrentModel, Health } from "@/types/operational";
 
 type App = {
   config: Loaded<Config>;
   current: Loaded<CurrentModel>;
-  selection: Selection;
-  setSelection: React.Dispatch<React.SetStateAction<Selection>>;
-  dark: boolean;
+  health: Loaded<Health>;
   refresh: () => void;
 };
 
@@ -66,346 +36,342 @@ const AppContext = createContext<App | null>(null);
 
 export function useApp(): App {
   const app = useContext(AppContext);
-  if (!app) throw new Error("useApp outside the workspace shell");
+  if (!app) throw new Error("useApp outside the site shell");
   return app;
 }
 
-function groups() {
-  return GROUPS.map((name) => ({
-    name,
-    items: ROUTES.filter((r) => r.group === name && r.nav !== false),
-  }));
-}
+const ORGANISATION = [
+  ["About ICPAC", "https://www.icpac.net/about-us/"],
+  ["WMO Regional Climate Centre", "https://www.icpac.net/rcc/"],
+  ["ICPAC weekly forecast", "https://www.icpac.net/weekly-forecast/"],
+  ["Contact us", "https://www.icpac.net/contact-us/"],
+] as const;
 
-function NavLink({
-  route,
+function MenuEntry({
+  menu,
   active,
-  onNavigate,
-  nested,
+  open,
+  setOpen,
 }: {
-  route: Route;
-  active: boolean;
-  onNavigate: () => void;
-  nested?: boolean;
+  menu: Menu;
+  active?: Route;
+  open: boolean;
+  setOpen: (menu: Menu | null) => void;
 }) {
+  const routes = menuRoutes(menu);
+  const current = active?.menu === menu;
+  if (routes.length === 1)
+    return (
+      <li>
+        <Link
+          className="item"
+          href={href(routes[0])}
+          aria-current={current ? "page" : undefined}
+        >
+          {menu}
+        </Link>
+      </li>
+    );
   return (
-    <Link
-      href={href(route)}
-      onClick={onNavigate}
-      aria-current={active ? "page" : undefined}
-      className={cx(
-        "flex h-8 items-center rounded-md px-2.5 transition",
-        nested && "ml-4 border-l border-sidebar-border pl-3 rounded-l-none",
-        active
-          ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-          : "text-sidebar-foreground/85 hover:bg-sidebar-accent/60",
-      )}
+    <li
+      className={cx(open && "open")}
+      onMouseEnter={() => setOpen(menu)}
+      onMouseLeave={() => setOpen(null)}
     >
-      <span className="truncate">{route.title}</span>
-    </Link>
+      <button
+        type="button"
+        className="item"
+        aria-expanded={open}
+        aria-current={current ? "page" : undefined}
+        onClick={() => setOpen(open ? null : menu)}
+      >
+        {menu} <ChevronDown size={16} aria-hidden />
+      </button>
+      <div className={cx("dropdown", menu === "Countries" && "wide")}>
+        {routes.map((route) => (
+          <Link
+            key={route.path}
+            href={href(route)}
+            aria-current={active?.path === route.path ? "page" : undefined}
+            onClick={() => setOpen(null)}
+          >
+            {route.title}
+            {route.soon && <span className="soon">Coming later</span>}
+          </Link>
+        ))}
+      </div>
+    </li>
   );
 }
 
-function Sidebar({
-  active,
-  collapsed,
-  mobileOpen,
-  close,
-}: {
-  active?: Route;
-  collapsed: boolean;
-  mobileOpen: boolean;
-  close: () => void;
-}) {
-  const { current } = useApp();
-  const [open, setOpen] = useState<Record<string, boolean>>({});
-  const rail = collapsed && !mobileOpen;
+function SearchDialog({ close }: { close: () => void }) {
+  const router = useRouter();
+  const [text, setText] = useState("");
+  const [index, setIndex] = useState(0);
+  const input = useRef<HTMLInputElement>(null);
+  const results = useMemo(() => {
+    const needle = text.trim().toLowerCase();
+    return ROUTES.filter(
+      (route) =>
+        route.nav !== false &&
+        (!needle ||
+          route.title.toLowerCase().includes(needle) ||
+          route.menu.toLowerCase().includes(needle)),
+    ).slice(0, 12);
+  }, [text]);
+  useEffect(() => input.current?.focus(), []);
+  useEffect(() => setIndex(0), [text]);
+  const go = (route?: Route) => {
+    if (!route) return;
+    router.push(href(route));
+    close();
+  };
   return (
-    <>
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
-          onClick={close}
-          aria-hidden
+    <div
+      className="search-backdrop"
+      role="dialog"
+      aria-modal
+      aria-label="Search the site"
+      onClick={close}
+    >
+      <div className="search-panel" onClick={(e) => e.stopPropagation()}>
+        <input
+          ref={input}
+          value={text}
+          placeholder="Search pages: forecast, Kenya, CHIRPS, bulletin…"
+          aria-label="Search pages"
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") close();
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setIndex((i) => Math.min(i + 1, results.length - 1));
+            }
+            if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setIndex((i) => Math.max(i - 1, 0));
+            }
+            if (e.key === "Enter") go(results[index]);
+          }}
         />
-      )}
-      <aside
-        aria-label="Workspace navigation"
-        className={cx(
-          "fixed inset-y-0 left-0 z-50 flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width,transform] lg:sticky lg:top-0 lg:h-screen lg:translate-x-0",
-          rail ? "w-[3.75rem]" : "w-64",
-          mobileOpen ? "translate-x-0" : "-translate-x-full",
-        )}
-      >
-        <div className="flex h-14 items-center gap-2.5 border-b border-sidebar-border px-3.5">
-          <Link
-            href="/"
-            onClick={close}
-            className="flex min-w-0 items-center gap-2.5"
-          >
-            {/* The IGAD seal, as on the weekly bulletin maps. */}
-            <img
-              src="/igad-seal.png"
-              alt="IGAD"
-              width={32}
-              height={32}
-              className="size-8 shrink-0 rounded-full bg-white"
-            />
-            {!rail && (
-              <span className="min-w-0 leading-tight">
-                <strong className="block truncate text-[0.98rem] tracking-tight">
-                  ICPAC Climate AI
-                </strong>
-                <small className="block truncate text-sidebar-muted">
-                  Week-2 rainfall forecasting
-                </small>
-              </span>
-            )}
-          </Link>
-          <button
-            className="ml-auto grid size-8 place-items-center rounded-md hover:bg-sidebar-accent lg:hidden"
-            onClick={close}
-            aria-label="Close navigation"
-          >
-            <X size={16} />
-          </button>
-        </div>
-        <nav
-          aria-label="Main navigation"
-          className="flex-1 overflow-y-auto px-2.5 py-3"
-        >
-          {groups().map(({ name, items }) => {
-            const Icon = ICONS[name];
-            const here = active?.group === name;
-            if (rail)
-              return (
-                <Link
-                  key={name}
-                  href={href(items[0])}
-                  title={name}
-                  aria-label={name}
-                  className={cx(
-                    "mb-1 grid h-9 place-items-center rounded-md",
-                    here
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                      : "hover:bg-sidebar-accent/60",
-                  )}
-                >
-                  <Icon size={17} />
-                </Link>
-              );
-            if (items.length === 1 && items[0].title === name)
-              return (
-                <Link
-                  key={name}
-                  href={href(items[0])}
-                  onClick={close}
-                  aria-current={here ? "page" : undefined}
-                  className={cx(
-                    "mb-1 flex h-9 items-center gap-2.5 rounded-md px-2.5 font-medium",
-                    here
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                      : "hover:bg-sidebar-accent/60",
-                  )}
-                >
-                  <Icon size={17} />
-                  {name}
-                </Link>
-              );
-            const expanded =
-              open[name] ?? (here || name === "Forecasts" || name === "Maps");
-            return (
-              <div key={name} className="mb-1">
-                <button
-                  onClick={() => setOpen((o) => ({ ...o, [name]: !expanded }))}
-                  aria-expanded={expanded}
-                  className={cx(
-                    "flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 font-medium hover:bg-sidebar-accent/60",
-                    here && "text-sidebar-accent-foreground",
-                  )}
-                >
-                  <Icon size={17} />
-                  {name}
-                  <ChevronDown
-                    size={15}
-                    className={cx(
-                      "ml-auto text-sidebar-muted transition",
-                      !expanded && "-rotate-90",
-                    )}
-                  />
-                </button>
-                {expanded && (
-                  <div className="mt-0.5 mb-1.5 grid gap-0.5">
-                    {items.map((route) => (
-                      <NavLink
-                        key={route.path}
-                        route={route}
-                        active={active?.path === route.path}
-                        onNavigate={close}
-                        nested
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </nav>
-        {!rail && (
-          <div className="border-t border-sidebar-border p-3">
-            <div className="rounded-lg border border-sidebar-border bg-card px-3 py-2.5">
-              <div className="text-[0.78rem] font-medium uppercase tracking-wide text-sidebar-muted">
-                Model in use
-              </div>
-              {current.data ? (
-                <>
-                  <div
-                    className="mt-1 truncate font-medium"
-                    title={current.data.model.model_id}
-                  >
-                    {current.data.model.model_id}
-                  </div>
-                  <div className="mt-1.5">
-                    <ModelStatus status={current.data.model.status} />
-                  </div>
-                </>
-              ) : (
-                <div className="mt-1 text-sidebar-muted">
-                  {current.loading
-                    ? "Loading…"
-                    : "No operational model registered"}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </aside>
-    </>
+        <ul>
+          {results.map((route, i) => (
+            <li key={route.path}>
+              <Link
+                href={href(route)}
+                className={cx(i === index && "active")}
+                onClick={close}
+              >
+                <span>{route.title}</span>
+                <small>{route.menu}</small>
+              </Link>
+            </li>
+          ))}
+          {!results.length && (
+            <li style={{ padding: 14, color: "var(--muted)" }}>
+              No page matches “{text}”.
+            </li>
+          )}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function StatusDot({ health }: { health: Loaded<Health> }) {
+  const colour = health.error
+    ? "#f87171"
+    : health.data?.status === "Healthy"
+      ? "#4ade80"
+      : health.data
+        ? "#fbbf24"
+        : "rgba(255,255,255,.6)";
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 9,
+        height: 9,
+        borderRadius: "50%",
+        background: colour,
+        boxShadow: "0 0 0 3px rgba(255,255,255,.18)",
+      }}
+    />
   );
 }
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const route = findRoute(pathname ?? "/");
+  const active = findRoute(pathname ?? "/");
+  const home = active?.page === "home";
   const config = useApi<Config>("/config");
   const current = useApi<CurrentModel>("/models/current");
-  const [selection, setSelection] = useState<Selection>(DEMO_SELECTION);
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [dark, setDark] = useState(false);
-  const [today, setToday] = useState("");
-  useEffect(() => {
-    setDark(document.documentElement.classList.contains("dark"));
-    setCollapsed(localStorage.getItem("icpac-sidebar") === "collapsed");
-    setToday(
-      new Date().toLocaleDateString("en-GB", {
-        weekday: "short",
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      }),
-    );
-  }, []);
-  const { reload: reloadConfig } = config;
-  const { reload: reloadCurrent } = current;
-  const app = useMemo<App>(
-    () => ({
-      config,
-      current,
-      selection,
-      setSelection,
-      dark,
-      refresh: () => {
-        reloadConfig();
-        reloadCurrent();
-      },
-    }),
-    [config, current, selection, dark, reloadConfig, reloadCurrent],
+  const health = useApi<Health>("/health");
+  const [open, setOpen] = useState<Menu | null>(null);
+  const [mobile, setMobile] = useState(false);
+  const [search, setSearch] = useState(false);
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  const nav = useRef<HTMLElement>(null);
+
+  const refresh = useCallback(() => {
+    config.reload();
+    current.reload();
+    health.reload();
+  }, [config, current, health]);
+  const app = useMemo(
+    () => ({ config, current, health, refresh }),
+    [config, current, health, refresh],
   );
-  const toggleTheme = () => {
-    const next = !dark;
-    document.documentElement.classList.toggle("dark", next);
-    localStorage.setItem("icpac-theme", next ? "dark" : "light");
-    setDark(next);
-  };
+
+  useEffect(() => {
+    setOpen(null);
+    setMobile(false);
+  }, [pathname]);
+  useEffect(() => {
+    const keys = (e: KeyboardEvent) => {
+      const typing =
+        e.target instanceof HTMLElement &&
+        ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName);
+      if (e.key === "/" && !typing) {
+        e.preventDefault();
+        setSearch(true);
+      }
+      if (e.key === "Escape") setOpen(null);
+    };
+    const outside = (e: MouseEvent) => {
+      if (nav.current && !nav.current.contains(e.target as Node)) setOpen(null);
+    };
+    window.addEventListener("keydown", keys);
+    window.addEventListener("click", outside);
+    return () => {
+      window.removeEventListener("keydown", keys);
+      window.removeEventListener("click", outside);
+    };
+  }, []);
+
   return (
     <AppContext.Provider value={app}>
-      <div className="flex min-h-screen">
-        <Sidebar
-          active={route}
-          collapsed={collapsed}
-          mobileOpen={mobileOpen}
-          close={() => setMobileOpen(false)}
-        />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-background/90 px-4 backdrop-blur md:px-6">
-            <button
-              className="grid size-9 place-items-center rounded-md border border-border bg-card hover:bg-muted"
-              aria-label="Toggle navigation"
-              onClick={() => {
-                if (window.matchMedia("(min-width: 1024px)").matches) {
-                  localStorage.setItem(
-                    "icpac-sidebar",
-                    collapsed ? "expanded" : "collapsed",
-                  );
-                  setCollapsed(!collapsed);
-                } else setMobileOpen(true);
-              }}
-            >
-              <PanelLeft size={16} />
-            </button>
-            <nav
-              aria-label="Breadcrumb"
-              className="flex min-w-0 items-center gap-1.5 text-muted-foreground"
-            >
-              {route && route.group !== route.title && (
-                <>
-                  <span className="hidden truncate sm:inline">
-                    {route.group}
-                  </span>
-                  <span className="hidden sm:inline" aria-hidden>
-                    /
-                  </span>
-                </>
-              )}
-              <span className="truncate font-medium text-foreground">
-                {route?.title ?? "Not found"}
-              </span>
-            </nav>
-            <div className="ml-auto flex items-center gap-2.5">
-              {current.data && (
-                <span className="hidden md:inline-flex">
-                  <ModelStatus status={current.data.model.status} />
-                </span>
-              )}
-              {config.error && (
-                <span className="text-status-critical-ink" role="status">
-                  API unavailable
-                </span>
-              )}
-              <span className="hidden text-muted-foreground xl:inline">
-                {today}
-              </span>
-              <button
-                className="grid size-9 place-items-center rounded-md border border-border bg-card hover:bg-muted"
-                aria-label="Toggle theme"
-                onClick={toggleTheme}
-              >
-                {dark ? <Sun size={16} /> : <Moon size={16} />}
-              </button>
+      <a href="#content" className="sr-only focus:not-sr-only">
+        Skip to content
+      </a>
+      <header className={cx("site-top", home && "home")}>
+        <div className="wrap brandbar">
+          <Link
+            className="brand"
+            href="/"
+            aria-label="ICPAC Week-2 forecasts, home"
+          >
+            <img src="/igad-seal-white.png" alt="" width={74} height={74} />
+            <div>
+              <b>ICPAC</b>
+              <small>IGAD Climate Prediction and Applications Centre</small>
             </div>
-          </header>
-          <main className="mx-auto w-full max-w-[1440px] flex-1 space-y-6 p-4 md:p-6">
-            {children}
-          </main>
-          <footer className="flex flex-wrap justify-between gap-2 border-t border-border px-6 py-4 text-[0.86rem] text-subtle">
-            <span>
-              IGAD | ICPAC · Week-2 MBC + Atmos37 CatBoost forecasting
-            </span>
-            <span>Every number on screen comes from the forecast API.</span>
-          </footer>
+          </Link>
+          <div className="utility">
+            <Link className="hide-sm" href="/system">
+              Status <StatusDot health={health} />
+            </Link>
+            <button type="button" onClick={() => setSearch(true)}>
+              Search <Search size={18} aria-hidden />
+            </button>
+            <Link className="pill-white hide-sm" href="/data/runs">
+              Run forecast
+            </Link>
+            <button
+              type="button"
+              className="menu-toggle"
+              aria-label={mobile ? "Close menu" : "Open menu"}
+              aria-expanded={mobile}
+              onClick={() => setMobile((m) => !m)}
+            >
+              {mobile ? <X size={26} /> : <MenuIcon size={26} />}
+            </button>
+          </div>
         </div>
-      </div>
+        <nav
+          ref={nav}
+          className={cx("mainnav", mobile && "mobile-open")}
+          aria-label="Main"
+        >
+          <ul>
+            {MENUS.map((menu) => (
+              <MenuEntry
+                key={menu}
+                menu={menu}
+                active={active}
+                open={open === menu}
+                setOpen={setOpen}
+              />
+            ))}
+          </ul>
+        </nav>
+        <div className={home ? "hero" : "banner"}>
+          <div className="wrap">
+            <div ref={setSlot} className="banner-slot" />
+            {!home && (
+              <div className="banner-fallback">
+                <h1>{active?.title ?? "Page not found"}</h1>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+      <BannerSlot.Provider value={slot}>
+        <main id="content">{children}</main>
+      </BannerSlot.Provider>
+      <footer className="site-footer">
+        <div className="wrap cols">
+          <div className="about">
+            <Link className="brand" href="/">
+              <img src="/igad-seal-white.png" alt="" width={56} height={56} />
+              <div>
+                <b>ICPAC</b>
+                <small>IGAD Climate Prediction and Applications Centre</small>
+              </div>
+            </Link>
+            <p style={{ marginTop: 18 }}>
+              Week-2 (days 8–14) rainfall forecasts for the eleven ICPAC member
+              states: the ECMWF ensemble, corrected with statistical and AI/ML
+              methods and verified against CHIRPS.
+            </p>
+            <p>ICPAC is a designated Regional Climate Centre by WMO.</p>
+          </div>
+          <div>
+            <h4>Forecasts</h4>
+            <Link href="/forecasts">Latest forecast</Link>
+            <Link href="/maps/rainfall">Rainfall maps</Link>
+            <Link href="/forecasts/archive">Forecast archive</Link>
+            <Link href="/verification">Verification</Link>
+            <Link href="/copilot">Forecaster Copilot</Link>
+          </div>
+          <div>
+            <h4>Products and Data</h4>
+            <Link href="/bulletin">Weekly bulletin</Link>
+            <Link href="/data">Data sources</Link>
+            <Link href="/data/ecmwf">ECMWF ensemble</Link>
+            <Link href="/data/chirps">CHIRPS</Link>
+            <Link href="/models">Model registry</Link>
+          </div>
+          <div>
+            <h4>Organisation</h4>
+            {ORGANISATION.map(([label, url]) => (
+              <a key={url} href={url} target="_blank" rel="noreferrer">
+                {label}
+              </a>
+            ))}
+          </div>
+        </div>
+        <div className="wrap legal">
+          <span>© ICPAC {new Date().getUTCFullYear()}</span>
+          <span>
+            Week-2 forecast service
+            {current.data
+              ? ` · model ${current.data.model.model_id} (${current.data.role})`
+              : ""}
+          </span>
+        </div>
+      </footer>
+      {search && <SearchDialog close={() => setSearch(false)} />}
     </AppContext.Provider>
   );
 }

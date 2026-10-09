@@ -17,7 +17,7 @@
 #   LLM_APP               The model's container app (default icpac-llm).
 #   LLM_IMAGE             Its image (default ghcr.io/joe254h/icpac-llm:latest).
 #   LLM_CPU, LLM_MEMORY   Its size (default 2 and 4Gi; 4 and 8Gi answer about twice as fast).
-#   DATABASE_URL, IMAGE, SYNTHETIC, CPU, MEMORY  Passed on to backend.sh for the backend.
+#   DATABASE_URL, IMAGE, CPU, MEMORY  Passed on to backend.sh for the backend.
 set -euo pipefail
 
 GROUP=${GROUP:-icpac}

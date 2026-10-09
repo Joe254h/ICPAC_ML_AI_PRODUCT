@@ -52,13 +52,13 @@ population standard deviation (`X_spread`, ddof = 0) with a streaming algorithm.
   (wind850, qu850, qv850, qwind850, deltaT850_500, shear200_850), mean over the seven
   steps per member, then ensemble mean and spread.
 
-## Synthetic fixtures
+## Synthetic fixtures (tests only)
 
 `climate_engine/forecasts/fixtures.py` writes files in exactly this format, labelled
-`SYNTHETIC TEST FIXTURE - NOT ECMWF DATA`. They use their own pressure steps
+`SYNTHETIC TEST FIXTURE - NOT ECMWF DATA`, for the tests. They use their own pressure steps
 (`FIXTURE_PRESSURE_STEPS_HOURS`); a run on them records that override in its provenance
-and every output is labelled synthetic. The API offers synthetic runs only where
-`ALLOW_SYNTHETIC_FORECASTS=true` (development and CI, never production).
+and every output is labelled synthetic. The API does not offer them: operational runs read
+ECMWF Open Data downloads or supplied ECMWF files.
 
 ## Observations for verification
 

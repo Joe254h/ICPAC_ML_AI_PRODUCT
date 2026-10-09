@@ -21,9 +21,13 @@ validated.
   display only and left out of pooled metrics unless explicitly requested.
 * **Every number from the backend.** The interface computes nothing scientific; values
   come from the API with their scope (validation period, verified forecasts, cases).
-* **Synthetic data is labelled.** Fixture inputs, demonstration pages and their outputs say
-  so in the data, the maps, the manifest and the interface; synthetic runs are disabled
-  unless `ALLOW_SYNTHETIC_FORECASTS=true`.
+* **Real input only.** The service forecasts from the ECMWF ensemble it downloads (or
+  supplied ECMWF files) and verifies against CHIRPS. Synthetic fixtures exist only in the
+  tests, and anything made from them is labelled synthetic in the data, the maps and the
+  manifest.
+* **Nothing is inferred for missing products.** A layer or bulletin section whose inputs do
+  not exist (the hybrid, anomalies, temperature, observation datasets other than CHIRPS)
+  is shown as in progress with what it needs.
 * **Provenance.** Each forecast records model, version and checksums, MBC and schema
   checksums, initialization and valid window, grid and domain, input fingerprints,
   configuration checksum and overrides, and the software revision.

@@ -1,4 +1,3 @@
-import type { Selection } from "@/types";
 export type Source = {
   id: string;
   title: string;
@@ -47,8 +46,14 @@ export type ChatSession = {
 };
 export type ChatAnswer = ChatMessage & {
   session_id: string;
-  selection?: Selection;
   grounding: string;
+};
+export type BulletinSection = {
+  key: string;
+  title: string;
+  text: string[];
+  leads: string[];
+  missing_dependency?: string;
 };
 export type Bulletin = {
   id: string;
@@ -56,20 +61,19 @@ export type Bulletin = {
   kind?: string;
   forecast_id?: string;
   title: string;
-  status: string;
-  selection: Selection;
+  status: "draft" | "under_review" | "approved" | "published" | "rejected";
   created_at: string;
+  created_by?: string;
   text: string;
-  provider: string;
-  fallback: string | null;
   facts_checksum: string;
-  sources: Source[];
   parent_id: string | null;
   consistency: { status: string; errors: string[] };
   facts: {
+    title: string;
     period: string;
-    mean_rainfall_mm: number | null;
-    metrics: Record<string, number | null>;
+    label: string;
+    forecast_id: string;
+    sections: BulletinSection[];
     provenance: Record<string, unknown>;
   };
   reviews: {
@@ -77,18 +81,7 @@ export type Bulletin = {
     actor: string;
     comment: string;
     timestamp: string;
+    from?: string;
+    to?: string;
   }[];
-};
-export type Job = {
-  id: string;
-  cycle: string;
-  stage: string;
-  executor: string;
-  status: string;
-  log: string;
-  group_id: string;
-  poll_error?: string;
-  exit_code: number | null;
-  start_time: string | null;
-  end_time: string | null;
 };

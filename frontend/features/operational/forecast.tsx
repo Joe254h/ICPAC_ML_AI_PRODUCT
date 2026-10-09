@@ -1,173 +1,253 @@
 "use client";
-/** Latest (or ?id=) forecast: all three forecasts, facts, countries, provenance. */
-import { AlertTriangle } from "lucide-react";
+/** The latest (or a chosen) Week-2 forecast: map, outlook text, countries, products. */
+import { useState } from "react";
+import { FileDown, FileText } from "lucide-react";
+import ForecastMap from "@/components/forecast-map";
 import {
   Card,
-  CardContent,
-  CardHeader,
   ErrorState,
   LinkButton,
-  MapImage,
-  PageHeader,
-  SeriesSwatch,
+  MapFigure,
+  Notice,
+  PageBanner,
   Skeleton,
+  Stat,
+  Tabs,
 } from "@/components/ui";
 import type { PageProps } from "@/features/view";
+import { SERIES, num, validDays } from "@/lib/format";
+import { useApi } from "@/services/hooks";
+import type {
+  BulletinStatus,
+  ForecastDetail,
+  Variant,
+} from "@/types/operational";
 import {
+  CountryChart,
   CountryTable,
   Downloads,
-  ForecastBadges,
   ForecastFacts,
   NoForecast,
+  NotesCard,
+  ProductStatusList,
   ProvenanceList,
-  VARIANTS,
-  VerificationCard,
-  forecastSubtitle,
+  VerificationSummary,
+  forecastFacts,
+  layersOf,
   mapUrl,
+  methodName,
+  primaryOf,
   useForecast,
 } from "@/features/operational/shared";
-import { SERIES, day } from "@/lib/format";
+
+function rich(text: string, lead?: string) {
+  if (lead && text.startsWith(lead))
+    return (
+      <>
+        <strong>{lead}</strong>
+        {text.slice(lead.length)}
+      </>
+    );
+  return text;
+}
+
+function Outlook({ bulletin }: { bulletin?: BulletinStatus }) {
+  const sections = bulletin?.sections ?? [];
+  const headline = sections.find((s) => s.key === "headline");
+  const rainfall = sections.find((s) => s.key === "rainfall");
+  if (!headline && !rainfall) return <Skeleton height={180} />;
+  return (
+    <>
+      {headline && (
+        <p style={{ fontSize: 19, marginTop: 0 }}>
+          {rich(headline.text[0], headline.leads?.[0])}
+        </p>
+      )}
+      {rainfall && (
+        <ul style={{ paddingLeft: 20, margin: 0 }}>
+          {rainfall.text.map((text, i) => (
+            <li key={i} style={{ marginBottom: 10 }}>
+              {rich(text, rainfall.leads?.[i])}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
+function Body({ detail }: { detail: ForecastDetail }) {
+  const layers = layersOf(detail);
+  const primary = primaryOf(detail);
+  const [mapLayer, setMapLayer] = useState<Variant>(primary);
+  const [figureLayer, setFigureLayer] = useState<Variant>(primary);
+  const bulletin = useApi<BulletinStatus>(
+    `/forecasts/${detail.forecast_id}/bulletin`,
+  );
+  const means = detail.interpretation.domain_mean_mm;
+  const wettest = [...detail.countries].sort(
+    (a, b) => (b[primary]?.mean_mm ?? 0) - (a[primary]?.mean_mm ?? 0),
+  )[0];
+  const hybrid = detail.products?.hybrid;
+  return (
+    <>
+      <PageBanner
+        title={bulletin.data?.title ?? "Latest Week-2 Forecast"}
+        crumbs={[
+          { label: "Forecasts", href: "/forecasts/archive" },
+          { label: "Latest forecast" },
+        ]}
+        subtitle={`Week-2 (days 8–14) total rainfall over the eleven ICPAC member states, valid ${validDays(detail.valid_start, detail.valid_end)}.`}
+        facts={forecastFacts(detail)}
+        actions={
+          <>
+            <LinkButton
+              href={`/bulletin?id=${detail.forecast_id}`}
+              variant="amber"
+            >
+              <FileText size={18} /> Weekly bulletin
+            </LinkButton>
+            {bulletin.data?.export && (
+              <LinkButton
+                href={"/api" + bulletin.data.export}
+                variant="ghost-light"
+              >
+                <FileDown size={18} /> Word draft
+              </LinkButton>
+            )}
+          </>
+        }
+      />
+      {hybrid?.status === "in_progress" && (
+        <Notice title="Issued from MBC.">
+          The MBC + AI/ML hybrid is still in progress: it needs {hybrid.reason}.
+          This forecast provides raw ECMWF and the MBC-corrected rainfall.
+        </Notice>
+      )}
+      <div className="stats">
+        <Stat
+          label={`Regional mean · ${SERIES[primary].label}`}
+          value={num(means[primary])}
+          unit="mm"
+          hint="Area mean over the 205,999-cell domain"
+        />
+        <Stat
+          label="Regional mean · raw ECMWF"
+          value={num(means.raw)}
+          unit="mm"
+          hint="Before correction"
+        />
+        <Stat
+          label="Wettest country"
+          value={wettest?.country ?? "—"}
+          hint={
+            wettest
+              ? `${num(wettest[primary]?.mean_mm)} mm area mean`
+              : undefined
+          }
+          tone="amber"
+        />
+        <Stat
+          label="Ensemble"
+          value={detail.provenance.ensemble_members}
+          unit="members"
+          hint={methodName(detail)}
+        />
+      </div>
+      <Card
+        title="Rainfall outlook"
+        subtitle="Hover over a country for its mean; switch layers on the left."
+      >
+        <ForecastMap
+          detail={detail}
+          layer={mapLayer}
+          onLayer={setMapLayer}
+          height={600}
+        />
+      </Card>
+      <div className="grid-2">
+        <Card eyebrow="Weekly bulletin" title="What the forecast says">
+          <Outlook bulletin={bulletin.data} />
+        </Card>
+        <Card
+          eyebrow="Bulletin map"
+          title="Total rainfall"
+          action={
+            <Tabs
+              label="Map layer"
+              value={figureLayer}
+              onChange={setFigureLayer}
+              options={layers.map((layer) => ({
+                value: layer,
+                label: SERIES[layer].label,
+              }))}
+            />
+          }
+        >
+          <MapFigure
+            src={mapUrl(detail, figureLayer)}
+            alt={`${SERIES[figureLayer].label} Week-2 rainfall map`}
+            caption={`${SERIES[figureLayer].label} · valid ${validDays(detail.valid_start, detail.valid_end)}`}
+          />
+        </Card>
+      </div>
+      <Card
+        title="Forecast products"
+        subtitle="Each layer and what it is made from."
+      >
+        <ProductStatusList detail={detail} />
+      </Card>
+      <Card
+        title="Country outlook"
+        subtitle="Area means and ranges of Week-2 rainfall (mm) per member state."
+      >
+        <CountryTable rows={detail.countries} layers={layers} />
+        <div style={{ marginTop: 28 }}>
+          <CountryChart rows={detail.countries} layers={layers} />
+        </div>
+      </Card>
+      <Card title="Verification">
+        <VerificationSummary detail={detail} />
+      </Card>
+      <div className="grid-2">
+        <Card title="Forecast details">
+          <ForecastFacts detail={detail} />
+        </Card>
+        <Card
+          title="Downloads"
+          subtitle="The forecast's product package, with checksums."
+        >
+          <Downloads detail={detail} />
+        </Card>
+      </div>
+      <NotesCard detail={detail} />
+      <Card title="Provenance">
+        <ProvenanceList detail={detail} />
+      </Card>
+    </>
+  );
+}
 
 export default function Forecast({ id }: PageProps) {
   const forecast = useForecast(id);
-  if (forecast.loading && !forecast.data)
-    return <Skeleton className="h-[40rem]" />;
-  if (forecast.status === 404) return <NoForecast />;
-  if (forecast.error || !forecast.data)
-    return (
-      <ErrorState
-        message={forecast.error ?? "Forecast unavailable"}
-        retry={forecast.reload}
-      />
-    );
-  const detail = forecast.data;
-  const caveats = [
-    ...detail.interpretation.caveats,
-    ...detail.notes.filter((n) => !detail.interpretation.caveats.includes(n)),
-  ].filter(
-    (text) =>
-      !(
-        detail.map_style?.startsWith("weekly") &&
-        text.startsWith("Rainfall map colours follow a provisional style")
-      ),
-  );
   return (
-    <>
-      <PageHeader
-        title={`Week-2 forecast · ${day(detail.initialization)}`}
-        description={forecastSubtitle(detail)}
-        badges={<ForecastBadges detail={detail} />}
-        actions={
-          <LinkButton href="/forecasts/week-2">All Week-2 forecasts</LinkButton>
-        }
-      />
-      <Card>
-        <CardHeader
-          title="Raw ECMWF, MBC and MBC + AI"
-          description="The ICPAC weekly bulletin's rainfall classes on all three maps; the hybrid is the residual-corrected forecast"
-        />
-        <CardContent className="grid gap-4 lg:grid-cols-3">
-          {VARIANTS.map((variant) => (
-            <figure key={variant} className="m-0 grid gap-2">
-              <figcaption className="flex items-center gap-2 font-medium">
-                <SeriesSwatch series={variant} />
-                {SERIES[variant].label}
-              </figcaption>
-              <MapImage
-                src={mapUrl(detail, variant)}
-                alt={`${SERIES[variant].label} Week-2 rainfall`}
-              />
-            </figure>
-          ))}
-        </CardContent>
-      </Card>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader title="Forecast facts" />
-          <CardContent className="pt-3">
-            <ForecastFacts detail={detail} />
-          </CardContent>
-        </Card>
-        <div className="grid content-start gap-6">
-          <Card>
-            <CardHeader
-              title="Caveats and missing products"
-              description="Stated by the backend for this forecast"
+    <div className="page">
+      <div className="wrap">
+        {forecast.loading && <Skeleton height={520} />}
+        {forecast.status === 404 && (
+          <>
+            <PageBanner
+              title="Latest Week-2 Forecast"
+              crumbs={[{ label: "Forecasts" }]}
             />
-            <CardContent className="grid gap-3">
-              <ul className="m-0 grid gap-2 pl-0">
-                {caveats.map((text) => (
-                  <li key={text} className="flex gap-2">
-                    <AlertTriangle
-                      size={16}
-                      className="mt-0.5 shrink-0 text-status-serious-ink"
-                    />
-                    <span>{text}</span>
-                  </li>
-                ))}
-              </ul>
-              <div className="grid gap-1 border-t border-border pt-3 text-[0.9rem] text-muted-foreground">
-                {Object.entries(detail.manifest.missing_dependencies)
-                  .filter(
-                    ([product]) =>
-                      product !== "bulletin" ||
-                      detail.bulletin_generator?.status !== "ready",
-                  )
-                  .map(([product, needs]) => (
-                    <span key={product}>
-                      <strong className="text-foreground">
-                        {product[0].toUpperCase() + product.slice(1)}:
-                      </strong>{" "}
-                      unavailable · needs {needs}
-                    </span>
-                  ))}
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader
-              title="Predicted residual"
-              description={`${detail.algorithm} correction added to MBC (CHIRPS − MBC learned on ${detail.model.training_period ?? "the training period"})`}
-            />
-            <CardContent>
-              <MapImage
-                src={mapUrl(detail, "residual")}
-                alt="Predicted residual map"
-              />
-            </CardContent>
-          </Card>
-        </div>
+            <NoForecast />
+          </>
+        )}
+        {forecast.error && forecast.status !== 404 && (
+          <ErrorState message={forecast.error} retry={forecast.reload} />
+        )}
+        {forecast.data && <Body detail={forecast.data} />}
       </div>
-      <VerificationCard
-        verification={detail.verification}
-        forecastId={detail.forecast_id}
-      />
-      <Card>
-        <CardHeader
-          title="Country summaries"
-          description="MBC + AI median, minimum and maximum over each country's cells"
-        />
-        <CardContent>
-          <CountryTable rows={detail.countries} />
-        </CardContent>
-      </Card>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader
-            title="Product package"
-            description="Stable file names · SHA256 of each file in the manifest"
-          />
-          <CardContent className="pt-3">
-            <Downloads detail={detail} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader title="Provenance" />
-          <CardContent className="pt-3">
-            <ProvenanceList detail={detail} />
-          </CardContent>
-        </Card>
-      </div>
-    </>
+    </div>
   );
 }

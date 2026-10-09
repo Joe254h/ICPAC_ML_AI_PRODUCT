@@ -2,6 +2,7 @@
 
 import copy
 import dataclasses
+import io
 import json
 import os
 import shutil
@@ -303,6 +304,17 @@ def test_without_the_atmos37_inputs_a_run_holds_raw_and_mbc(env, monkeypatch):
     assert missing.status_code == 404 and "in progress" in missing.json()["detail"]
     assert client.get(f"/forecasts/{fid}/package/maps/hybrid.png").status_code == 404
     assert client.get(f"/forecasts/{fid}/map?layer=mbc").status_code == 200
+    # The interactive map's overlay: a transparent Mercator PNG on the grid's bounds.
+    assert set(detail["overlays"]) == {"mbc", "raw"}
+    west, south, east, north = detail["overlay_bounds"]
+    assert west == pytest.approx(LON[0] - 0.025) and north == pytest.approx(LAT[-1] + 0.025)
+    overlay = client.get(f"/forecasts/{fid}/overlay?layer=mbc")
+    assert overlay.status_code == 200 and overlay.content[:4] == PNG
+    from PIL import Image
+
+    image = Image.open(io.BytesIO(overlay.content))
+    assert image.mode == "RGBA" and image.size[0] == LON.size
+    assert client.get(f"/forecasts/{fid}/overlay?layer=hybrid").status_code == 404
     rows = client.get(f"/forecasts/{fid}/countries").json()
     assert set(rows[0]) >= {"raw", "mbc"} and "hybrid" not in rows[0]
     assert "hybrid_mean_mm" not in client.get(f"/forecasts/{fid}/countries?format=csv").text

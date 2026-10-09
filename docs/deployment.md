@@ -28,9 +28,9 @@ cp .env.example .env          # local values only; .env is git-ignored
 docker compose up --build     # backend :8000, frontend :3000
 ```
 
-Compose mounts `artifacts/`, `observations/` and `forecasts/` read-only, keeps the
-database and product packages in the `climate-data` volume and allows synthetic
-demonstration runs (`ALLOW_SYNTHETIC_FORECASTS=true`).
+Compose mounts `artifacts/` read-only and keeps the database, the downloaded ECMWF and
+CHIRPS data and the product packages in the `climate-data` volume. The backend needs
+outbound HTTPS to ECMWF Open Data and the CHIRPS server ([operations](operations.md)).
 
 ## Frontend: Vercel
 
@@ -123,7 +123,9 @@ scales to zero when idle.
 3. Settings: `LOCATION` (default `southafricanorth`; Azure for Students allows a fixed
    list of regions, shown by `az policy assignment list --disable-scope-strict-match
    --query "[].parameters.listOfAllowedLocations.value" -o tsv`; choose the one nearest the
-   database), `SYNTHETIC=false` once real ECMWF input arrives, `IMAGE`, `CPU` and `MEMORY`.
+   database), `IMAGE`, `CPU` and `MEMORY`. Container Apps allow outbound HTTPS, so the
+   app downloads ECMWF Open Data and CHIRPS itself; run the weekly cycle from the
+   Operations page.
 
 Azure for Students creates **express** Container Apps environments, which cannot mount
 Azure Files. The app therefore needs no mounted disk: with `PACKAGE_STORE_CONNECTION` (a
@@ -150,9 +152,9 @@ gcloud run deploy icpac-api --image "$IMAGE" --region REGION \
   --execution-environment gen2 --memory 4Gi --cpu 2 --timeout 600 --concurrency 4 \
   --add-volume name=products,type=cloud-storage,bucket=PRODUCTS_BUCKET \
   --add-volume-mount volume=products,mount-path=/mnt/products \
-  --add-volume name=inputs,type=cloud-storage,bucket=INPUTS_BUCKET,readonly=true \
+  --add-volume name=inputs,type=cloud-storage,bucket=INPUTS_BUCKET \
   --add-volume-mount volume=inputs,mount-path=/mnt/inputs \
-  --set-env-vars ALLOW_SYNTHETIC_FORECASTS=false,AUTO_REGISTER_MODELS=true \
+  --set-env-vars AUTO_REGISTER_MODELS=true \
   --set-env-vars RUN_ROOT=/mnt/products,FORECAST_INPUT_ROOT=/mnt/inputs/ecmwf,DATA_ROOT=/mnt/inputs/chirps \
   --set-secrets DATABASE_URL=icpac-database-url:latest
 ```
