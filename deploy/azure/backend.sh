@@ -19,6 +19,7 @@
 #                 list of regions; if this one is refused, rerun with an allowed one. List them:
 #                 az policy assignment list --disable-scope-strict-match \
 #                   --query "[].parameters.listOfAllowedLocations.value" -o tsv
+#                 Reruns use the region of the existing Container Apps environment.
 #   DATABASE_URL  PostgreSQL connection string, e.g. Supabase's (paste it as Supabase shows
 #                 it, with your password). Without it the database lives inside the
 #                 container and is emptied whenever the app restarts or scales to zero.
@@ -49,7 +50,7 @@ for namespace in Microsoft.App Microsoft.OperationalInsights Microsoft.Storage; 
   az provider register --namespace "$namespace" --wait
 done
 
-step "Resource group $GROUP in $LOCATION"
+step "Resource group $GROUP"
 if az group show --name "$GROUP" --output none 2>/dev/null; then
   echo "Using the existing resource group $GROUP"
 elif ! az group create --name "$GROUP" --location "$LOCATION" --output none; then
@@ -80,6 +81,15 @@ if ! az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" --
 fi
 ENVIRONMENT_ID=$(az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" \
   --query id --output tsv)
+# The app must live in its environment's region, so a rerun takes the region of the
+# existing environment whatever LOCATION says (the default may not be allowed for this
+# subscription, and an app cannot move region).
+ENV_LOCATION=$(az containerapp env show --name "$ENVIRONMENT" --resource-group "$GROUP" \
+  --query location --output tsv | tr -d ' \r' | tr '[:upper:]' '[:lower:]')
+if [ -n "$ENV_LOCATION" ] && [ "$ENV_LOCATION" != "$LOCATION" ]; then
+  echo "Using the region of the existing environment: $ENV_LOCATION"
+  LOCATION=$ENV_LOCATION
+fi
 
 step "Container app $APP from $IMAGE"
 KEEP_DATABASE=false
