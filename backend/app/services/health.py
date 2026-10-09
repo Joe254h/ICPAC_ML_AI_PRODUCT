@@ -2,11 +2,12 @@
 
 import os
 import shutil
+from datetime import date
 
 import httpx
 
 from backend.app.services import forecasts, operational
-from chatbot.providers import MockLLMProvider, provider
+from chatbot.providers import MockLLMProvider, provider, provider_name
 from climate_engine.core import ROOT, config
 from climate_engine.provenance import code_version
 
@@ -54,6 +55,16 @@ def system_health(platform) -> dict:
         if chirps
         else "Warning · no CHIRPS window verified yet"
     )
+    from backend.app.services.monitoring import MonitoringService
+
+    dekads = MonitoringService(platform).dekads()
+    components["CHIRPS monitoring"] = (
+        "Healthy · latest dekad "
+        f"{date.fromisoformat(dekads[0]['start']).day}–"
+        f"{date.fromisoformat(dekads[0]['end']):%d %b %Y} (preliminary)"
+        if dekads
+        else "Warning · no CHIRPS dekad downloaded yet"
+    )
     runs = service.runs()
     components["Operational forecasts"] = (
         f"Healthy · latest initialization {runs[0]['initialization']} ({runs[0]['forecast_id']})"
@@ -62,7 +73,19 @@ def system_health(platform) -> dict:
     )
     try:
         llm = provider()
-        if isinstance(llm, MockLLMProvider):
+        if provider_name() == "anthropic":
+            key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("LLM_API_KEY")
+            if not key:
+                raise ValueError("no Anthropic key")
+            base = (os.getenv("LLM_BASE_URL") or "https://api.anthropic.com").rstrip("/")
+            response = httpx.get(
+                base.removesuffix("/v1") + "/v1/models",
+                headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
+                timeout=3,
+            )
+            response.raise_for_status()
+            components["Copilot language model"] = "Healthy · Claude reachable"
+        elif isinstance(llm, MockLLMProvider):
             components["Copilot language model"] = "Warning · not configured (template answers)"
         else:
             cfg = config("runtime")["llm"]

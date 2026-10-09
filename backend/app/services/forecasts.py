@@ -555,10 +555,10 @@ class ForecastService:
         return Path(os.getenv("DATA_ROOT", str(ROOT / "data" / "observations")))
 
     def verify_with_chirps(
-        self, forecast_id: str, actor: str, get: chirps.Downloader | None = None
+        self, forecast_id: str, actor: str, server: chirps.Server | None = None
     ) -> dict[str, Any]:
-        """Download CHIRPS for the forecast's seven valid days and verify the forecast."""
-        get = get or chirps.download
+        """Download CHIRPS for the forecast's seven valid days (days already held are
+        reused) and verify the forecast."""
         record = self.repo.get(KIND, forecast_id)
         if record.get("verification_status") == "available":
             raise ValueError(f"Forecast {forecast_id} is already verified")
@@ -570,8 +570,8 @@ class ForecastService:
                 "for CHIRPS to cover it"
             )
         grid = operational.authoritative_grid()
-        week = chirps.week_total(start, grid, get)
         folder = self.data_root() / "chirps"
+        week = chirps.week_total(start, grid, server or chirps.Server(), store=folder)
         folder.mkdir(parents=True, exist_ok=True)
         name = chirps.file_name(start)
         partial = folder / f".{name}.partial"
@@ -592,6 +592,7 @@ class ForecastService:
     def verify_due(self, actor: str) -> dict[str, Any]:
         """Verify every unverified forecast whose window CHIRPS should now cover."""
         verified, waiting, failed = [], [], []
+        server = chirps.Server()  # one set of directory listings for the whole pass
         for record in self.runs():
             if record.get("verification_status") == "available":
                 continue
@@ -600,7 +601,7 @@ class ForecastService:
                 waiting.append(record["forecast_id"])
                 continue
             try:
-                self.verify_with_chirps(record["forecast_id"], actor)
+                self.verify_with_chirps(record["forecast_id"], actor, server)
                 verified.append(record["forecast_id"])
             except (chirps.CHIRPSUnavailable, Unavailable) as exc:
                 waiting.append(f"{record['forecast_id']}: {exc}")

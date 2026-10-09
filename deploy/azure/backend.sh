@@ -26,8 +26,11 @@
 #   IMAGE         Container image (default ghcr.io/joe254h/icpac-backend:latest).
 #   CPU, MEMORY   Container size (default 2 and 4Gi; a full-grid forecast needs about 1 GB).
 #   GROUP, APP, ENVIRONMENT  Resource names (defaults icpac, icpac-api, icpac-env).
-#   LLM_OVERRIDES Set by llm.sh: the Copilot settings for the self-hosted model. Without it,
-#                 the Copilot settings already on the app are kept.
+#   ANTHROPIC_API_KEY  Optional: the Copilot answers with Claude (Anthropic API) from the
+#                 forecast's own data and answers general questions; the key is stored as an
+#                 app secret. CLAUDE_MODEL picks the model (default claude-opus-5-5).
+#   LLM_OVERRIDES Set by llm.sh: the Copilot settings for the self-hosted model. Without it
+#                 (and without ANTHROPIC_API_KEY), the Copilot settings on the app are kept.
 set -euo pipefail
 
 LOCATION=${LOCATION:-southafricanorth}
@@ -36,6 +39,21 @@ APP=${APP:-icpac-api}
 ENVIRONMENT=${ENVIRONMENT:-icpac-env}
 IMAGE=${IMAGE:-ghcr.io/joe254h/icpac-backend:latest}
 DATABASE_URL=${DATABASE_URL:-}
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  # Claude replaces every earlier Copilot setting (see docs/chatbot.md).
+  LLM_OVERRIDES=$(KEY="$ANTHROPIC_API_KEY" MODEL="${CLAUDE_MODEL:-claude-opus-5-5}" python3 -c '
+import json, os
+e = os.environ
+print(json.dumps({
+    "env": [
+        {"name": "LLM_PROVIDER", "value": "anthropic"},
+        {"name": "LLM_MODEL", "value": e["MODEL"]},
+        {"name": "LLM_API_KEY", "secretRef": "llm-api-key"},
+        {"name": "LLM_TIMEOUT_SECONDS", "value": "60"},
+    ],
+    "secrets": [{"name": "llm-api-key", "value": e["KEY"]}],
+}))')
+fi
 CPU=${CPU:-2}
 MEMORY=${MEMORY:-4Gi}
 PACKAGES=forecast-packages

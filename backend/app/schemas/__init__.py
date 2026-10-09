@@ -94,7 +94,9 @@ class ForecastRunRequest(BaseModel):
 class OperationRequest(BaseModel):
     """A background operational task (see backend/app/services/operations.py)."""
 
-    action: Literal["fetch_ecmwf", "run_forecast", "verify_due", "verify_forecast", "cycle"]
+    action: Literal[
+        "fetch_ecmwf", "run_forecast", "verify_due", "verify_forecast", "update_chirps", "cycle"
+    ]
     initialization: date | None = None
     forecast_id: str | None = Field(default=None, pattern=FORECAST_ID)
     actor: str = Field(min_length=2, max_length=80)

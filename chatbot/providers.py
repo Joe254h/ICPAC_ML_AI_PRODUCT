@@ -179,8 +179,11 @@ def provider_name() -> str:
 
 
 def provider() -> LLMProvider:
+    """The provider of the fixed-sentence path. With Claude (LLM_PROVIDER=anthropic) the
+    language model works through tools (chatbot/agent.py); when it cannot answer, the fixed
+    sentences are shown in their order, without a model call."""
     name = provider_name()
-    if name == "mock":
+    if name in ("mock", "anthropic"):
         return MockLLMProvider()
     if name == "openai_compatible":
         return OpenAICompatibleProvider()

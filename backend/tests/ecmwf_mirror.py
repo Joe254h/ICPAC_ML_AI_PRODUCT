@@ -1,5 +1,7 @@
-"""A local ECMWF Open Data mirror for tests: real GRIB2 files and .index files laid out as
-on data.ecmwf.int, served over HTTP so the official client runs unchanged."""
+"""A local mirror for tests: ECMWF Open Data (real GRIB2 files and .index files laid out as
+on data.ecmwf.int, so the official client runs unchanged) and, under /chc, a CHIRPS
+preliminary dekad laid out as on data.chc.ucsb.edu (with its directory listing). The
+rainfall in both is a made-up pattern: it exercises the chain, it is not weather."""
 
 import argparse
 import json
@@ -98,6 +100,39 @@ def build(root: Path, day: date, members: int = 3, steps=(168, 336)) -> Path:
     return folder
 
 
+def build_chirps_dekad(root: Path, today: date) -> Path:
+    """The newest dekad that has ended before ``today``, as a CHIRPS preliminary dekadal
+    NetCDF over the region (the real files are global)."""
+    import xarray as xr
+
+    from climate_engine.inputs.chirps_dekad import Dekad
+
+    year, month = today.year, today.month
+    if today.day > 20:
+        dekad = Dekad(year, month, 2)
+    elif today.day > 10:
+        dekad = Dekad(year, month, 1)
+    else:
+        previous = date(year, month, 1) - timedelta(days=1)
+        dekad = Dekad(previous.year, previous.month, 3)
+    lat = np.round(np.arange(-14.975, 24.976, 0.05), 3)
+    lon = np.round(np.arange(19.025, 53.976, 0.05), 3)
+    pattern = 40 * (1 + np.sin(np.deg2rad(lat * 9))[:, None] * np.cos(np.deg2rad(lon * 7)))
+    folder = root / "chc/products/CHIRPS-2.0/prelim/global_dekad/netcdf"
+    folder.mkdir(parents=True, exist_ok=True)
+    data = xr.Dataset(
+        {"precip": (("time", "latitude", "longitude"), pattern[None].astype(np.float32))},
+        coords={
+            "time": [np.datetime64(dekad.start.isoformat())],
+            "latitude": lat,
+            "longitude": lon,
+        },
+    )
+    path = folder / dekad.name
+    data.to_netcdf(path)
+    return path
+
+
 class _Quiet(SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -141,8 +176,9 @@ class _RangeHandler(_Quiet):
 
 
 def main() -> None:
-    """Build and serve a mirror holding yesterday's run, the newest a forecaster would find
-    (browser tests point ECMWF_OPENDATA_MIRRORS at it)."""
+    """Build and serve a mirror holding yesterday's run, the newest a forecaster would find,
+    and the newest ended CHIRPS dekad (browser tests point ECMWF_OPENDATA_MIRRORS at the
+    mirror and CHIRPS_BASE_URL at its /chc folder)."""
     parser = argparse.ArgumentParser(description=main.__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8998)
@@ -152,6 +188,7 @@ def main() -> None:
     day = args.date or datetime.now(timezone.utc).date() - timedelta(days=1)
     shutil.rmtree(args.root, ignore_errors=True)
     build(args.root, day, args.members)
+    build_chirps_dekad(args.root, day + timedelta(days=1))
     handler = partial(_RangeHandler, directory=str(args.root))
     print(f"ECMWF mirror of the {day} 00 UTC run on http://127.0.0.1:{args.port}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", args.port), handler).serve_forever()

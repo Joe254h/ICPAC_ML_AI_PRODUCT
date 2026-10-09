@@ -1,5 +1,5 @@
 """Operational tasks run in the background: fetch ECMWF input, run the forecast, verify
-against CHIRPS, or the whole weekly cycle.
+against CHIRPS, update the CHIRPS rainfall monitoring, or the whole weekly cycle.
 
 Downloads and runs take minutes, longer than a web request should wait, so each task is
 recorded (status, progress messages, result or error) and executed in a worker thread
@@ -23,6 +23,7 @@ ACTIONS = {
     "run_forecast": "Run the Week-2 forecast",
     "verify_due": "Verify finished forecasts against CHIRPS",
     "verify_forecast": "Verify one forecast against CHIRPS",
+    "update_chirps": "Update the CHIRPS rainfall monitoring",
     "cycle": "Weekly cycle: download ECMWF, run the forecast, verify against CHIRPS",
 }
 
@@ -153,6 +154,17 @@ class OperationService:
         result = self._forecasts().verify_with_chirps(forecast_id, body.actor)
         return {"forecast_id": forecast_id, "season": result["season"]}
 
+    def _update_chirps(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
+        from backend.app.services.monitoring import MonitoringService
+
+        self._log(operation_id, "Looking for the newest CHIRPS dekad")
+        result = MonitoringService(self.platform).update(body.actor)
+        self._log(
+            operation_id,
+            "Downloaded the newest dekad" if result["new"] else "The newest dekad is already held",
+        )
+        return result
+
     def _cycle(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
         from climate_engine.inputs import ecmwf_opendata
 
@@ -176,4 +188,9 @@ class OperationService:
                 )
             )
         result["verification"] = self._verify_due(operation_id, body)
+        try:
+            result["monitoring"] = self._update_chirps(operation_id, body)
+        except Exception as exc:  # the forecast stands; monitoring is retried next time
+            self._log(operation_id, f"The CHIRPS monitoring could not be updated: {exc}")
+            result["monitoring"] = {"error": str(exc)}
         return result

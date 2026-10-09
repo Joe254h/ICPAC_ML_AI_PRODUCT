@@ -1,5 +1,5 @@
-"""Operational forecast endpoints: input data, background operations, runs, packages,
-maps, countries and verification."""
+"""Operational forecast endpoints: input data, rainfall monitoring, background operations,
+runs, packages, maps, countries and verification."""
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query
 from fastapi.responses import Response
@@ -12,12 +12,14 @@ from backend.app.schemas import (
     VerificationRequest,
 )
 from backend.app.services.forecasts import ForecastService
+from backend.app.services.monitoring import MonitoringService
 from backend.app.services.operations import OperationService
 from climate_engine.inputs import sources
 from climate_engine.products.bulletin import MissingDependency
 from climate_engine.products.package import countries_csv
 
 ForecastId = Path(pattern=FORECAST_ID)
+DekadId = Path(pattern=r"^\d{4}-\d{2}-[123]$")
 MODEL_ID = r"^[a-zA-Z0-9_-]{1,80}$"
 IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
@@ -45,6 +47,39 @@ def install(app: FastAPI, dependency) -> None:
     @app.get("/data/chirps")
     def chirps_inputs(platform=Depends(dependency)) -> list[dict]:
         return ForecastService(platform).chirps_inputs()
+
+    def with_overlays(record: dict) -> dict:
+        base = f"/monitoring/dekads/{record['dekad']}/overlay?product="
+        overlays = {"total": base + "total"}
+        if record["percent_of_normal"]["status"] == "available":
+            overlays["percent"] = base + "percent"
+        return {**record, "overlays": overlays, "overlay_bounds": MonitoringService.bounds()}
+
+    @app.get("/monitoring/dekads")
+    def monitoring_dekads(platform=Depends(dependency)) -> list[dict]:
+        """CHIRPS preliminary dekads downloaded for rainfall monitoring, newest first."""
+        return MonitoringService(platform).dekads()
+
+    @app.get("/monitoring/dekads/latest")
+    def monitoring_latest(platform=Depends(dependency)) -> dict:
+        return with_overlays(MonitoringService(platform).latest())
+
+    @app.get("/monitoring/dekads/{dekad}")
+    def monitoring_dekad(dekad: str = DekadId, platform=Depends(dependency)) -> dict:
+        return with_overlays(MonitoringService(platform).get(dekad))
+
+    @app.get("/monitoring/dekads/{dekad}/overlay")
+    def monitoring_overlay(
+        dekad: str = DekadId,
+        product: str = Query("total", pattern=r"^(total|percent)$"),
+        platform=Depends(dependency),
+    ):
+        """The dekad's total (or percent of normal) as a transparent Web Mercator PNG."""
+        return Response(
+            MonitoringService(platform).overlay_png(dekad, product),
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     @app.get("/operations")
     def operations(platform=Depends(dependency)) -> list[dict]:

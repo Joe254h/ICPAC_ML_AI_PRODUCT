@@ -23,12 +23,30 @@ ecmwf_opendata:
   licence: "ECMWF Open Data, CC BY 4.0 (https://www.ecmwf.int/en/forecasts/datasets/open-data)"
 
 chirps:
-  # CHIRPS v2.0 daily, 0.05 degree, Africa subset (the model grid is CHIRPS-aligned).
+  # CHIRPS v2.0 from the Climate Hazards Center server, read as ICPAC's climate monitoring
+  # framework reads it: files are found by listing their directory (never by guessing a
+  # name), only files not yet held are downloaded, transient failures are retried with a
+  # doubling wait, every file is checked, and what is kept is cropped to the region.
+  #
+  # Daily files verify the Week-2 forecasts (a Week-2 window is seven days, not a dekad).
   # The final product is published about three weeks after each month; the preliminary
   # product a few days after each pentad. Final is used whenever it exists.
-  final_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/africa_daily/tifs/p05/{year}/chirps-v2.0.{year}.{month:02d}.{day:02d}.tif.gz"
-  prelim_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/prelim/global_daily/tifs/p05/{year}/chirps-v2.0.{year}.{month:02d}.{day:02d}.tif"
+  final_dir: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/africa_daily/tifs/p05/{year}/"
+  prelim_dir: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/prelim/global_daily/tifs/p05/{year}/"
+  # Preliminary dekadal NetCDF (variable precip), the monitoring framework's own source.
+  dekad_dir: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/prelim/global_dekad/netcdf/"
+  variable: precip
+  # Kept files cover the model grid, which contains the framework's Greater Horn of
+  # Africa box (20-53 E, 15 S - 24 N).
+  crop: {south: -15.0, north: 25.0, west: 19.0, east: 54.0}
+  retries: 5
+  retry_wait_seconds: 5
   nodata: -9999.0
+  # Dekadal percent of normal against the 1991-2020 long-term mean (the WMO normal used
+  # by the framework). Needs a NetCDF of CHIRPS dekads covering that period (ICPAC keeps
+  # one for its monitoring products); without it the anomaly is shown as in progress.
+  # CHIRPS_DEKAD_CLIMATOLOGY overrides the file.
+  climatology: {start: "1991-01-01", end: "2020-12-31", file: null}
   licence: "CHIRPS, Climate Hazards Center, UC Santa Barbara (public domain, cite Funk et al. 2015)"
 
 sources:

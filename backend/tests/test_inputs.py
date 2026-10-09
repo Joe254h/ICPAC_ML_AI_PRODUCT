@@ -2,10 +2,10 @@
 
 import gzip
 import io
-import re
 import time
 from datetime import date, timedelta
 
+import httpx
 import numpy as np
 import pytest
 import tifffile
@@ -135,41 +135,132 @@ def chirps_tile(daily_mm: float, missing: tuple[int, int] | None = None) -> byte
     return gzip.compress(buffer.getvalue())
 
 
-def test_chirps_week_total_reads_final_else_preliminary(env):
+def daily_url(product: str, day: date) -> str:
+    """Where CHC publishes a day: the final Africa product compressed, the preliminary
+    global product not."""
+    name = f"chirps-v2.0.{day.year}.{day.month:02d}.{day.day:02d}.tif"
+    return chirps.directory(product, day.year) + (name + ".gz" if product == "final" else name)
+
+
+def chc(files: dict[str, bytes]):
+    """A CHC server holding ``files``: directory URLs answer with an index page listing
+    the files in them, as the real server does; anything else is a 404."""
+
+    def get(url: str) -> bytes | None:
+        if url.endswith("/"):
+            names = [u[len(url) :] for u in files if u.startswith(url)]
+            if not names:
+                return None
+            links = "".join(f'<tr><td><a href="{n}">{n}</a></td></tr>' for n in names)
+            return f"<html><body><table>{links}</table></body></html>".encode()
+        return files.get(url)
+
+    return get
+
+
+def week(start: date, product: str = "final", mm: float = 3.0) -> dict[str, bytes]:
+    return {daily_url(product, start + timedelta(days=i)): chirps_tile(mm) for i in range(7)}
+
+
+def test_chirps_week_total_reads_final_else_preliminary(env, tmp_path):
     first_missing = (1, 1)
     assert MASK[first_missing]
-    requested = []
+    start = date(2026, 9, 21)
+    files = {}
+    for offset in range(7):
+        day = start + timedelta(days=offset)
+        files[daily_url("prelim", day)] = chirps_tile(1.0)
+        if day.day < 25:  # the last days are only in the preliminary product
+            files[daily_url("final", day)] = chirps_tile(
+                2.0, first_missing if day.day == 21 else None
+            )
+    requested: list[str] = []
+    server = chc(files)
 
     def get(url: str) -> bytes | None:
         requested.append(url)
-        found = re.search(r"\d{4}\.\d{2}\.(\d{2})", url)
-        assert found is not None
-        day = int(found[1])
-        if "prelim" in url:
-            return chirps_tile(1.0)
-        if day >= 25:  # the last days are only in the preliminary product
-            return None
-        return chirps_tile(2.0, first_missing if day == 21 else None)
+        return server(url)
 
-    week = chirps.week_total(date(2026, 9, 21), env.grid, get)
-    assert [d.product for d in week.days] == ["final"] * 4 + ["prelim"] * 3
-    assert week.products == ["final", "prelim"]
-    cells = env.grid.to_cells(week.values)
-    assert np.isnan(week.values[first_missing])
+    store = tmp_path / "chirps"
+    result = chirps.week_total(start, env.grid, chirps.Server(get), store)
+    assert [d.product for d in result.days] == ["final"] * 4 + ["prelim"] * 3
+    assert result.products == ["final", "prelim"]
+    # Files are found by listing their directory: one listing per product and year.
+    assert sum(url.endswith("/") for url in requested) == 2
+    cells = env.grid.to_cells(result.values)
+    assert np.isnan(result.values[first_missing])
     assert np.allclose(cells[np.isfinite(cells)], 4 * 2.0 + 3 * 1.0)
-    assert week.days[0].missing_domain_cells == 1
-    assert np.isnan(week.values[~MASK]).all()
-    data = chirps.to_dataset(week, env.grid)
+    assert result.days[0].missing_domain_cells == 1
+    assert np.isnan(result.values[~MASK]).all()
+    assert len(list((store / "daily").glob("*.nc"))) == 7
+    data = chirps.to_dataset(result, env.grid)
     assert data.attrs["valid_start"] == "2026-09-21T00:00:00+00:00"
     assert data.attrs["valid_end"] == "2026-09-28T00:00:00+00:00"
     with pytest.raises(chirps.CHIRPSUnavailable):
-        chirps.week_total(date(2026, 9, 21), env.grid, lambda url: None)
+        chirps.week_total(start, env.grid, chirps.Server(chc({})))
+
+
+def test_chirps_days_held_are_reused_until_the_final_product_appears(env, tmp_path):
+    start = date(2026, 9, 21)
+    store = tmp_path / "chirps"
+    chirps.week_total(start, env.grid, chirps.Server(chc(week(start, "prelim", 1.0))), store)
+    # Listed but not downloadable: the held preliminary days are used, nothing is fetched.
+    listed_only = chc(week(start, "prelim", 1.0))
+    fetched: list[str] = []
+
+    def no_files(url: str) -> bytes | None:
+        if not url.endswith("/"):
+            fetched.append(url)
+            return None
+        return listed_only(url)
+
+    again = chirps.week_total(start, env.grid, chirps.Server(no_files), store)
+    assert fetched == [] and again.products == ["prelim"]
+    # Once the final product is published, it replaces the preliminary days.
+    both = {**week(start, "prelim", 1.0), **week(start, "final", 2.0)}
+    final = chirps.week_total(start, env.grid, chirps.Server(chc(both)), store)
+    assert final.products == ["final"]
+    assert np.nanmax(final.values) == pytest.approx(14.0)
+    # Final days are then used without asking the server at all.
+    offline = chirps.week_total(start, env.grid, chirps.Server(chc({})), store)
+    assert offline.products == ["final"]
+
+
+def test_chirps_downloads_retry_with_a_doubling_wait():
+    waits: list[float] = []
+    calls = {"n": 0}
+
+    def flaky(url: str) -> bytes | None:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise httpx.ConnectError("connection reset")
+        return b"ok"
+
+    assert chirps.Server(flaky, sleep=waits.append).fetch("https://x/f.tif") == b"ok"
+    assert waits == [5.0, 10.0]
+
+    def down(url: str) -> bytes | None:
+        raise httpx.ConnectError("unreachable")
+
+    waits.clear()
+    with pytest.raises(chirps.CHIRPSUnavailable, match="after 5 attempts"):
+        chirps.Server(down, sleep=waits.append).fetch("https://x/f.tif")
+    assert waits == [5.0, 10.0, 20.0, 40.0]
+
+    def forbidden(url: str) -> bytes | None:
+        request = httpx.Request("GET", url)
+        raise httpx.HTTPStatusError("403", request=request, response=httpx.Response(403))
+
+    waits.clear()
+    with pytest.raises(chirps.CHIRPSUnavailable, match="after 1 attempt"):
+        chirps.Server(forbidden, sleep=waits.append).fetch("https://x/f.tif")
+    assert waits == []
 
 
 def test_finished_forecasts_are_verified_against_chirps(env, fast_maps, monkeypatch):
     record = run(env, "2026-09-14")
     future = run(env, "2026-10-05")
-    monkeypatch.setattr(chirps, "download", lambda url: chirps_tile(3.0))
+    monkeypatch.setattr(chirps, "download", chc(week(date(2026, 9, 21))))
     service = forecasts.ForecastService(env.platform)
     result = service.verify_due("Joe N")
     assert result["verified"] == [record["forecast_id"]]
@@ -188,6 +279,7 @@ def test_finished_forecasts_are_verified_against_chirps(env, fast_maps, monkeypa
 
 def test_the_weekly_cycle_runs_as_one_operation(env, fast_maps, mirror, monkeypatch):
     monkeypatch.setattr(ecmwf_opendata, "latest_initialization", lambda: date(2026, 10, 5))
+    monkeypatch.setattr(chirps, "download", chc({}))  # CHIRPS lists nothing yet
     client = env.client
     operation = client.post("/operations", json={"action": "cycle", "actor": "Joe N"}).json()
     done = wait(client, operation)
@@ -197,6 +289,9 @@ def test_the_weekly_cycle_runs_as_one_operation(env, fast_maps, mirror, monkeypa
     assert done["result"]["verification"]["waiting"] == [forecast_id]
     texts = [m["text"] for m in done["messages"]]
     assert texts[0] == "Started" and texts[-1] == "Finished"
+    # A CHIRPS outage is recorded, and the forecast stands.
+    assert "error" in done["result"]["monitoring"]
+    assert any("monitoring could not be updated" in text for text in texts)
     # A second cycle for the same run does not forecast it again.
     again = wait(
         client, client.post("/operations", json={"action": "cycle", "actor": "Joe N"}).json()
