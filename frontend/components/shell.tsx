@@ -200,6 +200,50 @@ function StatusDot({ health }: { health: Loaded<Health> }) {
   );
 }
 
+/**
+ * One notice for the whole site when the forecast service is not ready: starting up
+ * (it scales to zero when idle), unreachable, or an older release than this site.
+ */
+function ServiceNotice({ health }: { health: Loaded<Health> }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!health.loading) return setSlow(false);
+    const timer = window.setTimeout(() => setSlow(true), 4000);
+    return () => window.clearTimeout(timer);
+  }, [health.loading]);
+  let text: React.ReactNode = null;
+  if (health.loading && slow)
+    text = (
+      <>
+        <strong>Waking up the forecast service.</strong> It sleeps when nobody
+        uses it; the first page takes up to a minute.
+      </>
+    );
+  else if (health.error && !health.loading)
+    text = (
+      <>
+        <strong>The forecast service is not answering.</strong> Pages will load
+        once it is back.{" "}
+        <button type="button" onClick={health.reload}>
+          Try again
+        </button>
+      </>
+    );
+  else if (health.data && health.data.mode !== "operational")
+    text = (
+      <>
+        <strong>The forecast service is being updated.</strong> It still runs an
+        earlier release, so some pages cannot load yet.
+      </>
+    );
+  if (!text) return null;
+  return (
+    <div className="service-notice" role="status">
+      <div className="wrap">{text}</div>
+    </div>
+  );
+}
+
 export default function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const active = findRoute(pathname ?? "/");
@@ -305,17 +349,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             ))}
           </ul>
         </nav>
-        <div className={home ? "hero" : "banner"}>
-          <div className="wrap">
-            <div ref={setSlot} className="banner-slot" />
-            {!home && (
+        {!home && (
+          <div className="banner">
+            <div className="wrap">
+              <div ref={setSlot} className="banner-slot" />
               <div className="banner-fallback">
                 <h1>{active?.title ?? "Page not found"}</h1>
               </div>
-            )}
+            </div>
           </div>
-        </div>
+        )}
       </header>
+      <ServiceNotice health={health} />
       <BannerSlot.Provider value={slot}>
         <main id="content">{children}</main>
       </BannerSlot.Provider>
@@ -349,7 +394,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <Link href="/bulletin">Weekly bulletin</Link>
             <Link href="/data">Data sources</Link>
             <Link href="/data/ecmwf">ECMWF ensemble</Link>
-            <Link href="/data/chirps">CHIRPS</Link>
+            <Link href="/monitoring">Rainfall monitoring</Link>
             <Link href="/models">Model registry</Link>
           </div>
           <div>
@@ -366,7 +411,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <span>
             Week-2 forecast service
             {current.data
-              ? ` · model ${current.data.model.model_id} (${current.data.role})`
+              ? ` · ${current.data.model.model_name ?? "ECMWF ensemble with MBC"}`
               : ""}
           </span>
         </div>

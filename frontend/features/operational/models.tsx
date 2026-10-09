@@ -17,10 +17,16 @@ import {
 } from "@/components/ui";
 import { useApp } from "@/components/shell";
 import { useActor } from "@/lib/actor";
-import { dateTime, num, shortHash } from "@/lib/format";
+import { dateTime, num } from "@/lib/format";
 import { mutate } from "@/services/api";
 import { useApi } from "@/services/hooks";
 import type { OperationalModel } from "@/types/operational";
+
+/** "1.0.0-candidate.1" as "1.0.0 (candidate 1)". */
+function versionLabel(version: string): string {
+  const match = /^(\d+\.\d+\.\d+)-([a-z]+)\.(\d+)$/.exec(version);
+  return match ? `${match[1]} (${match[2]} ${match[3]})` : version;
+}
 
 const NAMES: Record<string, string> = {
   atmos37: "Atmos37",
@@ -190,7 +196,7 @@ function ModelCard({
     <Card
       eyebrow={inUse ? "In use for forecasts" : undefined}
       title={model.model_name ?? model.model_id}
-      subtitle={`${model.model_id} · version ${model.version}`}
+      subtitle={`Version ${versionLabel(model.version)}`}
       action={
         <div
           style={{
@@ -241,11 +247,13 @@ function ModelCard({
           ],
           [
             "Registered",
-            `${dateTime(model.created_at)}${model.registered_by ? ` by ${model.registered_by}` : ""}`,
-          ],
-          [
-            "Model checksum",
-            <code key="c">{shortHash(model.checksum, 20)}</code>,
+            `${dateTime(model.created_at)}${
+              model.registered_by === "startup"
+                ? ", automatically at start-up"
+                : model.registered_by
+                  ? ` by ${model.registered_by}`
+                  : ""
+            }`,
           ],
           [
             "Inference check",
@@ -272,7 +280,7 @@ function ModelCard({
             try {
               await mutate(`/models/${model.model_id}/validate`, {});
               setChecked(
-                "Artifacts re-verified and the inference check passed.",
+                "The model files were checked again and a test prediction succeeded.",
               );
               changed();
             } catch (e) {
@@ -284,7 +292,7 @@ function ModelCard({
           }}
         >
           <ShieldCheck size={15} />{" "}
-          {checking ? "Checking…" : "Re-check artifacts"}
+          {checking ? "Checking…" : "Re-check the model files"}
         </Button>
         {model.test_status === "untested" && (
           <Button variant="outline" size="sm" onClick={() => setTest(true)}>
@@ -335,8 +343,8 @@ function ModelCard({
               rollback: "Roll back to this version",
             }[action] ?? action
           }
-          description={`Confirm ${action} for ${model.model_id}. The service re-verifies the artifacts and the production requirements before any change.`}
-          statement="I have checked the model's artifacts, metrics and test evidence, and confirm this decision."
+          description={`Confirm this for ${model.model_name ?? "the model"}. The service checks the model's files and the production requirements again before any change.`}
+          statement="I have checked the model's files, scores and test evidence, and confirm this decision."
           onClose={() => setAction(null)}
           onSubmit={async (review) => {
             await mutate(`/models/${model.model_id}/${action}`, review);
@@ -362,18 +370,18 @@ export default function Models() {
         <PageBanner
           title="Model Registry"
           crumbs={[{ label: "Models" }]}
-          subtitle="Every operational model version with its artifacts, evidence and reviewed status. Forecasts use the production model, or the newest candidate until one is promoted."
+          subtitle="Every operational model version with its evidence and reviewed status. Forecasts use the production model, or the newest candidate until one is promoted."
         />
         {hybrid?.status === "in_progress" && (
           <Notice title="AI/ML layer in progress.">
-            The registered model&apos;s artifacts are verified, but its hybrid
-            layer cannot be produced yet. {hybrid.reason}
+            The registered model&apos;s files are verified, but its AI/ML layer
+            cannot be produced yet. {hybrid.reason}
           </Notice>
         )}
         {current.data && current.data.role !== "production" && (
           <Notice title="Candidate in use.">
             {current.data.note ??
-              `Forecasts use ${current.data.model.model_id} until a model is promoted.`}{" "}
+              `Forecasts use ${current.data.model.model_name ?? "the newest candidate"} until a model is promoted.`}{" "}
             Promotion needs a passed independent test.
           </Notice>
         )}
@@ -383,8 +391,8 @@ export default function Models() {
         )}
         {models.data && !models.data.length && (
           <Notice title="No model registered.">
-            Models register from reviewed descriptors in{" "}
-            <code>config/model_registry</code>.
+            Models are registered by the service at start-up once their files
+            have been checked.
           </Notice>
         )}
         {models.data?.map((model) => (

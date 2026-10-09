@@ -14,6 +14,12 @@ review and verifies finished forecasts against CHIRPS. It shows three forecast l
   **in progress**: it needs the pressure-level inputs described in
   [weekly operations](docs/operations.md#the-mbc--aiml-hybrid-layer-in-progress).
 
+It also monitors observed rainfall dekad by dekad from CHIRPS, downloaded the way ICPAC's
+[climate monitoring framework](https://github.com/misianihabat/ICPAC-Climate-Monitoring-operational-framework)
+does, and its Forecaster Copilot answers questions about the forecast from the service's
+own results (checked number by number) and general climate questions, with Claude through
+the Anthropic API ([Copilot](docs/chatbot.md)).
+
 Observation datasets other than CHIRPS (TAMSAT, RFE 2.0, ARC 2.0, GPM IMERG) are listed as
 coming later; nothing is computed from them yet.
 
@@ -27,13 +33,15 @@ arrives as a new version.
 | Interface (Next.js 16, Tailwind 4, MapLibre; icpac.net design) | `frontend/` |
 | API (FastAPI) | `backend/app/` |
 | Science: grid, Week-2 processing, MBC, Atmos37 features, inference, verification | `climate_engine/` |
-| ECMWF Open Data and CHIRPS downloads | `climate_engine/inputs/`, `config/data_sources.yaml` |
+| ECMWF Open Data and CHIRPS downloads, rainfall monitoring | `climate_engine/inputs/`, `config/data_sources.yaml`, `backend/app/services/monitoring.py` |
+| Forecaster Copilot (tool-using assistant, fixed-sentence fallback) | `chatbot/` |
 | ICPAC map standard | `climate_engine/cartography/icpac_maps.py` |
 | Product packages and bulletin interface | `climate_engine/products/` |
 | Verified HPC artifacts (checksummed) | `artifacts/`, `cartography/`, `fixtures/references/` |
 | Model descriptors | `config/model_registry/` |
 
-Documentation: [weekly operations and data sources](docs/operations.md) ·
+Documentation: [weekly operations, data sources and monitoring](docs/operations.md) ·
+[Forecaster Copilot](docs/chatbot.md) ·
 [operational models](docs/operational_models.md) ·
 [forecast input format](docs/forecast_input_format.md) ·
 [deployment (Vercel, Azure or Cloud Run, Supabase)](docs/deployment.md) ·
@@ -80,15 +88,17 @@ python -m scripts.register_model \
 ## Issue this week's forecast
 
 Open Data & Tools › Operations, enter your name and run the weekly cycle: it downloads the
-newest 00 UTC ECMWF ensemble, issues the forecast and verifies every earlier forecast that
-CHIRPS now covers. The same through the API:
+newest 00 UTC ECMWF ensemble, issues the forecast, verifies every earlier forecast that
+CHIRPS now covers and downloads the newest CHIRPS dekad for rainfall monitoring. The same through the API:
 
 ```bash
 curl -X POST http://localhost:8000/operations -H 'Content-Type: application/json' \
   -d '{"action": "cycle", "actor": "Joe254h"}'
 ```
 
-or unattended: `python -m scripts.operational_cycle --actor "scheduled cycle"`. The API
+or unattended: `python -m scripts.operational_cycle --actor "scheduled cycle"` weekly and
+`python -m scripts.operational_cycle --task daily` every morning (monitoring and
+verification). The API
 needs outbound HTTPS to ECMWF Open Data and the CHIRPS server; see
 [weekly operations](docs/operations.md).
 
@@ -103,7 +113,9 @@ candidate with the refitted model is described in
 |---|---|
 | Models, model in use, registration | `GET /models`, `GET /models/current`, `POST /models/register` |
 | Independent test, promotion | `POST /models/{id}/independent-test`, `POST /models/{id}/promote` |
-| Weekly cycle and its steps | `POST /operations` (`cycle`, `fetch_ecmwf`, `run_forecast`, `verify_due`, `verify_forecast`), `GET /operations`, `GET /operations/{id}` |
+| Weekly cycle and its steps | `POST /operations` (`cycle`, `fetch_ecmwf`, `run_forecast`, `verify_due`, `verify_forecast`, `update_chirps`), `GET /operations`, `GET /operations/{id}` |
+| Rainfall monitoring (CHIRPS dekads) | `GET /monitoring/dekads`, `GET /monitoring/dekads/latest`, `GET /monitoring/dekads/{dekad}`, `/overlay?product=total\|percent` |
+| Forecaster Copilot | `POST /chat`, `GET /chat/sessions`, `GET /chat/sessions/{id}` |
 | Data sources | `GET /data/sources`, `GET /data/ecmwf`, `GET /data/chirps` |
 | Forecasts | `GET /forecasts`, `GET /forecasts/latest`, `POST /forecasts/run`, `POST /forecasts/import` |
 | One forecast | `GET /forecasts/{id}`, `/map?layer=mbc\|raw`, `/overlay?layer=`, `/countries`, `/verification`, `/bulletin`, `/package/{file}` |
@@ -134,7 +146,8 @@ check every page, the bulletin review and the Copilot (`frontend/e2e`).
 ![Overview](docs/screenshots/overview.png)
 
 [Forecast](docs/screenshots/forecast.png) · [Maps](docs/screenshots/maps.png) ·
-[Country](docs/screenshots/country.png) · [Weekly bulletin](docs/screenshots/bulletin.png) ·
+[Member states](docs/screenshots/countries.png) · [Country](docs/screenshots/country.png) ·
+[Rainfall monitoring](docs/screenshots/monitoring.png) · [Weekly bulletin](docs/screenshots/bulletin.png) ·
 [Verification](docs/screenshots/verification.png) · [Models](docs/screenshots/models.png) ·
 [Data sources](docs/screenshots/data.png) · [Operations](docs/screenshots/operations.png) ·
 [System status](docs/screenshots/system.png) · [Copilot](docs/screenshots/copilot.png) ·

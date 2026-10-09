@@ -28,11 +28,16 @@ def system_health(platform) -> dict:
     else:
         model = in_use[-1]
         healthy = operational.OperationalModel(model).health_check()
-        role = "production" if model["status"] == "production" else "candidate, no production yet"
+        production = model["status"] == "production"
         name = model.get("model_name") or "The registered model"
+        tested = {
+            "passed": "independent test passed",
+            "failed": "independent test failed",
+        }.get(str(model.get("test_status")), "independent test not yet recorded")
         components["Operational model"] = (
-            f"{'Healthy' if role == 'production' else 'Warning'} · {name} ({role}; "
-            f"independent test {model.get('test_status')})"
+            f"Healthy · {name} (production model; {tested})"
+            if production
+            else f"Warning · {name} (candidate in use, no production model yet; {tested})"
             if healthy
             else f"Unavailable · {name}: its files changed since registration"
         )
@@ -45,8 +50,8 @@ def system_health(platform) -> dict:
     components["MBC + AI/ML forecast"] = (
         "Healthy · hybrid layer produced"
         if hybrid["status"] == "available"
-        else "In progress · forecasts provide raw ECMWF and MBC until the Atmos37 inputs are "
-        "supplied"
+        else "In progress · forecasts provide raw ECMWF and MBC until the AI/ML model's "
+        "upper-air inputs are supplied"
     )
     service = forecasts.ForecastService(platform)
     ecmwf = service.ecmwf_inputs()
@@ -59,7 +64,7 @@ def system_health(platform) -> dict:
     components["CHIRPS verification"] = (
         f"Healthy · latest week verified from {_day(chirps[0]['valid_start'])}"
         if chirps
-        else "Warning · no CHIRPS window verified yet"
+        else "Warning · no forecast week verified against CHIRPS yet"
     )
     from backend.app.services.monitoring import MonitoringService
 
@@ -110,7 +115,7 @@ def system_health(platform) -> dict:
     free = shutil.disk_usage(ROOT).free
     components["Storage"] = (
         "Healthy" if free > 500_000_000 else "Warning · low disk space"
-    ) + f" · {free // 1_000_000} MB free"
+    ) + f" · {free / 1e9:.1f} GB free"
     return {
         "status": "Warning"
         if any(value.startswith(("Unavailable", "Warning")) for value in components.values())

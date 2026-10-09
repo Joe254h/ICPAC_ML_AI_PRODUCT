@@ -30,7 +30,7 @@ const SUGGESTIONS = [
   "Summarise this week's forecast for the region.",
   "Explain the forecast for Kenya.",
   "Show the rainfall map for Somalia.",
-  "What does MBC mean?",
+  "How does El Niño affect the October–December rains?",
 ];
 const STORAGE = "icpac-copilot-session";
 const REGION = "GHA";
@@ -45,12 +45,34 @@ function Sources({ sources }: { sources: Source[] }) {
             <a href={source.url} target="_blank" rel="noreferrer">
               {source.title}
             </a>
-            <span>{source.category.replaceAll("_", " ")}</span>
             <p>{source.excerpt}</p>
           </li>
         ))}
       </ul>
     </details>
+  );
+}
+
+/** What an answer rests on, in words: the service's data, or general background. */
+function AnswerBasis({ message }: { message: ChatMessage }) {
+  const basis = message.evidence ?? [];
+  if (message.kind === "general")
+    return (
+      <div className="chat-basis">
+        <span className="basis-chip general">General background</span>
+        <span className="basis-note">Not from this week&apos;s forecast</span>
+      </div>
+    );
+  if (!basis.length) return null;
+  return (
+    <div className="chat-basis">
+      <span className="basis-note">Based on</span>
+      {basis.map((item) => (
+        <span key={item} className="basis-chip">
+          {item}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -85,23 +107,12 @@ function Message({ message }: { message: ChatMessage }) {
         )}
         {message.fallback && (
           <p className="chat-fallback">
-            The language model did not answer, so this is the checked forecast
-            explanation.
+            The language model could not give a checked answer, so this is the
+            fixed explanation from the forecast.
           </p>
         )}
+        {!user && <AnswerBasis message={message} />}
         {!!message.sources?.length && <Sources sources={message.sources} />}
-        {!!message.tool_trace?.length && (
-          <details className="chat-details">
-            <summary>
-              Forecast data used ·{" "}
-              {message.tool_trace.map((t) => t.tool).join(", ")}
-            </summary>
-            <pre>{JSON.stringify(message.tool_trace, null, 2)}</pre>
-          </details>
-        )}
-        {message.provider && (
-          <small className="chat-provider">{message.provider}</small>
-        )}
       </div>
     </article>
   );
@@ -278,10 +289,10 @@ export default function Copilot() {
         <PageBanner
           title="Forecaster Copilot"
           crumbs={[{ label: "Copilot" }]}
-          subtitle="Ask about the week's forecast in plain language. Answers are built from the forecast's own numbers, maps and verification, and every figure can be traced to the data used."
+          subtitle="Ask about this week's forecast, observed rainfall and verification, or about weather and climate in general. Forecast figures come from the service's own data and are checked before they are shown."
           facts={[
-            "Self-hosted language model",
-            "Answers cite the forecast",
+            "Figures from this week's data",
+            "General climate questions too",
             "Bulletins still need review",
           ]}
         />
@@ -308,7 +319,7 @@ export default function Copilot() {
                   </p>
                   <p>
                     ECMWF run of {day(forecast.initialization)} ·{" "}
-                    {pinned?.model_id ?? forecast.model_id}
+                    {forecast.model?.model_name ?? "registered model"}
                   </p>
                   {pinned && pinned.forecast_id !== forecast.forecast_id && (
                     <Button

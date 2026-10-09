@@ -12,6 +12,7 @@ and verifies each forecast once its week has been observed. Everything below run
 | 1. Download ECMWF | The newest published 00 UTC ensemble run (or a chosen date) is fetched from ECMWF Open Data. | an ECMWF input record, with its mirror and SHA-256 |
 | 2. Run the forecast | Raw ECMWF and MBC are computed on the 0.05° ICPAC grid and the product package is written (NetCDF, maps, country statistics, bulletin inputs, provenance). | a forecast record and its package |
 | 3. Verify | Every earlier forecast whose week CHIRPS now covers is scored against CHIRPS. | a CHIRPS week record and the forecast's verification |
+| 4. Update monitoring | The newest CHIRPS dekad, if one is published that the service does not have yet, is downloaded for the Rainfall Monitoring page. A failure here is recorded with the cycle and never stops the forecast. | a CHIRPS dekad record |
 
 Each step can also be started on its own. A task runs in the background, one at a time;
 its progress, the person who started it and the outcome stay in the task history.
@@ -23,12 +24,20 @@ CHIRPS preliminary product covers all seven days.
 ### Unattended runs
 
 ```bash
-python -m scripts.operational_cycle --actor "scheduled cycle"
+python -m scripts.operational_cycle --actor "scheduled cycle"          # weekly cycle
+python -m scripts.operational_cycle --task daily --actor "daily task"  # monitoring + verification
 ```
 
-runs the same cycle from cron, an Azure Container Apps job or the HPC, with the same
+run the same tasks from cron, an Azure Container Apps job or the HPC, with the same
 environment as the API (`DATABASE_URL`, `RUN_ROOT`, `FORECAST_INPUT_ROOT`, `DATA_ROOT`,
-`PACKAGE_STORE_CONNECTION`).
+`PACKAGE_STORE_CONNECTION`). The daily task follows ICPAC's climate monitoring framework,
+which checks CHIRPS every morning: it downloads a new dekad when one is published (nothing
+otherwise) and verifies the forecasts CHIRPS now covers. A crontab (UTC):
+
+```cron
+0 7 * * *  cd /app && python -m scripts.operational_cycle --task daily
+30 9 * * 1 cd /app && python -m scripts.operational_cycle
+```
 
 ## Data sources
 
@@ -38,6 +47,7 @@ The list shown in the interface comes from `config/data_sources.yaml`.
 |---|---|---|
 | ECMWF ensemble (ENS), ECMWF Open Data | forecast input | in use |
 | CHIRPS v2.0 daily | verification | in use |
+| CHIRPS v2.0 dekadal (preliminary) | rainfall monitoring | in use |
 | TAMSAT, RFE 2.0, ARC 2.0, GPM IMERG | further verification references | coming later: listed, no reader yet, nothing is computed from them |
 
 ### ECMWF Open Data
@@ -54,11 +64,46 @@ The list shown in the interface comes from `config/data_sources.yaml`.
 
 ### CHIRPS v2.0
 
-* Daily 0.05° GeoTIFFs for the seven days of the forecast's window, summed into the Week-2
-  total on the same grid as the forecast.
-* The **final** Africa product is used when published (about three weeks after each
-  month), else the **preliminary** global product; the products used are recorded.
+The downloads follow ICPAC's
+[climate monitoring operational framework](https://github.com/misianihabat/ICPAC-Climate-Monitoring-operational-framework):
+
+* Files are found by **listing the CHC directory** (`data.chc.ucsb.edu`), never by guessing
+  a name, and only files the service does not hold yet are downloaded.
+* Every request is tried **five times**, waiting 5, 10, 20 and 40 s between attempts; a
+  missing file (404) is not retried.
+* Every file is validated (variable, date, 0.05° spacing) and **cropped to 19–54°E,
+  15°S–25°N**, the framework's box, which contains the ICPAC grid.
+* **Verification** uses the daily 0.05° files of the forecast's seven days, summed into the
+  Week-2 total on the forecast's grid. The **final** Africa product is used when published
+  (about three weeks after each month), else the **preliminary** global product; the
+  products used are recorded. Downloaded days are kept under `DATA_ROOT/chirps/daily` and
+  reused, and a preliminary day is replaced once its final file appears.
 * Cells CHIRPS marks as no data are left out of the scores, never filled.
+* `CHIRPS_BASE_URL` points every request at another server laid out like the CHC one (a
+  mirror, or the test server below).
+
+## Rainfall monitoring (CHIRPS dekads)
+
+The Monitoring page shows observed rainfall dekad by dekad, as ICPAC's monitoring
+products do: the **dekad total** from the preliminary dekadal NetCDF
+(`prelim/global_dekad/netcdf`), mapped and averaged for the region and each member state
+(mean, highest, share of cells below 1 mm).
+
+**Percent of normal** compares the dekad with the **1991–2020 mean of the same dekad of the
+same month**. It needs that climatology: a NetCDF of the 1991–2020 CHIRPS dekads (variable
+`precip`), set with `CHIRPS_DEKAD_CLIMATOLOGY` (or `chirps.climatology.file` in
+`config/data_sources.yaml`). Until it is supplied the page shows percent of normal as in
+progress and says why. Cells where the dekad had less than 1 mm, or whose normal is zero,
+are left out.
+
+> **A note on the framework's dekadal script.** Its percent-of-normal step selects the
+> climatology by **day of month** only (e.g. every dekad starting on day 1), which averages
+> the first dekads of all twelve months together. This service selects the same month
+> *and* dekad, which is what "percent of normal" means; ICPAC may wish to correct the
+> framework the same way.
+
+Monthly and seasonal totals, anomalies and SPI, which the framework also produces, are
+listed as coming later.
 
 ## Operational choice: 0.25° input on the 1.5° training grid
 
@@ -93,7 +138,8 @@ changes.
 ## Network access
 
 The API needs outbound HTTPS to `data.ecmwf.int`, `ecmwf-forecasts.s3.eu-central-1.amazonaws.com`
-(the AWS mirror) and `data.chc.ucsb.edu`. Azure Container Apps allows this by default.
+(the AWS mirror), `data.chc.ucsb.edu` and, when the Copilot uses Claude,
+`api.anthropic.com`. Azure Container Apps allows this by default.
 
 ## Testing without the internet
 
@@ -102,8 +148,12 @@ like `data.ecmwf.int`, and serves them with byte ranges:
 
 ```bash
 python -m backend.tests.ecmwf_mirror --root /tmp/mirror --port 8998   # yesterday's run
-ECMWF_OPENDATA_MIRRORS=http://127.0.0.1:8998 python -m uvicorn backend.app.main:app
+ECMWF_OPENDATA_MIRRORS=http://127.0.0.1:8998 CHIRPS_BASE_URL=http://127.0.0.1:8998/chc \
+  python -m uvicorn backend.app.main:app
 ```
+
+The same server also serves the latest finished CHIRPS dekad under `/chc`, laid out like
+the CHC server.
 
 The browser tests (`frontend/e2e`) start this mirror and run the weekly cycle through the
 Operations page before checking every page. The mirror's rainfall is a made-up pattern on

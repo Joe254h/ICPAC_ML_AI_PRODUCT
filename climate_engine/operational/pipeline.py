@@ -252,11 +252,11 @@ def run_forecast(
     )
     notes = list(result.metadata["notes"])
     if blocker is not None:
-        notes.append(f"MBC + AI/ML (hybrid) forecast in progress: {blocker}")
+        notes.append(f"The MBC + AI/ML forecast is in progress: it is waiting for {blocker}")
     if open_data:
         notes.append(
-            "ECMWF Open Data rainfall (0.25 degree) averaged to 1.5 degree and interpolated "
-            "bilinearly to the 0.05 degree grid (operational choice)"
+            "ECMWF Open Data rainfall (0.25°) is averaged to the 1.5° grid the model was "
+            "trained on, then interpolated to the 0.05° ICPAC grid (an operational choice)"
         )
     if synthetic:
         notes.append("Input is a synthetic test fixture: not a forecast of real weather")

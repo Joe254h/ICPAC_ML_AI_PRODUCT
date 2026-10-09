@@ -58,7 +58,7 @@ const ACTIONS: Record<
       action: "approve",
       label: "Approve",
       description:
-        "Approve the bulletin for release. The approved content is sealed with checksums.",
+        "Approve the bulletin for release. The approved text and maps are sealed so they cannot change.",
       variant: "green",
     },
     {
@@ -137,7 +137,7 @@ function Detail({
   return (
     <>
       <Card
-        eyebrow={`Forecast ${draft.forecast_id ?? ""}`}
+        eyebrow="Weekly bulletin draft"
         title={draft.title}
         action={<Status tone={tone}>{label}</Status>}
       >
@@ -178,8 +178,9 @@ function Detail({
           </LinkButton>
         </div>
         {draft.consistency.status !== "PASS" && (
-          <Notice tone="red" title="Consistency check failed:">
-            {draft.consistency.errors.join("; ")}
+          <Notice tone="red" title="Consistency check failed.">
+            The text no longer matches the sections frozen with this draft; make
+            a new revision before reviewing it.
           </Notice>
         )}
         <KeyValues
@@ -195,7 +196,10 @@ function Detail({
                 : "Failed",
             ],
             ["Label", draft.facts.label],
-            ["Revision of", draft.parent_id ?? "—"],
+            [
+              "Revision",
+              draft.parent_id ? "Revision of an earlier draft" : "First draft",
+            ],
           ]}
         />
         {draft.reviews.length > 0 && (
@@ -284,7 +288,7 @@ export default function Bulletins({ id }: PageProps) {
             { label: "Bulletin", href: "/bulletin" },
             { label: "Drafts and review" },
           ]}
-          subtitle="Every weekly bulletin goes from draft to review, approval and publication. Each decision needs a named reviewer and a justification, and approved content is sealed with checksums."
+          subtitle="Every weekly bulletin goes from draft to review, approval and publication. Each decision needs a named reviewer and a justification, and approved content is sealed so it cannot change."
           actions={
             <Button variant="amber" onClick={() => create()} disabled={busy}>
               <FilePlus2 size={18} />{" "}

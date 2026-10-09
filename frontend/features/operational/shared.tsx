@@ -14,15 +14,7 @@ import {
   Status,
 } from "@/components/ui";
 import { countrySlug } from "@/features/routes";
-import {
-  SERIES,
-  dateTime,
-  day,
-  num,
-  shortHash,
-  signed,
-  validDays,
-} from "@/lib/format";
+import { SERIES, dateTime, day, num, signed, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type {
   CountryRow,
@@ -48,7 +40,7 @@ export const LAYER_TEXT: Record<Variant, { title: string; method: string }> = {
   hybrid: {
     title: "MBC + AI/ML",
     method:
-      "The MBC forecast plus a CatBoost correction learned from 37 predictors (ensemble rainfall and atmospheric fields at 850, 700, 500 and 200 hPa): max(MBC + residual, 0).",
+      "The MBC forecast plus a CatBoost correction learned from 37 predictors (ensemble rainfall and atmospheric fields at 850, 700, 500 and 200 hPa), added to MBC and kept at or above zero.",
   },
 };
 
@@ -88,6 +80,13 @@ export function NoForecast() {
       </p>
     </EmptyState>
   );
+}
+
+/** A model's registry status in words. */
+export function modelState(status?: string | null): string {
+  if (status === "production") return "production model";
+  if (status === "candidate") return "candidate model, under evaluation";
+  return status ? `${status} model` : "registered model";
 }
 
 export function forecastFacts(detail: ForecastRun): string[] {
@@ -143,11 +142,10 @@ export function ForecastFacts({ detail }: { detail: ForecastDetail }) {
         ["Ensemble", `${p.ensemble_members} perturbed members`],
         ["Input", detail.input_label],
         [
-          "Model registry entry",
-          `${detail.model_id} · ${detail.model_version} (${detail.model_status})`,
+          "Model",
+          `${detail.model?.model_name ?? "Registered model"} (${modelState(detail.model_status)})`,
         ],
-        ["Generated", dateTime(detail.generation_time)],
-        ["Forecast ID", <code key="id">{detail.forecast_id}</code>],
+        ["Issued", dateTime(detail.generation_time)],
       ]}
     />
   );
@@ -189,7 +187,6 @@ export function CountryTable({
             <th className="num">Median</th>
             <th className="num">Min</th>
             <th className="num">Max</th>
-            <th className="num">Grid cells</th>
           </tr>
         </thead>
         <tbody>
@@ -213,9 +210,6 @@ export function CountryTable({
                 <td className="num">{num(stats?.median_mm)}</td>
                 <td className="num">{num(stats?.min_mm)}</td>
                 <td className="num">{num(stats?.max_mm)}</td>
-                <td className="num" style={{ color: "var(--muted)" }}>
-                  {row.cell_count.toLocaleString("en-GB")}
-                </td>
               </tr>
             );
           })}
@@ -358,12 +352,9 @@ export function VerificationSummary({ detail }: { detail: ForecastDetail }) {
     return (
       <>
         <p style={{ marginTop: 0 }}>
-          Verified against CHIRPS{" "}
-          {verification.observation?.file
-            ? `(${verification.observation.file})`
-            : ""}
-          . Spatial scores over the 205,999-cell domain for this single week;
-          they do not by themselves establish forecast skill.
+          Verified against CHIRPS daily rainfall. Scores over the eleven member
+          states for this single week; they do not by themselves establish
+          forecast skill.
         </p>
         <MetricsTable metrics={verification.domain} />
       </>
@@ -377,118 +368,75 @@ export function VerificationSummary({ detail }: { detail: ForecastDetail }) {
   );
 }
 
-const FILES: [string, string][] = [
-  ["forecast.nc", "Gridded forecast fields (NetCDF4)"],
-  ["countries.csv", "Country statistics (CSV)"],
-  ["maps/mbc.png", "Map: MBC"],
-  ["maps/hybrid.png", "Map: MBC + AI/ML"],
-  ["maps/raw.png", "Map: raw ECMWF"],
-  ["maps/residual.png", "Map: AI/ML residual"],
-  ["verification.json", "Verification scores"],
-  ["provenance.json", "Provenance record"],
-  ["manifest.json", "Package manifest with checksums"],
+const FILES: [string, string, string][] = [
+  ["forecast.nc", "Gridded forecast", "NetCDF, every layer on the 0.05° grid"],
+  ["countries.csv", "Country statistics", "Spreadsheet of the country figures"],
+  ["maps/mbc.png", "Map: MBC", "Image"],
+  ["maps/hybrid.png", "Map: MBC + AI/ML", "Image"],
+  ["maps/raw.png", "Map: raw ECMWF", "Image"],
 ];
 
 export function Downloads({ detail }: { detail: ForecastDetail }) {
   const available = new Set(Object.keys(detail.files ?? {}));
   return (
-    <ul
-      style={{
-        listStyle: "none",
-        margin: 0,
-        padding: 0,
-        display: "grid",
-        gap: 4,
-      }}
-    >
-      {FILES.filter(([name]) => available.has(name)).map(([name, label]) => (
-        <li key={name}>
-          <a
-            href={`/api/forecasts/${detail.forecast_id}/package/${name}`}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 12,
-              padding: "10px 12px",
-              borderRadius: 10,
-              color: "var(--ink)",
-            }}
-            className="hover:bg-[var(--green-50)]"
-          >
-            <span>
-              <strong style={{ display: "block", fontWeight: 600 }}>
-                {label}
-              </strong>
-              <code style={{ fontSize: 12.5, color: "var(--muted)" }}>
-                {name}
-              </code>
-            </span>
-            <Download
-              size={17}
-              style={{ color: "var(--green-700)", flex: "none" }}
-            />
-          </a>
-        </li>
-      ))}
+    <ul className="download-list">
+      {FILES.filter(([name]) => available.has(name)).map(
+        ([name, label, kind]) => (
+          <li key={name}>
+            <a href={`/api/forecasts/${detail.forecast_id}/package/${name}`}>
+              <span>
+                <strong>{label}</strong>
+                <small>{kind}</small>
+              </span>
+              <Download size={17} aria-hidden />
+            </a>
+          </li>
+        ),
+      )}
     </ul>
   );
 }
 
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+/** How the forecast was made, in words. */
 export function ProvenanceList({ detail }: { detail: ForecastDetail }) {
   const p = detail.provenance;
   return (
-    <>
-      <KeyValues
-        items={[
-          [
-            "Grid",
-            `${p.grid_definition.shape.join(" × ")} cells (latitude × longitude), 0.05°`,
-          ],
-          [
-            "Domain",
-            `${p.domain_definition.cells.toLocaleString("en-GB")} cells · ${p.domain_definition.name}`,
-          ],
-          ["MBC month", String(p.mbc_month)],
-          [
-            "MBC artifact",
-            <code key="b">{shortHash(p.mbc_artifact_checksum, 16)}</code>,
-          ],
-          [
-            "Input files",
-            p.input_source.inputs.map((i) => i.path).join(", ") || "—",
-          ],
-          [
-            "Software",
-            `${p.software_version.package} · ${shortHash(p.software_version.git_commit, 10)}`,
-          ],
-        ]}
-      />
-      <details style={{ marginTop: 16 }}>
-        <summary
-          style={{
-            cursor: "pointer",
-            fontWeight: 600,
-            color: "var(--green-700)",
-          }}
-        >
-          Full provenance record
-        </summary>
-        <pre
-          style={{
-            marginTop: 10,
-            maxHeight: 380,
-            overflow: "auto",
-            background: "var(--ground)",
-            borderRadius: 12,
-            padding: 14,
-            fontSize: 12.5,
-          }}
-        >
-          {JSON.stringify(p, null, 2)}
-        </pre>
-      </details>
-    </>
+    <KeyValues
+      items={[
+        [
+          "Grid",
+          `${p.grid_definition.shape.join(" × ")} cells at 0.05° (about 5 km)`,
+        ],
+        [
+          "Area",
+          `${p.domain_definition.cells.toLocaleString("en-GB")} land cells over the eleven member states`,
+        ],
+        [
+          "Ensemble",
+          `${p.ensemble_members} perturbed members of the ECMWF ensemble`,
+        ],
+        [
+          "Bias correction",
+          `Ratios for ${MONTHS[(p.mbc_month ?? 1) - 1]}, from 2005–2021 CHIRPS and ECMWF rainfall`,
+        ],
+        ["Input", detail.input_label],
+      ]}
+    />
   );
 }
 

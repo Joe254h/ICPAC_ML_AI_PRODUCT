@@ -171,7 +171,7 @@ function VerificationMap({ metric }: { metric: string }) {
           {entry.available ? (
             <Card
               title={`${info.title} · ${SERIES[shown].label}`}
-              subtitle={`${data.cases} verified forecasts of ${data.model_id}`}
+              subtitle={`${data.cases} verified forecasts of the model in use`}
             >
               <MapFigure
                 src={`/api/verification/maps/${metric}?variant=${shown}&include_protected=${includeTest}`}

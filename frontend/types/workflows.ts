@@ -23,6 +23,10 @@ export type ChatMessage = {
   context?: ChatContext;
   links?: { label: string; url: string }[];
   images?: { url: string; alt: string }[];
+  /** forecast: built from the service's data; general: background knowledge. */
+  kind?: "forecast" | "general";
+  /** What the answer is based on, in words. */
+  evidence?: string[];
 };
 export type ChatContext = {
   mode: "operational" | "demonstration";

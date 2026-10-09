@@ -237,7 +237,7 @@ class ModelRegistry:
             return {
                 "role": "candidate",
                 "model": candidates[-1],
-                "note": "No production model yet: forecasts use the candidate under evaluation",
+                "note": "No production model yet: forecasts use the candidate under evaluation.",
             }
         raise KeyError("no operational model registered")
 

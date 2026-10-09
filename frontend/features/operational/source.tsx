@@ -17,7 +17,7 @@ import {
 } from "@/components/ui";
 import type { PageProps } from "@/features/view";
 import { useActor } from "@/lib/actor";
-import { dateTime, day, shortHash, validDays } from "@/lib/format";
+import { dateTime, day, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
 import type {
@@ -49,6 +49,13 @@ function OperationNotice({
   );
 }
 
+function mirrorName(mirror: string): string {
+  if (mirror === "ecmwf" || mirror.includes("data.ecmwf.int")) return "ECMWF";
+  if (mirror === "aws" || mirror.includes("amazonaws"))
+    return "ECMWF archive (AWS)";
+  return "Local copy";
+}
+
 function Ecmwf({ source }: { source?: DataSource }) {
   const inputs = useApi<EcmwfInput[]>("/data/ecmwf");
   const [actor] = useActor();
@@ -65,7 +72,7 @@ function Ecmwf({ source }: { source?: DataSource }) {
           { label: "ECMWF ensemble" },
         ]}
         subtitle="The forecast input: the real-time ECMWF ensemble from ECMWF Open Data, 00 UTC run, 0.25°, 15-day range. Only the Week-2 rainfall is downloaded."
-        facts={["50 perturbed members", "Steps 168 h and 336 h", "CC BY 4.0"]}
+        facts={["50 ensemble members", "Days 8–14", "Open licence (CC BY 4.0)"]}
       />
       <div className="grid-2">
         <Card
@@ -109,21 +116,22 @@ function Ecmwf({ source }: { source?: DataSource }) {
         <Card title="How it is processed">
           <ol style={{ margin: 0, paddingLeft: 22, display: "grid", gap: 8 }}>
             <li>
-              Only total precipitation of the 50 perturbed members at 168 h and
-              336 h is read from each file (byte ranges listed in its index), as
-              in training, without the control member.
+              Only the total rainfall of the 50 ensemble members at days 7 and
+              14 is downloaded, as the model was trained; nothing else is
+              fetched.
             </li>
             <li>
-              Every GRIB message is checked: parameter, date, run, member, step
-              and units.
+              Each field is checked: the right variable, date, run, member,
+              forecast hour and units.
             </li>
             <li>
-              The global field is cropped to Eastern Africa and stored as the
-              forecast input.
+              The global field is cut to Eastern Africa and kept as the forecast
+              input.
             </li>
             <li>
-              The forecast run averages it to 1.5° and interpolates it to the
-              0.05° grid (see <Link href="/forecasts/raw">Raw ECMWF</Link>).
+              The forecast averages it to the 1.5° grid the model was trained
+              on, then interpolates it to the 0.05° ICPAC grid (see{" "}
+              <Link href="/forecasts/raw">Raw ECMWF</Link>).
             </li>
           </ol>
         </Card>
@@ -132,7 +140,7 @@ function Ecmwf({ source }: { source?: DataSource }) {
         title="Downloaded runs"
         subtitle={
           source
-            ? `${source.provider} · mirrors data.ecmwf.int, then the AWS archive`
+            ? `${source.provider}: ECMWF's own server first, then its archive on Amazon Web Services`
             : undefined
         }
       >
@@ -147,9 +155,8 @@ function Ecmwf({ source }: { source?: DataSource }) {
                 <tr>
                   <th>ECMWF run</th>
                   <th className="num">Members</th>
-                  <th>Mirror</th>
-                  <th className="num">GRIB size</th>
-                  <th>GRIB SHA-256</th>
+                  <th>Downloaded from</th>
+                  <th className="num">Size</th>
                   <th>Fetched</th>
                 </tr>
               </thead>
@@ -160,12 +167,9 @@ function Ecmwf({ source }: { source?: DataSource }) {
                       {day(row.initialization)}, 00 UTC
                     </td>
                     <td className="num">{row.members}</td>
-                    <td>{row.mirror.replace(/^https?:\/\//, "")}</td>
+                    <td>{mirrorName(row.mirror)}</td>
                     <td className="num">
                       {(row.grib_bytes / 1e6).toFixed(1)} MB
-                    </td>
-                    <td>
-                      <code>{shortHash(row.grib_sha256, 12)}</code>
                     </td>
                     <td style={{ color: "var(--muted)" }}>
                       {dateTime(row.fetched_at)} · {row.fetched_by}

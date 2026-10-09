@@ -9,7 +9,9 @@ export type PageKey =
   | "layer"
   | "maps"
   | "country"
+  | "countries"
   | "verification"
+  | "monitoring"
   | "models"
   | "data"
   | "source"
@@ -35,11 +37,11 @@ export type Route = {
 export type Menu =
   | "Home"
   | "Forecasts"
+  | "Monitoring"
   | "Maps"
   | "Countries"
   | "Verification"
   | "Bulletin"
-  | "Models"
   | "Data & Tools"
   | "Copilot";
 
@@ -64,11 +66,11 @@ export const countrySlug = (name: string) =>
 /** Header menus, in the order of the ICPAC website's navigation. */
 export const MENUS: Menu[] = [
   "Forecasts",
+  "Monitoring",
   "Maps",
   "Countries",
   "Verification",
   "Bulletin",
-  "Models",
   "Data & Tools",
   "Copilot",
 ];
@@ -151,6 +153,12 @@ export const ROUTES: Route[] = [
     page: "maps",
     param: "skill",
   },
+  {
+    path: "countries",
+    title: "All member states",
+    menu: "Countries",
+    page: "countries",
+  },
   ...COUNTRIES.map((name) => ({
     path: "countries/" + countrySlug(name),
     title: name,
@@ -176,7 +184,18 @@ export const ROUTES: Route[] = [
     menu: "Bulletin",
     page: "drafts",
   },
-  { path: "models", title: "Model registry", menu: "Models", page: "models" },
+  {
+    path: "monitoring",
+    title: "Rainfall monitoring",
+    menu: "Monitoring",
+    page: "monitoring",
+  },
+  {
+    path: "models",
+    title: "Model registry",
+    menu: "Data & Tools",
+    page: "models",
+  },
   { path: "data", title: "Data sources", menu: "Data & Tools", page: "data" },
   {
     path: "data/ecmwf",
@@ -222,13 +241,15 @@ export const ROUTES: Route[] = [
   ...(
     [
       ["forecasts/week-2", "Forecast archive", "Forecasts", "archive"],
-      ["models/candidate", "Model registry", "Models", "models"],
-      ["models/production", "Model registry", "Models", "models"],
+      ["models/candidate", "Model registry", "Data & Tools", "models"],
+      ["models/production", "Model registry", "Data & Tools", "models"],
       ["system/data", "System status", "Data & Tools", "system"],
       ["system/models", "System status", "Data & Tools", "system"],
       ["system/processing", "System status", "Data & Tools", "system"],
       ["health", "System status", "Data & Tools", "system"],
       ["jobs", "Operations", "Data & Tools", "operations"],
+      ["operations", "Operations", "Data & Tools", "operations"],
+      ["maps", "Rainfall maps", "Maps", "maps"],
     ] as const
   ).map(([path, title, menu, page]) => ({
     path,

@@ -1,5 +1,14 @@
 import { expect, test } from "vitest";
-import { UNAVAILABLE, day, num, signed, validDays } from "../lib/format";
+import {
+  UNAVAILABLE,
+  day,
+  num,
+  period,
+  shortPeriod,
+  signed,
+  validDays,
+  weekPeriod,
+} from "../lib/format";
 
 test("missing values are shown as unavailable, never as zero", () => {
   expect(num(null)).toBe(UNAVAILABLE);
@@ -20,5 +29,23 @@ test("the Week-2 window ends the day before valid_end (00 UTC)", () => {
   expect(
     validDays("2026-10-12T00:00:00+00:00", "2026-10-19T00:00:00+00:00"),
   ).toBe("12 Oct 2026 – 18 Oct 2026");
-  expect(day("2026-10-05")).toBe("05 Oct 2026");
+  expect(day("2026-10-05")).toBe("5 Oct 2026");
+});
+
+test("short periods leave out the year", () => {
+  expect(shortPeriod("2026-09-21", "2026-09-30")).toBe("21–30 Sep");
+  expect(shortPeriod("2026-09-28", "2026-10-04")).toBe("28 Sep – 4 Oct");
+});
+
+test("periods read as headlines", () => {
+  expect(period("2026-10-14", "2026-10-20")).toBe("14–20 October 2026");
+  expect(period("2026-09-28", "2026-10-04")).toBe(
+    "28 September – 4 October 2026",
+  );
+  expect(period("2026-12-28", "2027-01-03")).toBe(
+    "28 December 2026 – 3 January 2027",
+  );
+  expect(
+    weekPeriod("2026-10-14T00:00:00+00:00", "2026-10-21T00:00:00+00:00"),
+  ).toBe("14–20 October 2026");
 });

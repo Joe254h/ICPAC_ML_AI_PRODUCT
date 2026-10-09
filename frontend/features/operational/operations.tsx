@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Fragment, useEffect, useState } from "react";
 import {
+  BarChart3,
   CheckCircle2,
   CloudDownload,
   Loader2,
@@ -59,6 +60,12 @@ const STEPS: {
     title: "Verify finished forecasts",
     text: "Fetch CHIRPS for every week that has ended.",
     icon: CheckCircle2,
+  },
+  {
+    action: "update_chirps",
+    title: "Update rainfall monitoring",
+    text: "Download the newest CHIRPS dekad, if there is one.",
+    icon: BarChart3,
   },
 ];
 
@@ -153,7 +160,8 @@ export default function Operations() {
                 and bulletin inputs.
               </li>
               <li>
-                Verify every earlier forecast whose week CHIRPS now covers.
+                Verify every earlier forecast whose week CHIRPS now covers, and
+                download the newest CHIRPS dekad for rainfall monitoring.
               </li>
             </ol>
             <div className="grid-2" style={{ gap: 14 }}>
@@ -228,7 +236,7 @@ export default function Operations() {
             )}
           </Card>
         </div>
-        <div className="grid-3">
+        <div className="grid-4">
           {STEPS.map(({ action, title, text, icon: Icon }) => (
             <div
               key={action}
@@ -333,23 +341,20 @@ export default function Operations() {
             </div>
           )}
         </Card>
-        <Card title="Scheduling">
+        <Card title="Schedule">
           <KeyValues
             items={[
               [
                 "Weekly",
-                "Run the cycle once the 00 UTC ECMWF run of the issue day is published (about 09:00 UTC).",
+                "Run the cycle once ECMWF has published the 00 UTC run of the issue day (about 09:00 UTC).",
+              ],
+              [
+                "Daily",
+                "Check for a new CHIRPS dekad and verify the forecasts it now covers, as ICPAC's climate monitoring does each morning.",
               ],
               [
                 "Unattended",
-                <span key="cmd">
-                  <code>
-                    python -m scripts.operational_cycle --actor &quot;scheduled
-                    cycle&quot;
-                  </code>{" "}
-                  runs the same cycle from a scheduler (cron, an Azure Container
-                  Apps job or the HPC).
-                </span>,
+                "Both can run on a schedule without anyone opening this page; your system administrator sets that up (see the service's operations guide).",
               ],
             ]}
           />

@@ -35,12 +35,12 @@ const STEPS: Record<Variant, string[]> = {
   mbc: [
     "Start from the raw ECMWF ensemble mean.",
     "Multiply each cell by its locked ratio of CHIRPS to ECMWF rainfall for the initialization month (fitted on 2005–2021, clipped to 0.05–20).",
-    "Keep the result at or above zero: MBC = max(0, raw × ratio).",
+    "Keep the result at or above zero.",
   ],
   hybrid: [
     "Build 37 predictors per cell: ensemble rainfall mean and spread, location, season, the MBC forecast and atmospheric fields at 850, 700, 500 and 200 hPa (humidity, winds, moisture transport, temperature, geopotential, shear).",
     "A CatBoost model (378 trees) predicts what MBC still gets wrong: the residual CHIRPS − MBC.",
-    "MBC + AI/ML = max(MBC + predicted residual, 0).",
+    "Add the predicted residual to MBC and keep the result at or above zero: this is the MBC + AI/ML forecast.",
   ],
 };
 
@@ -76,29 +76,29 @@ function Body({
       {!available ? (
         <>
           <InProgress title="MBC + AI/ML hybrid">
-            {reason
-              ? `${reason[0].toUpperCase()}${reason.slice(1)}. Forecasts are issued from MBC until then.`
-              : "The AI/ML model's inputs are not available yet, so forecasts are issued from MBC."}
+            {!reason
+              ? "The AI/ML model's inputs are not available yet, so forecasts are issued from MBC."
+              : /^[A-Z]/.test(reason)
+                ? reason
+                : `Waiting for ${reason.replace(/\.$/, "")}. Forecasts are issued from MBC until then.`}
           </InProgress>
           <Card title="What is needed to complete it">
             <ol
               style={{ margin: 0, paddingLeft: 22, display: "grid", gap: 10 }}
             >
               <li>
-                The seven Week-2 forecast steps at which the training code read
-                the pressure-level fields (
-                <code>ecmwf.pressure.week2_steps_hours</code> in{" "}
-                <code>config/operational.yaml</code>), taken from the HPC
-                feature script.
+                The forecast hours at which the model&apos;s training read the
+                upper-air (pressure-level) fields, from ICPAC&apos;s training
+                scripts.
               </li>
               <li>
-                ECMWF ensemble fields of specific humidity, winds, temperature
-                and geopotential at 850, 700, 500 and 200 hPa for those steps.
+                Those ECMWF ensemble fields: humidity, winds, temperature and
+                geopotential at 850, 700, 500 and 200 hPa.
               </li>
               <li>
-                With both, every run adds the hybrid layer automatically; until
-                then the model artifacts are verified but not used for the
-                forecast.
+                With both, every forecast adds the AI/ML layer automatically.
+                Until then the model is checked and kept ready, and forecasts
+                are issued from MBC.
               </li>
             </ol>
             <p style={{ margin: "18px 0 0" }}>

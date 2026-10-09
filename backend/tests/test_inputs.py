@@ -99,7 +99,7 @@ def test_fetch_and_run_from_open_data(env, fast_maps, mirror):
     # The open data hold no pressure levels: the hybrid stays in progress.
     assert record["primary_layer"] == "mbc"
     assert "upper-air (pressure-level) ECMWF fields" in record["products"]["hybrid"]["reason"]
-    assert any("averaged to 1.5 degree" in note for note in record["notes"])
+    assert any("averaged to the 1.5° grid" in note for note in record["notes"])
     detail = client.get(f"/forecasts/{record['forecast_id']}").json()
     assert detail["provenance"]["input_attributes"]["mirror"] == mirror
     with xr.open_dataset(forecasts.package_root() / record["forecast_id"] / "forecast.nc") as data:

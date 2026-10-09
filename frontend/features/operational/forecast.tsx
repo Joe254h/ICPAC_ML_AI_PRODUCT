@@ -15,7 +15,7 @@ import {
   Tabs,
 } from "@/components/ui";
 import type { PageProps } from "@/features/view";
-import { SERIES, num, validDays } from "@/lib/format";
+import { SERIES, num, validDays, weekPeriod } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type {
   BulletinStatus,
@@ -92,7 +92,7 @@ function Body({ detail }: { detail: ForecastDetail }) {
   return (
     <>
       <PageBanner
-        title={bulletin.data?.title ?? "Latest Week-2 Forecast"}
+        title={`Weekly Forecast for ${weekPeriod(detail.valid_start, detail.valid_end)}`}
         crumbs={[
           { label: "Forecasts", href: "/forecasts/archive" },
           { label: "Latest forecast" },
@@ -129,7 +129,7 @@ function Body({ detail }: { detail: ForecastDetail }) {
           label={`Regional mean · ${SERIES[primary].label}`}
           value={num(means[primary])}
           unit="mm"
-          hint="Area mean over the 205,999-cell domain"
+          hint="Area average over the eleven member states"
         />
         <Stat
           label="Regional mean · raw ECMWF"
@@ -213,15 +213,12 @@ function Body({ detail }: { detail: ForecastDetail }) {
         <Card title="Forecast details">
           <ForecastFacts detail={detail} />
         </Card>
-        <Card
-          title="Downloads"
-          subtitle="The forecast's product package, with checksums."
-        >
+        <Card title="Downloads" subtitle="This forecast's data and maps.">
           <Downloads detail={detail} />
         </Card>
       </div>
       <NotesCard detail={detail} />
-      <Card title="Provenance">
+      <Card title="How this forecast was made">
         <ProvenanceList detail={detail} />
       </Card>
     </>

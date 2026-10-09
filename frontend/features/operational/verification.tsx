@@ -271,7 +271,7 @@ export default function Verification() {
                   ["Raw ECMWF", "9.055", "17.207", "+1.682", "0.718", "—"],
                   ["MBC", "7.578", "15.289", "−0.203", "0.775", "11.15%"],
                   [
-                    "MBC + CatBoost (Hybrid7)",
+                    "MBC + AI/ML (study model)",
                     "7.420",
                     "14.993",
                     "−0.361",
@@ -293,7 +293,8 @@ export default function Verification() {
           </div>
           <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 0 }}>
             From the ICPAC Week-2 AI/ML study (locked 2022–2024 test). The
-            operational Atmos37 hybrid has not yet been tested on that period.
+            operational MBC + AI/ML model has not yet been tested on that
+            period.
           </p>
         </Card>
       </div>

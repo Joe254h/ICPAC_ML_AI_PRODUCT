@@ -182,7 +182,9 @@ def interpretation_inputs(
         caveats.append("Input is a synthetic test fixture: not a forecast of real weather")
     hybrid = p.get("products", {}).get("hybrid", {"status": "available"})
     if hybrid["status"] != "available":
-        caveats.append(f"MBC + AI/ML (hybrid) forecast in progress: {hybrid.get('reason')}")
+        caveats.append(
+            f"The MBC + AI/ML forecast is in progress: it is waiting for {hybrid.get('reason')}"
+        )
     caveats.append(
         "Rainfall colours use the supplied ICPAC weekly bulletin's fixed rainfall classes"
     )

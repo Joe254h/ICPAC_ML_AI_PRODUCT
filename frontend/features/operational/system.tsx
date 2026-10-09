@@ -38,9 +38,9 @@ const GROUPS: {
   link?: [string, string];
 }[] = [
   {
-    title: "Forecast inputs",
-    text: "The ensemble the forecast is made from and the observations it is verified against.",
-    names: ["ECMWF input", "CHIRPS verification"],
+    title: "Data inputs",
+    text: "The ensemble the forecast is made from, the observations it is verified against and the rainfall monitoring.",
+    names: ["ECMWF input", "CHIRPS verification", "CHIRPS monitoring"],
     link: ["/data", "Data sources"],
   },
   {

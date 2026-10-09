@@ -142,11 +142,11 @@ class MonitoringService:
         path = chirps_dekad.climatology_path()
         if path is None:
             return None, (
-                "Percent of normal needs the 1991-2020 long-term mean of each dekad, which "
+                "Percent of normal needs the 1991–2020 long-term mean of each dekad, which "
                 "ICPAC keeps for its monitoring products; it has not been added yet."
             )
         if not path.exists():
-            return None, "The 1991-2020 long-term mean file was not found on the server."
+            return None, "The 1991–2020 long-term mean file was not found on the server."
         return chirps_dekad.long_term_mean(path, dekad, grid), None
 
     def field(self, identifier: str) -> xr.DataArray:

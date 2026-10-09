@@ -238,6 +238,8 @@ export type BulletinStatus = {
 export type Health = {
   status: string;
   mode: string;
+  /** The deployed source revision (absent on releases before it was reported). */
+  version?: string;
   components: Record<string, string>;
 };
 
@@ -299,6 +301,7 @@ export type OperationAction =
   | "run_forecast"
   | "verify_due"
   | "verify_forecast"
+  | "update_chirps"
   | "cycle";
 
 export type Operation = {
@@ -315,4 +318,35 @@ export type Operation = {
   messages: { time: string; text: string }[];
   result: Record<string, unknown> | null;
   error: string | null;
+};
+
+/** Figures of a CHIRPS dekad over an area (cos-latitude weighted means). */
+export type DekadFigures = {
+  mean_mm: number;
+  max_mm: number;
+  /** Share of the area with less than 1 mm. */
+  dry_fraction: number;
+  normal_mm?: number;
+  percent_of_normal?: number | null;
+};
+
+/** A CHIRPS preliminary dekad downloaded for rainfall monitoring. */
+export type Dekad = {
+  dekad: string;
+  year: number;
+  month: number;
+  number: number;
+  start: string;
+  end: string;
+  product: string;
+  region: DekadFigures;
+  countries: (DekadFigures & { country: string })[];
+  percent_of_normal: {
+    status: "available" | "in_progress";
+    reason: string | null;
+  };
+  fetched_at: string;
+  fetched_by: string;
+  overlays?: { total: string; percent?: string };
+  overlay_bounds?: [number, number, number, number];
 };
