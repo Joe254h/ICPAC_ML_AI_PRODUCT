@@ -207,17 +207,12 @@ class WeeklyHTMLExporter:
             )
             or '<tr><td colspan="4">Not reviewed yet</td></tr>'
         )
-        record = "".join(
-            f"<tr><th>{escape(str(k).replace('_', ' '))}</th><td>{escape(str(v))}</td></tr>"
-            for k, v in provenance.items()
-        )
+        # Readers see the decisions; identifiers and checksums stay in the service's record.
         body.append(
             '<section class="card record"><h2>Review record</h2>'
-            f"<p><strong>Status:</strong> {escape(status_text)} · draft "
-            f"{escape(bulletin.get('id', ''))}</p>"
+            f"<p><strong>Status:</strong> {escape(status_text)}</p>"
             "<table><thead><tr><th>Time (UTC)</th><th>Action</th><th>Reviewer</th>"
             f"<th>Comment</th></tr></thead><tbody>{reviews}</tbody></table>"
-            f"<details><summary>Forecast provenance</summary><table>{record}</table></details>"
             "</section>"
         )
 
@@ -227,7 +222,6 @@ class WeeklyHTMLExporter:
             for part in (
                 f"ECMWF ensemble initialised {issued}, 00 UTC" if issued else "",
                 f"Method: {method}",
-                f"Forecast {provenance.get('forecast_id', '')}",
             )
             if part
         )

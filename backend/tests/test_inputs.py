@@ -98,7 +98,7 @@ def test_fetch_and_run_from_open_data(env, fast_maps, mirror):
     assert record["input_label"] == "ECMWF ENS (Open Data)" and not record["synthetic"]
     # The open data hold no pressure levels: the hybrid stays in progress.
     assert record["primary_layer"] == "mbc"
-    assert "pressure-level input" in record["products"]["hybrid"]["reason"]
+    assert "upper-air (pressure-level) ECMWF fields" in record["products"]["hybrid"]["reason"]
     assert any("averaged to 1.5 degree" in note for note in record["notes"])
     detail = client.get(f"/forecasts/{record['forecast_id']}").json()
     assert detail["provenance"]["input_attributes"]["mirror"] == mirror
@@ -106,7 +106,7 @@ def test_fetch_and_run_from_open_data(env, fast_maps, mirror):
         raw = data["raw"].values[MASK]
     assert np.isfinite(raw).all() and (raw > 0).all()
     health = client.get("/health").json()["components"]
-    assert health["ECMWF input"].startswith("Healthy · latest 2026-10-05")
+    assert health["ECMWF input"] == "Healthy · latest run 5 Oct 2026, 00 UTC"
 
 
 def chirps_tile(daily_mm: float, missing: tuple[int, int] | None = None) -> bytes:

@@ -140,8 +140,8 @@ def test_open_data_forecast_runs_end_to_end_through_the_api(client, tmp_path):
         ), url
     assert client.get(f"/forecasts/{fid}/map?layer=hybrid").status_code == 404
     health = client.get("/health").json()["components"]
-    assert health["Operational forecasts"].startswith("Healthy · latest initialization 2026-10-05")
-    assert health["ECMWF input"].startswith("Healthy · latest 2026-10-05")
+    assert health["Operational forecasts"] == "Healthy · latest from the ECMWF run of 5 Oct 2026"
+    assert health["ECMWF input"] == "Healthy · latest run 5 Oct 2026, 00 UTC"
 
 
 def test_the_hybrid_chain_runs_on_the_real_artifacts(tmp_path):
@@ -224,5 +224,5 @@ def test_without_pressure_steps_the_hpc_command_publishes_raw_and_mbc(tmp_path):
     [package] = list((tmp_path / "packages").iterdir())
     provenance = json.loads((package / "provenance.json").read_text())
     assert provenance["layers"] == ["raw", "mbc"]
-    assert "ecmwf.pressure.week2_steps_hours" in provenance["products"]["hybrid"]["reason"]
+    assert "forecast hours" in provenance["products"]["hybrid"]["reason"]
     assert not (package / "maps" / "hybrid.png").exists()

@@ -290,7 +290,7 @@ def test_without_the_atmos37_inputs_a_run_holds_raw_and_mbc(env, monkeypatch):
     assert record["layers"] == ["raw", "mbc"] and record["primary_layer"] == "mbc"
     assert record["method"] == "MBC"
     assert record["products"]["hybrid"]["status"] == "in_progress"
-    assert "week2_steps_hours" in record["products"]["hybrid"]["reason"]
+    assert "forecast hours" in record["products"]["hybrid"]["reason"]
     fid = record["forecast_id"]
     directory = forecasts.package_root() / fid
     assert packages.check_package(directory) == []

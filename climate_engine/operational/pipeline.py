@@ -63,9 +63,11 @@ def hybrid_blocker(model: ResidualMBCModel, cfg: dict) -> str | None:
     if not needs_pressure(model.names):
         return None
     if cfg["ecmwf"]["pressure"].get("week2_steps_hours") is None:
+        # Shown to forecasters ("Waiting for ..."): the setting is
+        # ecmwf.pressure.week2_steps_hours in config/operational.yaml.
         return (
-            "the seven Week-2 pressure-level forecast steps of the training code "
-            "(ecmwf.pressure.week2_steps_hours) have not been supplied"
+            "the forecast hours at which the AI/ML model's training read the upper-air "
+            "(pressure-level) fields"
         )
     return None
 
@@ -148,7 +150,10 @@ def run_forecast(
     blocker = hybrid_blocker(model, cfg)
     pressure = provider.load_pressure(cycle) if blocker is None else None
     if blocker is None and needs_pressure(model.names) and pressure is None:
-        blocker = f"no ECMWF pressure-level input for {cycle}"
+        blocker = (
+            "the upper-air (pressure-level) ECMWF fields of the "
+            f"{initialization.day} {initialization:%B %Y} run"
+        )
     if blocker is None:
         features = build_features(
             model.names, rainfall, initialization, grid, model.mbc, cfg, pressure

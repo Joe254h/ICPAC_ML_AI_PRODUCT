@@ -104,7 +104,7 @@ def test_missing_package_and_explicit_date_do_not_fall_back_to_demo(env, fast_ma
     assert not missing["tool_trace"]
     run(env)
     unknown = ask(env, "Show Kenya rainfall for 2020-01-01")
-    assert "no forecast package for 2020-01-01" in unknown["text"]
+    assert "there is no forecast for 1 January 2020" in unknown["text"]
     assert "Mock correction" not in unknown["text"]
     assert env.client.post("/chat", json={"message": "   "}).status_code == 422
     anomaly = ask(env, "Show the rainfall anomaly map for Kenya")

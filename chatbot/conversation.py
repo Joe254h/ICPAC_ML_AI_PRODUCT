@@ -197,6 +197,20 @@ def intent_for(message: str, previous: dict) -> str:
     return "forecast"
 
 
+def unavailable_reason(exc: Exception) -> str:
+    """Why forecast data are unavailable, in words (no identifiers or internals)."""
+    text = str(exc)
+    if "no operational forecast" in text:
+        return ": no forecast has been issued yet"
+    if "no preceding forecast" in text:
+        return ": there is no earlier forecast"
+    found = re.search(r"no forecast package for (\d{4}-\d{2}-\d{2})", text)
+    if found:
+        day = datetime.fromisoformat(found[1])
+        return f": there is no forecast for {day.day} {day:%B %Y}"
+    return ""
+
+
 class OperationalConversation:
     def __init__(self, platform):
         self.platform = platform
@@ -297,7 +311,8 @@ class OperationalConversation:
                         "This package uses synthetic test inputs, so these values are not a forecast of real weather."
                     )
                 sentences["model_status"] = (
-                    f"The package uses {detail['model_id']} ({detail['model_status']})."
+                    f"The forecast comes from {(detail.get('model') or {}).get('model_name') or 'the registered model'}"
+                    f" ({detail['model_status']})."
                     + (
                         " It has not been approved for production."
                         if detail["model_status"] != "production"
@@ -410,7 +425,7 @@ class OperationalConversation:
                 )
             except (ValueError, KeyError, FileNotFoundError, ImportError, OSError) as exc:
                 sentences = {
-                    "unavailable": f"The requested forecast data are unavailable: {exc}. No statistics have been inferred. You can still ask me to explain forecasting terms."
+                    "unavailable": f"The requested forecast data are unavailable{unavailable_reason(exc)}. No statistics have been inferred. You can still ask me to explain forecasting terms."
                 }
         if intent not in {"greeting", "thanks", "help"} and not intent.startswith("glossary:"):
             context["intent"] = intent

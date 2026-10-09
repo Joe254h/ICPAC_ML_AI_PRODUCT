@@ -12,6 +12,11 @@ from climate_engine.core import ROOT, config
 from climate_engine.provenance import code_version
 
 
+def _day(value: str) -> str:
+    day = date.fromisoformat(value[:10])
+    return f"{day.day} {day:%b %Y}"
+
+
 def system_health(platform) -> dict:
     components = {"API": "Healthy", "Database": "Healthy"}
     models = [m for m in platform.repo.list("model") if operational.is_operational(m)]
@@ -24,16 +29,17 @@ def system_health(platform) -> dict:
         model = in_use[-1]
         healthy = operational.OperationalModel(model).health_check()
         role = "production" if model["status"] == "production" else "candidate, no production yet"
+        name = model.get("model_name") or "The registered model"
         components["Operational model"] = (
-            f"{'Healthy' if role == 'production' else 'Warning'} · {model['model_id']} ({role}; "
+            f"{'Healthy' if role == 'production' else 'Warning'} · {name} ({role}; "
             f"independent test {model.get('test_status')})"
             if healthy
-            else f"Unavailable · {model['model_id']} artifacts changed since registration"
+            else f"Unavailable · {name}: its files changed since registration"
         )
     issues = [i for i in platform.repo.list("registration_issue") if i.get("current")]
     if issues:
         components["Model registration"] = (
-            f"Unavailable · {issues[-1]['model_id']}: {issues[-1]['error']}"
+            "Unavailable · a model descriptor could not be registered; see the server log"
         )
     hybrid = forecasts.hybrid_status()
     components["MBC + AI/ML forecast"] = (
@@ -45,13 +51,13 @@ def system_health(platform) -> dict:
     service = forecasts.ForecastService(platform)
     ecmwf = service.ecmwf_inputs()
     components["ECMWF input"] = (
-        f"Healthy · latest {ecmwf[0]['initialization']} 00 UTC from {ecmwf[0]['mirror']}"
+        f"Healthy · latest run {_day(ecmwf[0]['initialization'])}, 00 UTC"
         if ecmwf
         else "Warning · no ECMWF ensemble downloaded yet"
     )
     chirps = service.chirps_inputs()
     components["CHIRPS verification"] = (
-        f"Healthy · latest window from {chirps[0]['valid_start']}"
+        f"Healthy · latest week verified from {_day(chirps[0]['valid_start'])}"
         if chirps
         else "Warning · no CHIRPS window verified yet"
     )
@@ -60,14 +66,13 @@ def system_health(platform) -> dict:
     dekads = MonitoringService(platform).dekads()
     components["CHIRPS monitoring"] = (
         "Healthy · latest dekad "
-        f"{date.fromisoformat(dekads[0]['start']).day}–"
-        f"{date.fromisoformat(dekads[0]['end']):%d %b %Y} (preliminary)"
+        f"{date.fromisoformat(dekads[0]['start']).day}–{_day(dekads[0]['end'])} (preliminary)"
         if dekads
         else "Warning · no CHIRPS dekad downloaded yet"
     )
     runs = service.runs()
     components["Operational forecasts"] = (
-        f"Healthy · latest initialization {runs[0]['initialization']} ({runs[0]['forecast_id']})"
+        f"Healthy · latest from the ECMWF run of {_day(runs[0]['initialization'])}"
         if runs
         else "Warning · no forecast run yet"
     )
@@ -86,7 +91,9 @@ def system_health(platform) -> dict:
             response.raise_for_status()
             components["Copilot language model"] = "Healthy · Claude reachable"
         elif isinstance(llm, MockLLMProvider):
-            components["Copilot language model"] = "Warning · not configured (template answers)"
+            components["Copilot language model"] = (
+                "Warning · not configured: the Copilot gives checked fixed answers"
+            )
         else:
             cfg = config("runtime")["llm"]
             url = os.getenv("LLM_BASE_URL", cfg["base_url"]).rstrip("/") + "/models"
@@ -97,7 +104,9 @@ def system_health(platform) -> dict:
             response.raise_for_status()
             components["Copilot language model"] = "Healthy · endpoint reachable"
     except (httpx.HTTPError, ValueError):
-        components["Copilot language model"] = "Unavailable · template answers used"
+        components["Copilot language model"] = (
+            "Unavailable · not reachable: the Copilot gives checked fixed answers"
+        )
     free = shutil.disk_usage(ROOT).free
     components["Storage"] = (
         "Healthy" if free > 500_000_000 else "Warning · low disk space"

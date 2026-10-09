@@ -96,10 +96,10 @@ def hybrid_status() -> dict[str, Any]:
     if settings()["ecmwf"]["pressure"].get("week2_steps_hours") is None:
         return {
             "status": "in_progress",
-            "reason": "The Atmos37 AI/ML model needs the seven Week-2 pressure-level forecast "
-            "steps of its training code (ecmwf.pressure.week2_steps_hours) and the ECMWF "
-            "pressure-level fields; until both are supplied, forecasts provide raw ECMWF "
-            "and MBC.",
+            "reason": "The AI/ML model needs two inputs that have not been supplied yet: the "
+            "forecast hours at which its training read the upper-air (pressure-level) fields, "
+            "and those fields from the ECMWF ensemble. Until then, forecasts are issued from "
+            "MBC.",
         }
     return {"status": "available", "reason": None}
 

@@ -9,7 +9,7 @@ about 1 GB of memory. A task left unfinished by a restart is marked interrupted.
 
 import threading
 import traceback
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from backend.app.db import now
@@ -17,6 +17,13 @@ from backend.app.schemas import ForecastRunRequest, OperationRequest
 from backend.app.services.forecasts import ForecastService, RunInProgress
 
 KIND = "operation"
+
+
+def _day(value: date | str) -> str:
+    day = value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
+    return f"{day.day} {day:%B %Y}"
+
+
 LOCK = threading.Lock()
 ACTIONS = {
     "fetch_ecmwf": "Download ECMWF ensemble rainfall",
@@ -98,12 +105,14 @@ class OperationService:
             self._log(operation_id, "Finished", status="complete", finished_at=now(), result=result)
             self.repo.audit(f"operation_{body.action}", body.actor, operation_id, {})
         except Exception as exc:
+            # Forecasters see the message; the exception type and trace stay in the record.
             self._log(
                 operation_id,
                 f"Failed: {exc}",
                 status="failed",
                 finished_at=now(),
-                error=f"{type(exc).__name__}: {exc}",
+                error=str(exc) or type(exc).__name__,
+                error_type=type(exc).__name__,
                 trace=traceback.format_exc(limit=5),
             )
         finally:
@@ -116,12 +125,12 @@ class OperationService:
         from climate_engine.inputs import ecmwf_opendata
 
         initialization = body.initialization or ecmwf_opendata.latest_initialization()
-        self._log(operation_id, f"Downloading the {initialization.isoformat()} 00 UTC ensemble")
+        self._log(operation_id, f"Downloading the ECMWF ensemble of {_day(initialization)}, 00 UTC")
         record = self._forecasts().fetch_ecmwf(initialization, body.actor)
         self._log(
             operation_id,
-            f"{record['members']} members from {record['mirror']} "
-            f"({record['grib_bytes'] / 1e6:.1f} MB of GRIB)",
+            f"{record['members']} ensemble members downloaded "
+            f"({record['grib_bytes'] / 1e6:.1f} MB)",
         )
         return {"input": record["id"], "initialization": record["initialization"]}
 
@@ -129,13 +138,17 @@ class OperationService:
         from climate_engine.inputs import ecmwf_opendata
 
         initialization: date = body.initialization or ecmwf_opendata.latest_initialization()
-        self._log(operation_id, f"Running the forecast initialised {initialization.isoformat()}")
+        self._log(operation_id, f"Running the forecast from the run of {_day(initialization)}")
         run = self._forecasts().run(
             ForecastRunRequest(
                 initialization=initialization, source="ecmwf_opendata", actor=body.actor
             )
         )
-        self._log(operation_id, f"Forecast {run['forecast_id']} published ({run['method']})")
+        self._log(
+            operation_id,
+            f"Forecast for {_day(run['valid_start'])} to "
+            f"{_day(date.fromisoformat(run['valid_end'][:10]) - timedelta(days=1))} published",
+        )
         return {"forecast_id": run["forecast_id"], "method": run["method"]}
 
     def _verify_due(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
@@ -150,7 +163,7 @@ class OperationService:
 
     def _verify_forecast(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
         forecast_id = str(body.forecast_id)
-        self._log(operation_id, f"Downloading CHIRPS for {forecast_id}")
+        self._log(operation_id, "Downloading CHIRPS for the forecast's week")
         result = self._forecasts().verify_with_chirps(forecast_id, body.actor)
         return {"forecast_id": forecast_id, "season": result["season"]}
 
@@ -177,8 +190,7 @@ class OperationService:
         if existing:
             self._log(
                 operation_id,
-                f"Forecast {existing[0]['forecast_id']} already exists for "
-                f"{initialization.isoformat()}",
+                f"The forecast from the run of {_day(initialization)} was already issued",
             )
             result["forecast_id"] = existing[0]["forecast_id"]
         else:
