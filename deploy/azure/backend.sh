@@ -23,7 +23,10 @@
 #   DATABASE_URL  PostgreSQL connection string, e.g. Supabase's (paste it as Supabase shows
 #                 it, with your password). Without it the database lives inside the
 #                 container and is emptied whenever the app restarts or scales to zero.
-#   IMAGE         Container image (default ghcr.io/joe254h/icpac-backend:latest).
+#   IMAGE         Container image. By default the newest published backend image, named by its
+#                 digest (ghcr.io/joe254h/icpac-backend@sha256:...), so Azure always pulls
+#                 exactly that build: with a moving tag such as :latest it can keep running
+#                 an image it pulled earlier.
 #   CPU, MEMORY   Container size (default 2 and 4Gi; a full-grid forecast needs about 1 GB).
 #   GROUP, APP, ENVIRONMENT  Resource names (defaults icpac, icpac-api, icpac-env).
 #   ANTHROPIC_API_KEY  Optional: the Copilot answers with Claude (Anthropic API) from the
@@ -42,7 +45,8 @@ LOCATION=${LOCATION:-southafricanorth}
 GROUP=${GROUP:-icpac}
 APP=${APP:-icpac-api}
 ENVIRONMENT=${ENVIRONMENT:-icpac-env}
-IMAGE=${IMAGE:-ghcr.io/joe254h/icpac-backend:latest}
+IMAGE=${IMAGE:-}
+EXPECTED=""
 DATABASE_URL=${DATABASE_URL:-}
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   # Claude replaces every earlier Copilot setting (see docs/chatbot.md).
@@ -81,6 +85,49 @@ MEMORY=${MEMORY:-4Gi}
 PACKAGES=forecast-packages
 
 step() { printf '\n==> %s\n' "$*"; }
+
+if [ -z "$IMAGE" ]; then
+  step "Newest backend image"
+  # The digest of :latest and the commit it was built from (the image's other tag).
+  RESOLVED=$(python3 - ghcr.io/joe254h/icpac-backend <<'PY'
+import json, sys, urllib.request
+
+image = sys.argv[1]
+repo = image.split("/", 1)[1]
+token = json.load(
+    urllib.request.urlopen(f"https://ghcr.io/token?scope=repository:{repo}:pull", timeout=30)
+)["token"]
+auth = {"Authorization": f"Bearer {token}"}
+accept = ", ".join(
+    [
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    ]
+)
+
+
+def digest(tag):
+    request = urllib.request.Request(
+        f"https://ghcr.io/v2/{repo}/manifests/{tag}",
+        method="HEAD",
+        headers={**auth, "Accept": accept},
+    )
+    return urllib.request.urlopen(request, timeout=30).headers["Docker-Content-Digest"]
+
+
+latest = digest("latest")
+request = urllib.request.Request(f"https://ghcr.io/v2/{repo}/tags/list?n=1000", headers=auth)
+tags = json.load(urllib.request.urlopen(request, timeout=30))["tags"]
+commit = next((t for t in tags if len(t) == 40 and digest(t) == latest), "")
+print(f"{image}@{latest} {commit}")
+PY
+  ) || { echo "Could not read the newest backend image from ghcr.io; set IMAGE to deploy one"; exit 1; }
+  IMAGE=${RESOLVED% *}
+  EXPECTED=${RESOLVED#* }
+  echo "Deploying the build of commit ${EXPECTED:0:7} ($IMAGE)"
+fi
 
 step "Subscription"
 az account show --query "{subscription:name, user:user.name}" --output table
@@ -259,15 +306,22 @@ FQDN=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
 REVISION=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
   --query properties.latestRevisionName --output tsv)
 
-# The previous revision keeps answering until the new one is ready, so wait for Azure to
-# report the new revision ready before reading the health of the API.
-step "Waiting for the new revision $REVISION (pulls the image, verifies artifacts, loads the model)"
+# The previous version keeps answering until the new one is ready. With a known commit,
+# wait until the API itself reports it; otherwise wait for Azure to report the revision.
+step "Waiting for the new version (pulls the image, verifies artifacts, loads the model)"
+VERSION=""
 READY=""
 for _ in $(seq 1 60); do
-  curl -fsS --max-time 20 "https://$FQDN/health" > /dev/null 2>&1 || true
-  READY=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
-    --query properties.latestReadyRevisionName --output tsv 2>/dev/null || true)
-  [ "$READY" = "$REVISION" ] && break
+  VERSION=$(curl -fsS --max-time 20 "https://$FQDN/health" 2>/dev/null \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin).get("version", ""))' 2>/dev/null \
+    || true)
+  if [ -n "$EXPECTED" ]; then
+    [ "$VERSION" = "$EXPECTED" ] && break
+  else
+    READY=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
+      --query properties.latestReadyRevisionName --output tsv 2>/dev/null || true)
+    [ "$READY" = "$REVISION" ] && break
+  fi
   RUNNING=$(az containerapp revision show --name "$APP" --resource-group "$GROUP" \
     --revision "$REVISION" --query properties.runningState --output tsv 2>/dev/null || true)
   if [ "$RUNNING" = "Failed" ]; then
@@ -275,10 +329,16 @@ for _ in $(seq 1 60); do
   fi
   sleep 10
 done
-if [ "$READY" != "$REVISION" ]; then
-  echo "The new revision $REVISION is not ready; the previous version may still be answering."
-  az containerapp revision list --name "$APP" --resource-group "$GROUP" --output table || true
-  echo "Its startup log: az containerapp logs show -n $APP -g $GROUP --revision $REVISION --tail 80"
+if { [ -n "$EXPECTED" ] && [ "$VERSION" != "$EXPECTED" ]; } \
+  || { [ -z "$EXPECTED" ] && [ "$READY" != "$REVISION" ]; }; then
+  echo "The new version is not answering yet; the previous version may still be answering."
+  az containerapp revision list --name "$APP" --resource-group "$GROUP" \
+    --query "[].{name:name, image:properties.template.containers[0].image, running:properties.runningState, health:properties.healthState}" \
+    --output table || true
+  echo "Why it did not start:"
+  az containerapp logs show --name "$APP" --resource-group "$GROUP" --type system --tail 20 \
+    2>/dev/null || true
+  echo "Its own log: az containerapp logs show -n $APP -g $GROUP --tail 80"
 fi
 curl -fsS --max-time 60 "https://$FQDN/health" | python3 -c '
 import json, sys
