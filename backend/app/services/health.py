@@ -4,9 +4,11 @@ import os
 import shutil
 from datetime import date
 
+import anthropic
 import httpx
 
 from backend.app.services import forecasts, operational
+from chatbot.agent import AnthropicModel
 from chatbot.providers import MockLLMProvider, provider, provider_name
 from climate_engine.core import ROOT, config
 from climate_engine.provenance import code_version
@@ -84,16 +86,9 @@ def system_health(platform) -> dict:
     try:
         llm = provider()
         if provider_name() == "anthropic":
-            key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("LLM_API_KEY")
-            if not key:
-                raise ValueError("no Anthropic key")
-            base = (os.getenv("LLM_BASE_URL") or "https://api.anthropic.com").rstrip("/")
-            response = httpx.get(
-                base.removesuffix("/v1") + "/v1/models",
-                headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
-                timeout=3,
-            )
-            response.raise_for_status()
+            claude = AnthropicModel()  # ValueError without a key
+            # The key works and the model exists.
+            claude.client.with_options(timeout=3, max_retries=0).models.retrieve(claude.model)
             components["Copilot language model"] = "Healthy · Claude reachable"
         elif isinstance(llm, MockLLMProvider):
             components["Copilot language model"] = (
@@ -108,7 +103,7 @@ def system_health(platform) -> dict:
             )
             response.raise_for_status()
             components["Copilot language model"] = "Healthy · endpoint reachable"
-    except (httpx.HTTPError, ValueError):
+    except (anthropic.APIError, httpx.HTTPError, ValueError):
         components["Copilot language model"] = (
             "Unavailable · not reachable: the Copilot gives checked fixed answers"
         )

@@ -5,7 +5,9 @@ import json
 from json import loads
 from typing import Any
 
+import anthropic
 import httpx
+import httpx2
 import pytest
 
 from backend.app.schemas import ChatRequest
@@ -17,19 +19,42 @@ from chatbot.service import Copilot
 
 
 class FakeClaude:
-    """Anthropic's Messages API, scripted: ``script`` turns the request into the reply."""
+    """Anthropic's Messages API, scripted: ``script`` turns the request into the reply's
+    content blocks, or into ``{"content": [...], "stop_reason": ...}``."""
 
     def __init__(self, script):
         self.script = script
         self.requests: list[dict[str, Any]] = []
 
-    def __call__(self, url: str, headers: dict, timeout: float, json: dict) -> httpx.Response:
-        assert url == "https://api.anthropic.com/v1/messages"
-        assert headers["x-api-key"] == "test-key" and headers["anthropic-version"]
-        self.requests.append(json)
-        return httpx.Response(
-            200, json={"content": self.script(json)}, request=httpx.Request("POST", url)
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        assert str(request.url).startswith("https://api.anthropic.com/v1/messages")
+        assert request.headers["x-api-key"] == "test-key"
+        assert "server-side-fallback-2026-07-01" in request.headers["anthropic-beta"]
+        body = json.loads(request.content)
+        self.requests.append(body)
+        reply = self.script(body)
+        content = reply["content"] if isinstance(reply, dict) else reply
+        calls = any(block["type"] == "tool_use" for block in content)
+        stop = reply.get("stop_reason") if isinstance(reply, dict) else None
+        return httpx2.Response(
+            200,
+            json={
+                "id": f"msg_{len(self.requests)}",
+                "type": "message",
+                "role": "assistant",
+                "model": body["model"],
+                "content": content,
+                "stop_reason": stop or ("tool_use" if calls else "end_turn"),
+                "stop_sequence": None,
+                "usage": {"input_tokens": 100, "output_tokens": 20},
+            },
         )
+
+
+def scripted(monkeypatch, handler) -> None:
+    """Put ``handler`` behind the Copilot's Claude client."""
+    transport = httpx2.MockTransport(handler)
+    monkeypatch.setattr(agent, "HTTP_CLIENT", anthropic.DefaultHttpxClient(transport=transport))
 
 
 def tool_results(request: dict) -> list[dict]:
@@ -50,7 +75,7 @@ def claude(monkeypatch):
 
     def install(script):
         fake = FakeClaude(script)
-        monkeypatch.setattr(agent.httpx, "post", fake)
+        scripted(monkeypatch, fake)
         return fake
 
     return install
@@ -204,12 +229,69 @@ def test_an_unreachable_or_unconfigured_model_falls_back(env, fast_maps, monkeyp
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
-    def offline(*args, **kwargs):
-        raise httpx.ConnectError("offline")
+    def offline(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("offline", request=request)
 
-    monkeypatch.setattr(agent.httpx, "post", offline)
+    scripted(monkeypatch, offline)
     answer = Copilot(env.platform).answer(ChatRequest(message="Forecast for Kenya"))
     assert "could not answer" in answer["fallback"] and "Kenya" in answer["text"]
+
+
+def test_claude_s_turns_go_back_unchanged_with_room_to_think(env, fast_maps, claude):
+    """Current Claude models think before answering: the thinking counts towards
+    max_tokens, and within one answer the thinking blocks go back as they came."""
+    run(env)
+    thinking = {"type": "thinking", "thinking": "", "signature": "sig-1"}
+
+    def script(request: dict) -> list[dict]:
+        results = tool_results(request)
+        if not results:
+            return [
+                thinking,
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "get_country_forecast",
+                    "input": {"country": "Kenya"},
+                },
+            ]
+        return [{"type": "text", "text": "Kenya's forecast is ready."}]
+
+    fake = claude(script)
+    answer = Copilot(env.platform).answer(ChatRequest(message="How wet will Kenya be?"))
+    assert answer["fallback"] is None
+    first, second = fake.requests
+    assert first["max_tokens"] >= 16000 and first["output_config"] == {"effort": "low"}
+    assert first["fallbacks"] == "default" and first["cache_control"] == {"type": "ephemeral"}
+    assert "thinking" not in first and "tool_choice" not in first and "temperature" not in first
+    replayed = second["messages"][-2]
+    assert replayed["role"] == "assistant" and replayed["content"][0] == thinking
+    assert replayed["content"][1]["id"] == "toolu_1"
+    # Append-only: the earlier part of the conversation is sent again unchanged.
+    assert second["messages"][: len(first["messages"])] == first["messages"]
+    assert second["system"] == first["system"] and second["tools"] == first["tools"]
+
+
+def test_a_declined_or_cut_off_answer_falls_back(env, fast_maps, claude):
+    run(env)
+    for stop in ("refusal", "max_tokens"):
+        claude(lambda request, stop=stop: {"content": [], "stop_reason": stop})
+        answer = Copilot(env.platform).answer(ChatRequest(message="Forecast for Kenya"))
+        assert "could not answer" in answer["fallback"] and "Kenya" in answer["text"]
+
+
+def test_an_earlier_groq_or_qwen_setting_is_not_used_for_claude(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_MODEL", "qwen/qwen3-32b")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    claude = agent.AnthropicModel()
+    assert claude.model == "claude-opus-5-5"
+    assert str(claude.client.base_url).startswith("https://api.anthropic.com")
+    monkeypatch.setenv("LLM_MODEL", "claude-sonnet-5-5")
+    monkeypatch.setenv("LLM_EFFORT", "medium")
+    claude = agent.AnthropicModel()
+    assert claude.model == "claude-sonnet-5-5" and claude.effort == "medium"
 
 
 def test_figures_are_checked_to_the_precision_written():

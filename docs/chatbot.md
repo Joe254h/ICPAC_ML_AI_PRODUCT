@@ -29,8 +29,11 @@ GET /chat/sessions lists titles, updated dates and contexts; GET /chat/sessions/
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...      # or LLM_API_KEY
 LLM_MODEL=claude-opus-5-5         # default; claude-sonnet-5-5 costs less
+LLM_EFFORT=low                    # default; medium or high think longer (slower, dearer)
 LLM_TIMEOUT_SECONDS=60
 ```
+
+The Copilot calls Claude through Anthropic's official Python SDK (`anthropic`). Current Claude models think before they answer; the thinking counts towards the 16,000-token output limit, and within one answer Claude's turns (thinking included) go back to it unchanged while it calls tools. The system prompt and tools are cached between calls, which lowers the cost of every question after the first. A request Claude's safeguards decline is re-run on the model Anthropic recommends (server-side fallback); a declined or cut-off answer falls back to the checked fixed sentences. `LLM_MODEL` is used only when it names a Claude model, and `LLM_BASE_URL` is ignored for Claude, so an earlier Groq or Qwen setting left on the server does no harm (a proxy for Claude is set with `ANTHROPIC_BASE_URL`).
 
 On Azure, `ANTHROPIC_API_KEY=... bash deploy/azure/backend.sh` stores the key as a Container Apps secret and sets the rest (`CLAUDE_MODEL` picks another model). Claude is the default because it calls tools reliably and answers general climate questions well; the grounding check above holds whichever model is used. Questions and tool results are sent to Anthropic's API; nothing else is.
 

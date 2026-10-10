@@ -20,9 +20,16 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, cast
 
+import anthropic
 import httpx
+from anthropic.types.beta import (
+    BetaOutputConfigParam,
+    BetaTextBlock,
+    BetaToolParam,
+    BetaToolUseBlock,
+)
 
 from backend.app.services.forecasts import ForecastService
 from climate_engine.core import config
@@ -630,6 +637,9 @@ class Call:
 class Reply:
     text: str
     calls: list[Call]
+    #: The response's content blocks as the provider returned them (thinking included),
+    #: sent back unchanged while the same answer continues.
+    raw: list[Any] = field(default_factory=list)
 
 
 class ChatModel(Protocol):
@@ -642,37 +652,44 @@ def _timeout() -> float:
     return float(os.getenv("LLM_TIMEOUT_SECONDS") or 60)
 
 
+#: The HTTP client for Claude; the tests put a scripted Claude behind it.
+HTTP_CLIENT: Any = None
+
+
 class AnthropicModel:
-    """Claude through Anthropic's Messages API."""
+    """Claude through Anthropic's Messages API (the official SDK).
+
+    Current Claude models think before they answer, and the thinking counts towards
+    ``max_tokens``; while one answer goes on through tool calls, Claude's own turns go back
+    exactly as it wrote them, thinking blocks included. ``LLM_EFFORT`` (default ``low``, for
+    quick answers) sets how much it thinks. A request Claude's safeguards decline is re-run on
+    the model Anthropic recommends (server-side fallback); a declined or cut-off answer falls
+    back to the checked fixed sentences.
+    """
 
     def __init__(self) -> None:
-        self.key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("LLM_API_KEY")
-        if not self.key:
+        key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("LLM_API_KEY")
+        if not key:
             raise ValueError("ANTHROPIC_API_KEY is not set")
-        self.model = os.getenv("LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
-        self.base = (os.getenv("LLM_BASE_URL") or "https://api.anthropic.com").rstrip("/")
-        if self.base.endswith("/v1"):
-            self.base = self.base[:-3]
+        # LLM_MODEL and LLM_BASE_URL may still hold an earlier Groq or Qwen setting; only a
+        # Claude model is used, and a proxy is set with ANTHROPIC_BASE_URL (read by the SDK).
+        model = os.getenv("LLM_MODEL") or ""
+        self.model = model if model.startswith("claude") else DEFAULT_ANTHROPIC_MODEL
+        self.effort = cast(
+            Literal["low", "medium", "high", "xhigh", "max"], os.getenv("LLM_EFFORT") or "low"
+        )
+        self.client = anthropic.Anthropic(
+            api_key=key, timeout=_timeout(), max_retries=1, http_client=HTTP_CLIENT
+        )
         self.label = "Claude"
 
     def respond(self, system: str, transcript: list[dict], tools: list[dict]) -> Reply:
-        messages: list[dict[str, Any]] = []
+        messages: list[Any] = []
         for turn in transcript:
             if turn["role"] == "user":
                 messages.append({"role": "user", "content": turn["text"]})
             elif turn["role"] == "assistant":
-                content: list[dict[str, Any]] = []
-                if turn.get("text"):
-                    content.append({"type": "text", "text": turn["text"]})
-                for call in turn.get("calls", []):
-                    content.append(
-                        {
-                            "type": "tool_use",
-                            "id": call.id,
-                            "name": call.name,
-                            "input": call.arguments,
-                        }
-                    )
+                content: list[Any] = turn.get("raw") or [{"type": "text", "text": turn["text"]}]
                 messages.append({"role": "assistant", "content": content})
             else:
                 messages.append(
@@ -688,38 +705,33 @@ class AnthropicModel:
                         ],
                     }
                 )
-        response = httpx.post(
-            self.base + "/v1/messages",
-            headers={
-                "x-api-key": str(self.key),
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            timeout=_timeout(),
-            json={
-                "model": self.model,
-                "max_tokens": 1500,
-                "system": system,
-                "messages": messages,
-                "tools": [
-                    {
-                        "name": t["name"],
-                        "description": t["description"],
-                        "input_schema": t["parameters"],
-                    }
-                    for t in tools
-                ],
-            },
-        )
-        response.raise_for_status()
-        blocks = response.json()["content"]
-        text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
-        calls = [
-            Call(b["id"], b["name"], b.get("input") or {})
-            for b in blocks
-            if b.get("type") == "tool_use"
+        tool_params: list[BetaToolParam] = [
+            {"name": t["name"], "description": t["description"], "input_schema": t["parameters"]}
+            for t in tools
         ]
-        return Reply(text, calls)
+        output_config: BetaOutputConfigParam = {"effort": self.effort}
+        response = self.client.beta.messages.create(
+            model=self.model,
+            max_tokens=16000,
+            system=system,
+            messages=messages,
+            tools=tool_params,
+            output_config=output_config,
+            cache_control={"type": "ephemeral"},
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+        )
+        if response.stop_reason == "refusal":
+            raise ValueError("Claude declined to answer")
+        if response.stop_reason == "max_tokens":
+            raise ValueError("Claude's answer was cut off")
+        text = "".join(b.text for b in response.content if isinstance(b, BetaTextBlock))
+        calls = [
+            Call(b.id, b.name, dict(b.input or {}))
+            for b in response.content
+            if isinstance(b, BetaToolUseBlock)
+        ]
+        return Reply(text, calls, list(response.content))
 
 
 class OpenAIToolsModel:
@@ -821,7 +833,9 @@ def answer(
         reply = model.respond(SYSTEM, transcript, TOOLS)
         if not reply.calls:
             break
-        transcript.append({"role": "assistant", "text": reply.text, "calls": reply.calls})
+        transcript.append(
+            {"role": "assistant", "text": reply.text, "calls": reply.calls, "raw": reply.raw}
+        )
         results = [
             {
                 "id": call.id,

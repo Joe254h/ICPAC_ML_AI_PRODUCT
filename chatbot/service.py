@@ -8,6 +8,7 @@ with checked, fixed sentences from the forecast package.
 
 import json
 
+import anthropic
 import httpx
 
 from backend.app.db import now
@@ -91,7 +92,14 @@ class Copilot:
                     "The language model quoted a figure that is not in the forecast, so the "
                     "checked answer is shown instead."
                 )
-            except (httpx.HTTPError, ValueError, KeyError, TypeError, IndexError) as exc:
+            except (
+                anthropic.APIError,
+                httpx.HTTPError,
+                ValueError,
+                KeyError,
+                TypeError,
+                IndexError,
+            ) as exc:
                 fallback = (
                     "The language model could not answer just now, so the checked answer is "
                     f"shown instead ({type(exc).__name__})."
