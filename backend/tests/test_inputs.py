@@ -16,9 +16,10 @@ from backend.tests import ecmwf_mirror
 from backend.tests.test_forecasts import env as env
 from backend.tests.test_forecasts import fast_maps as fast_maps
 from backend.tests.test_forecasts import run
-from backend.tests.tiny import LAT, LON, MASK
+from backend.tests.tiny import LAT, LON, MASK, STEPS
+from climate_engine.forecasts.ecmwf_s2s import ECMWFS2SForecastProvider
 from climate_engine.inputs import chirps, ecmwf_opendata
-from climate_engine.operational.ecmwf import coarsen
+from climate_engine.operational.ecmwf import ATMOSPHERIC_VARIABLES, atmospheric_features, coarsen
 
 
 def wait(client, operation: dict, seconds: float = 120) -> dict:
@@ -55,6 +56,53 @@ def test_open_data_download_keeps_perturbed_tp_members(mirror, tmp_path):
     assert ecmwf_opendata.is_published(date(2026, 10, 5), mirror)
     assert not ecmwf_opendata.is_published(date(2026, 10, 6), mirror)
     assert ecmwf_opendata.latest_initialization(date(2026, 10, 7)) == date(2026, 10, 5)
+
+
+def test_upper_air_predictors_download_checked_and_averaged(env, tmp_path, monkeypatch):
+    """The AI/ML model's upper-air fields: only the needed parameters and levels, every
+    member at the seven forecast hours, on the training grid, ready for the features."""
+    root = tmp_path / "pl-mirror"
+    ecmwf_mirror.build(root, date(2026, 10, 5), pressure_steps=STEPS)
+    with ecmwf_mirror.serve(root) as url:
+        monkeypatch.setenv("ECMWF_OPENDATA_MIRRORS", url)
+        rain = ecmwf_opendata.fetch(date(2026, 10, 5), tmp_path / "in")
+        progress: list[str] = []
+        result = ecmwf_opendata.fetch_pressure(
+            date(2026, 10, 5), tmp_path / "in", STEPS, progress=progress.append
+        )
+        with pytest.raises(ValueError, match="seven"):
+            ecmwf_opendata.fetch_pressure(date(2026, 10, 5), tmp_path / "in", STEPS[:6])
+        with pytest.raises(ecmwf_opendata.ECMWFDataUnavailable):
+            ecmwf_opendata.fetch_pressure(date(2026, 10, 4), tmp_path / "in", STEPS)
+    assert result.path.name == "ecmwf_s2s_pl_2026-10-05.nc" and result.members == 3
+    assert progress[0] == "Upper-air fields: forecast hour 168 (1 of 7)" and len(progress) == 7
+    with xr.open_dataset(result.path) as data:
+        assert list(data["number"].values) == [1, 2, 3]
+        assert list(data["isobaricInhPa"].values) == [850, 700, 500, 200]
+        assert data["q"].attrs["units"] == "kg kg**-1" and data["gh"].attrs["units"] == "gpm"
+        assert np.isfinite(data["q"].sel(isobaricInhPa=[850, 700]).values).all()
+        assert np.isnan(data["q"].sel(isobaricInhPa=500).values).all()  # not used, not kept
+        assert data.attrs["averaged_to_degrees"] == "1.5"
+    # The pipeline reads the file like an HPC input and builds the 30 upper-air features.
+    provider = ECMWFS2SForecastProvider(rain.path, result.path, env.cfg)
+    pressure = provider.load_pressure("2026-10-05")
+    assert pressure is not None
+    features = atmospheric_features(pressure, env.grid, env.cfg)
+    assert len(features) == 2 * len(ATMOSPHERIC_VARIABLES)
+    assert all(np.isfinite(values).all() for values in features.values())
+    assert 0.006 < float(features["q850_mean"].mean()) < 0.01
+
+
+def test_implausible_upper_air_values_stop_the_download(tmp_path, monkeypatch):
+    root = tmp_path / "pl-mirror"
+    ecmwf_mirror.build(root, date(2026, 10, 5), pressure_steps=STEPS)
+    # Humidity in g/kg instead of kg/kg would look like this: refused, never used.
+    monkeypatch.setitem(ecmwf_opendata.PRESSURE_GRIB, "q", ("kg kg**-1", (0.0, 0.001)))
+    with ecmwf_mirror.serve(root) as url:
+        monkeypatch.setenv("ECMWF_OPENDATA_MIRRORS", url)
+        with pytest.raises(ValueError, match="outside the plausible"):
+            ecmwf_opendata.fetch_pressure(date(2026, 10, 5), tmp_path / "in", STEPS)
+    assert not (tmp_path / "in" / "ecmwf_s2s_pl_2026-10-05.nc").exists()
 
 
 def test_averaging_to_the_training_grid_preserves_the_mean():

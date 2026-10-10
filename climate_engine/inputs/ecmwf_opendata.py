@@ -8,6 +8,14 @@ global 0.25 degree fields are cropped to Eastern Africa and written as the docum
 forecast input ``ecmwf_s2s_tp_<date>.nc`` (docs/forecast_input_format.md), which the
 operational pipeline reads like any other ECMWF input.
 
+The AI/ML model's upper-air predictors come from the same run: specific humidity, winds,
+temperature and geopotential height at the pressure levels it was trained on (q at 850 and
+700 hPa, u and v at 850 and 200 hPa, t at 850 and 500 hPa, gh at 500 hPa), for the seven
+Week-2 forecast hours of the training definition, 50 perturbed members. Only those fields
+are downloaded, one forecast hour and parameter at a time so the disk holds little at once;
+each is checked, kept only when its values are physically plausible, averaged to the 1.5
+degree grid of the training forecasts and written as ``ecmwf_s2s_pl_<date>.nc``.
+
 Nothing is assumed about the GRIB grid: its origin, increments and scanning order are
 read from every message, and every message is checked (parameter, date, run, member,
 step, units) before it is used.
@@ -25,8 +33,19 @@ import numpy as np
 import xarray as xr
 
 from climate_engine.core import config
+from climate_engine.operational.ecmwf import PRESSURE_INPUTS, coarsen
 
 STEPS_HOURS = (168, 336)
+
+#: Units of each upper-air field as ECMWF writes them, and the range its values must lie in
+#: over Eastern Africa: anything outside means a wrong parameter, level or unit.
+PRESSURE_GRIB: dict[str, tuple[str, tuple[float, float]]] = {
+    "q": ("kg kg**-1", (0.0, 0.05)),
+    "u": ("m s**-1", (-150.0, 150.0)),
+    "v": ("m s**-1", (-150.0, 150.0)),
+    "t": ("K", (170.0, 330.0)),
+    "gh": ("gpm", (4000.0, 7000.0)),
+}
 
 
 class ECMWFDataUnavailable(LookupError):
@@ -241,8 +260,8 @@ def to_dataset(messages: list[Message], initialization: date, metadata: dict) ->
     )
 
 
-def file_name(initialization: date) -> str:
-    return f"ecmwf_s2s_tp_{initialization.isoformat()}.nc"
+def file_name(initialization: date, kind: str = "tp") -> str:
+    return f"ecmwf_s2s_{kind}_{initialization.isoformat()}.nc"
 
 
 def _sha256(path: Path) -> str:
@@ -297,13 +316,262 @@ def fetch(initialization: date, directory: Path) -> FetchResult:
     )
 
 
+# ---------------------------------------------------------------------- upper air
+
+
+@dataclass
+class Field:
+    name: str
+    level: int
+    number: int
+    step: int
+    values: np.ndarray  # (latitude, longitude) on the cropped area
+    latitude: np.ndarray
+    longitude: np.ndarray
+
+
+def pressure_request(initialization: date, name: str, levels: tuple[int, ...], step: int):
+    cfg = settings()
+    return {
+        "date": initialization.strftime("%Y%m%d"),
+        "time": int(cfg["run_hour"]),
+        "stream": cfg["stream"],
+        "type": cfg["type"],
+        "param": name,
+        "levtype": "pl",
+        "levelist": [str(level) for level in levels],
+        "step": step,
+    }
+
+
+def decode_pressure(
+    path: Path,
+    initialization: date,
+    name: str,
+    levels: tuple[int, ...],
+    step: int,
+    area: dict | None = None,
+) -> list[Field]:
+    """Every message of one upper-air parameter and forecast hour, checked and cropped."""
+    import eccodes as codes
+
+    area = area or settings()["area"]
+    units, (low, high) = PRESSURE_GRIB[name]
+    expected_date = int(initialization.strftime("%Y%m%d"))
+    run_hour = int(settings()["run_hour"])
+    fields: list[Field] = []
+    with path.open("rb") as stream:
+        while (gid := codes.codes_grib_new_from_file(stream)) is not None:
+            try:
+                short_name = codes.codes_get(gid, "shortName")
+                if short_name != name:
+                    raise ValueError(f"Unexpected parameter {short_name!r}, expected {name!r}")
+                if codes.codes_get(gid, "typeOfLevel") != "isobaricInhPa":
+                    raise ValueError(f"{name} is not on pressure levels")
+                level = int(codes.codes_get(gid, "level"))
+                if level not in levels:
+                    raise ValueError(f"{name} at {level} hPa was not requested")
+                if codes.codes_get(gid, "dataDate") != expected_date:
+                    raise ValueError(
+                        f"Message for {codes.codes_get(gid, 'dataDate')}, expected {expected_date}"
+                    )
+                if codes.codes_get(gid, "dataTime") != run_hour * 100:
+                    raise ValueError("Message from another run hour")
+                if codes.codes_get(gid, "dataType") != "pf":
+                    raise ValueError("Only perturbed members are used")
+                if int(codes.codes_get(gid, "endStep")) != step:
+                    raise ValueError(f"{name} message for another forecast hour")
+                if codes.codes_get(gid, "units") != units:
+                    raise ValueError(
+                        f"{name} in {codes.codes_get(gid, 'units')!r}, expected {units!r}"
+                    )
+                number = int(codes.codes_get(gid, "number"))
+                latitude, longitude = _grid_axes(codes, gid)
+                values = codes.codes_get_values(gid).astype(np.float64)
+                if codes.codes_get(gid, "bitmapPresent"):
+                    values[values == codes.codes_get(gid, "missingValue")] = np.nan
+                values = values.reshape(latitude.size, longitude.size)
+                cropped, lat, lon = _crop(values, latitude, longitude, area)
+                if not np.isfinite(cropped).all():
+                    raise ValueError(f"Missing values in {name}{level} member {number}")
+                if cropped.min() < low or cropped.max() > high:
+                    raise ValueError(
+                        f"{name}{level} member {number} at {step} h has values from "
+                        f"{cropped.min():.4g} to {cropped.max():.4g} {units}, outside the "
+                        f"plausible {low:g} to {high:g}"
+                    )
+                fields.append(Field(name, level, number, step, cropped, lat, lon))
+            finally:
+                codes.codes_release(gid)
+    return fields
+
+
+def pressure_dataset(
+    fields: dict[tuple[str, int, int, int], np.ndarray],
+    latitude: np.ndarray,
+    longitude: np.ndarray,
+    steps: list[int],
+    initialization: date,
+    metadata: dict,
+) -> xr.Dataset:
+    """q, u, v, t, gh on (number, step, isobaricInhPa, latitude, longitude), after checking
+    that every member has every field at every forecast hour."""
+    members = sorted({number for (_, _, number, _) in fields})
+    if len(members) < 2:
+        raise ValueError("At least two perturbed members are needed")
+    levels = sorted(
+        {level for levels in PRESSURE_INPUTS.values() for level in levels}, reverse=True
+    )
+    variables = {}
+    for name, needed in PRESSURE_INPUTS.items():
+        # One level axis serves every variable; levels a variable is not used at stay empty.
+        data = np.full(
+            (len(members), len(steps), len(levels), latitude.size, longitude.size),
+            np.nan,
+            dtype=np.float32,
+        )
+        for i, number in enumerate(members):
+            for j, step in enumerate(steps):
+                for level in needed:
+                    values = fields.get((name, level, number, step))
+                    if values is None:
+                        raise ValueError(f"Member {number} lacks {name}{level} at {step} h")
+                    data[i, j, levels.index(level)] = values
+        variables[name] = (
+            ("number", "step", "isobaricInhPa", "latitude", "longitude"),
+            data,
+            {"units": PRESSURE_GRIB[name][0], "levels_used": ",".join(map(str, needed))},
+        )
+    return xr.Dataset(
+        variables,
+        coords={
+            "number": np.asarray(members, dtype=np.int32),
+            "step": np.asarray(steps, dtype="timedelta64[h]").astype("timedelta64[ns]"),
+            "isobaricInhPa": np.asarray(levels, dtype=np.int32),
+            "latitude": latitude.astype(np.float64),
+            "longitude": longitude.astype(np.float64),
+        },
+        attrs={
+            "initialization": initialization.isoformat(),
+            "source": "ECMWF Open Data, IFS ensemble (ENS) 00 UTC, perturbed members",
+            "licence": settings()["licence"],
+            **{k: str(v) for k, v in metadata.items()},
+        },
+    )
+
+
+def fetch_pressure(
+    initialization: date,
+    directory: Path,
+    steps: list[int],
+    degrees: float | None = 1.5,
+    progress=None,
+) -> FetchResult:
+    """Download, check and write the upper-air predictors of one initialization.
+
+    ``steps`` are the seven Week-2 forecast hours of the training definition. Each field is
+    averaged to the ``degrees`` grid of the training forecasts (ECMWF S2S, 1.5 degrees)
+    before it is kept. Mirrors are tried in order; the file is written atomically.
+    """
+    if len(steps) != 7:
+        raise ValueError("The upper-air predictors need exactly seven forecast hours")
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    failures = []
+    for mirror in mirrors():
+        digest, size, urls = hashlib.sha256(), 0, []
+        kept: dict[tuple[str, int, int, int], np.ndarray] = {}
+        axes: tuple[np.ndarray, np.ndarray] | None = None
+        unavailable = None
+        for position, step in enumerate(steps, start=1):
+            if progress:
+                progress(f"Upper-air fields: forecast hour {step} ({position} of 7)")
+            for name, levels in PRESSURE_INPUTS.items():
+                with tempfile.TemporaryDirectory(prefix="ecmwf-pl-") as scratch:
+                    grib = Path(scratch) / f"{name}.grib2"
+                    try:
+                        result = client(mirror).retrieve(
+                            target=str(grib), **pressure_request(initialization, name, levels, step)
+                        )
+                    except Exception as exc:  # network errors and "no index entries" alike
+                        unavailable = f"{mirror}: {name} at {step} h: {type(exc).__name__}: {exc}"
+                        break
+                    urls += [str(u[0] if isinstance(u, tuple) else u) for u in result.urls]
+                    with grib.open("rb") as stream:
+                        for block in iter(lambda: stream.read(1 << 20), b""):
+                            digest.update(block)
+                            size += len(block)
+                    # A field that fails its checks stops the download: bad data are not
+                    # worked around by trying another mirror.
+                    for field_ in decode_pressure(grib, initialization, name, levels, step):
+                        da = xr.DataArray(
+                            field_.values,
+                            dims=("latitude", "longitude"),
+                            coords={"latitude": field_.latitude, "longitude": field_.longitude},
+                        )
+                        if degrees:
+                            da = coarsen(da, degrees)
+                        lat, lon = da["latitude"].values, da["longitude"].values
+                        if axes is None:
+                            axes = (lat, lon)
+                        elif not (np.array_equal(axes[0], lat) and np.array_equal(axes[1], lon)):
+                            raise ValueError("Upper-air messages are on different grids")
+                        key = (field_.name, field_.level, field_.number, field_.step)
+                        if key in kept:
+                            raise ValueError(f"Duplicate message {key}")
+                        kept[key] = da.values.astype(np.float32)
+            if unavailable:
+                break
+        if unavailable:
+            failures.append(unavailable)
+            continue
+        if axes is None:
+            failures.append(f"{mirror}: no upper-air message")
+            continue
+        sha256 = digest.hexdigest()
+        dataset = pressure_dataset(
+            kept,
+            axes[0],
+            axes[1],
+            list(steps),
+            initialization,
+            {
+                "mirror": mirror,
+                "grib_sha256": sha256,
+                "averaged_to_degrees": degrees or "none",
+            },
+        )
+        target = directory / file_name(initialization, "pl")
+        partial = target.with_name(f".{target.name}.partial")
+        dataset.to_netcdf(partial)
+        partial.replace(target)
+        return FetchResult(
+            initialization,
+            target,
+            mirror,
+            int(dataset.sizes["number"]),
+            list(steps),
+            sha256,
+            size,
+            sorted(set(urls)),
+        )
+    raise ECMWFDataUnavailable(
+        f"The upper-air fields of the ECMWF ensemble run {initialization.isoformat()} 00 UTC "
+        "are not available: " + "; ".join(failures)
+    )
+
+
 __all__ = [
     "ECMWFDataUnavailable",
     "FetchResult",
+    "PRESSURE_GRIB",
     "decode",
+    "decode_pressure",
     "fetch",
+    "fetch_pressure",
     "file_name",
     "is_published",
     "latest_initialization",
+    "pressure_dataset",
     "to_dataset",
 ]

@@ -61,38 +61,113 @@ def message(codes, number: int, step: int, day: date, kind: str = "pf", param: i
     return data
 
 
-def build(root: Path, day: date, members: int = 3, steps=(168, 336)) -> Path:
+#: Upper-air fields of the mirror: GRIB paramId and a plausible value, with more levels than
+#: the AI/ML model reads, so the client's level filtering is exercised.
+PRESSURE = {
+    "q": (133, 0.008),
+    "u": (131, 5.0),
+    "v": (132, -3.0),
+    "t": (130, 280.0),
+    "gh": (156, 5800.0),
+}
+PRESSURE_LEVELS = (925, 850, 700, 500, 200)
+
+
+def pressure_message(codes, name: str, level: int, number: int, step: int, day: date) -> bytes:
+    param, base = PRESSURE[name]
+    lat = np.arange(90.0, -90.0 - 1e-9, -STEP)
+    lon = np.arange(-180.0, 180.0, STEP)
+    # Level, member and hour change the field a little; the pattern stays plausible.
+    variation = 0.02 * np.cos(np.deg2rad(lat))[:, None] * np.sin(np.deg2rad(lon + step))
+    scale = 1 + variation + 0.01 * number - 0.0001 * (level - 850)
+    gid = codes.codes_grib_new_from_samples("GRIB2")
+    for key, value in [
+        ("centre", "ecmf"),
+        ("setLocalDefinition", 1),
+        ("stream", "enfo"),
+        ("type", "pf"),
+        ("productDefinitionTemplateNumber", 1),
+        ("paramId", param),
+        ("typeOfLevel", "isobaricInhPa"),
+        ("level", level),
+        ("number", number),
+        ("numberOfForecastsInEnsemble", 50),
+        ("dataDate", int(day.strftime("%Y%m%d"))),
+        ("dataTime", 0),
+        ("stepType", "instant"),
+        ("step", step),
+        ("gridType", "regular_ll"),
+        ("Ni", int(360 / STEP)),
+        ("Nj", int(180 / STEP) + 1),
+        ("latitudeOfFirstGridPointInDegrees", 90.0),
+        ("longitudeOfFirstGridPointInDegrees", -180.0),
+        ("latitudeOfLastGridPointInDegrees", -90.0),
+        ("longitudeOfLastGridPointInDegrees", 180.0 - STEP),
+        ("iDirectionIncrementInDegrees", STEP),
+        ("jDirectionIncrementInDegrees", STEP),
+        ("jScansPositively", 0),
+        ("iScansNegatively", 0),
+    ]:
+        codes.codes_set(gid, key, value)
+    codes.codes_set_values(gid, (base * scale).ravel())
+    data = codes.codes_get_message(gid)
+    codes.codes_release(gid)
+    return data
+
+
+def build(root: Path, day: date, members: int = 3, steps=(168, 336), pressure_steps=()) -> Path:
     """Files for one 00 UTC ENS run: tp for the control and perturbed members, plus another
-    parameter, so the client's index filtering is exercised."""
+    parameter, so the client's index filtering is exercised; with ``pressure_steps``, also
+    the upper-air fields of the perturbed members at those forecast hours."""
     import eccodes as codes
 
     folder = root / day.strftime("%Y%m%d") / "00z" / "ifs" / "0p25" / "enfo"
     folder.mkdir(parents=True, exist_ok=True)
     stamp = day.strftime("%Y%m%d") + "000000"
-    for step in steps:
+    for step in sorted(set(steps) | set(pressure_steps)):
         blob, index = b"", []
-        entries = [("cf", 0, 228)] + [("pf", n, 228) for n in range(1, members + 1)]
-        entries += [("pf", 1, 167)]  # 2 m temperature, which must not be downloaded
-        for kind, number, param in entries:
-            data = message(codes, number, step, day, kind, param)
-            index.append(
-                {
-                    "domain": "g",
-                    "date": day.strftime("%Y%m%d"),
-                    "time": "0000",
-                    "expver": "0001",
-                    "class": "od",
-                    "type": kind,
-                    "stream": "enfo",
-                    "step": str(step),
-                    "levtype": "sfc",
-                    "number": str(number),
-                    "param": "tp" if param == 228 else "2t",
-                    "_offset": len(blob),
-                    "_length": len(data),
-                }
-            )
+
+        def add(data: bytes, line: dict) -> None:
+            nonlocal blob
+            base = {
+                "domain": "g",
+                "date": day.strftime("%Y%m%d"),
+                "time": "0000",
+                "expver": "0001",
+                "class": "od",
+                "stream": "enfo",
+                "step": str(step),
+            }
+            index.append({**base, **line, "_offset": len(blob), "_length": len(data)})
             blob += data
+
+        if step in steps:
+            entries = [("cf", 0, 228)] + [("pf", n, 228) for n in range(1, members + 1)]
+            entries += [("pf", 1, 167)]  # 2 m temperature, which must not be downloaded
+            for kind, number, param in entries:
+                add(
+                    message(codes, number, step, day, kind, param),
+                    {
+                        "type": kind,
+                        "levtype": "sfc",
+                        "number": str(number),
+                        "param": "tp" if param == 228 else "2t",
+                    },
+                )
+        if step in pressure_steps:
+            for name in PRESSURE:
+                for level in PRESSURE_LEVELS:
+                    for number in range(1, members + 1):
+                        add(
+                            pressure_message(codes, name, level, number, step, day),
+                            {
+                                "type": "pf",
+                                "levtype": "pl",
+                                "levelist": str(level),
+                                "number": str(number),
+                                "param": name,
+                            },
+                        )
         (folder / f"{stamp}-{step}h-enfo-ef.grib2").write_bytes(blob)
         (folder / f"{stamp}-{step}h-enfo-ef.index").write_text(
             "\n".join(json.dumps(line) for line in index) + "\n"
