@@ -316,7 +316,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               Status <StatusDot health={health} />
             </Link>
             <button type="button" onClick={() => setSearch(true)}>
-              Search <Search size={18} aria-hidden />
+              <span className="label">Search</span>
+              <Search size={18} aria-hidden />
             </button>
             <Link className="pill-white hide-sm" href="/data/runs">
               Run forecast
@@ -374,12 +375,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 <small>IGAD Climate Prediction and Applications Centre</small>
               </div>
             </Link>
-            <p style={{ marginTop: 18 }}>
-              Week-2 (days 8–14) rainfall forecasts for the eleven ICPAC member
-              states: the ECMWF ensemble, corrected with statistical and AI/ML
-              methods and verified against CHIRPS.
-            </p>
-            <p>ICPAC is a designated Regional Climate Centre by WMO.</p>
           </div>
           <div>
             <h4>Forecasts</h4>
@@ -409,10 +404,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <div className="wrap legal">
           <span>© ICPAC {new Date().getUTCFullYear()}</span>
           <span>
-            Week-2 forecast service
-            {current.data
-              ? ` · ${current.data.model.model_name ?? "ECMWF ensemble with MBC"}`
-              : ""}
+            Forecast data: ECMWF Open Data (CC BY 4.0) · Observations: CHIRPS,
+            TAMSAT
           </span>
         </div>
       </footer>

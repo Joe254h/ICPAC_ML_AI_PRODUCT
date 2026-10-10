@@ -86,6 +86,21 @@ export function weekPeriod(start: string, end: string): string {
   return period(start, last);
 }
 
+/** "Today", "Yesterday" or a short date, for lists of recent items. */
+export function relativeDay(iso: string | null | undefined): string {
+  if (!iso) return "Earlier";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Earlier";
+  const days = Math.floor(
+    (Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()) -
+      Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())) /
+      86_400_000,
+  );
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]}`;
+}
+
 export function dateTime(iso: string | null | undefined): string {
   if (!iso) return UNAVAILABLE;
   const date = new Date(iso);

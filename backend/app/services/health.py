@@ -77,6 +77,24 @@ def system_health(platform) -> dict:
         if dekads
         else "Warning · no CHIRPS dekad downloaded yet"
     )
+    tamsat = MonitoringService(platform, "tamsat").dekads()
+    components["TAMSAT monitoring"] = (
+        "Healthy · latest dekad "
+        f"{date.fromisoformat(tamsat[0]['start']).day}–{_day(tamsat[0]['end'])}"
+        if tamsat
+        else "Warning · no TAMSAT dekad downloaded yet"
+    )
+    from backend.app.services.bulletin_mail import email_status
+
+    email = email_status()
+    components["Bulletin email"] = (
+        f"Healthy · review links go to {email['reviewers']} reviewer"
+        f"{'s' if email['reviewers'] != 1 else ''}"
+        if email["configured"] and email["reviewers"]
+        else "Warning · no reviewers' addresses: bulletins are approved on the website only"
+        if email["configured"]
+        else "Warning · not set up: bulletins are approved and published on the website only"
+    )
     runs = service.runs()
     components["Operational forecasts"] = (
         f"Healthy · latest from the ECMWF run of {_day(runs[0]['initialization'])}"

@@ -18,6 +18,8 @@ export type Banner = {
   actions?: React.ReactNode;
   /** Short facts shown as pills (e.g. the forecast window). */
   facts?: React.ReactNode[];
+  /** A shorter banner, for tool pages where the work area should be on screen at once. */
+  compact?: boolean;
 };
 
 export function Crumbs({ crumbs }: { crumbs: Crumb[] }) {
@@ -44,11 +46,13 @@ export function PageBanner({
   crumbs,
   actions,
   facts,
+  compact,
 }: Banner) {
   const slot = useContext(BannerSlot);
   if (!slot) return null;
   return createPortal(
     <>
+      {compact && <span className="banner-compact" hidden />}
       {crumbs && <Crumbs crumbs={crumbs} />}
       <h1>{title}</h1>
       {subtitle && <p>{subtitle}</p>}

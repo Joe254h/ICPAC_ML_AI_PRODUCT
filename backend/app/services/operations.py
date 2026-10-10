@@ -30,7 +30,7 @@ ACTIONS = {
     "run_forecast": "Run the Week-2 forecast",
     "verify_due": "Verify finished forecasts against CHIRPS",
     "verify_forecast": "Verify one forecast against CHIRPS",
-    "update_chirps": "Update the CHIRPS rainfall monitoring",
+    "update_chirps": "Update the rainfall monitoring (CHIRPS and TAMSAT)",
     "cycle": "Weekly cycle: download ECMWF, run the forecast, verify against CHIRPS",
 }
 
@@ -174,8 +174,24 @@ class OperationService:
         result = MonitoringService(self.platform).update(body.actor)
         self._log(
             operation_id,
-            "Downloaded the newest dekad" if result["new"] else "The newest dekad is already held",
+            "Downloaded the newest CHIRPS dekad"
+            if result["new"]
+            else "The newest CHIRPS dekad is already held",
         )
+        self._log(operation_id, "Looking for the newest TAMSAT dekad")
+        try:
+            other = MonitoringService(self.platform, "tamsat").update(body.actor)
+        except Exception as exc:  # TAMSAT never holds up CHIRPS
+            self._log(operation_id, f"TAMSAT could not be updated: {exc}")
+            result["tamsat"] = {"error": str(exc)}
+        else:
+            self._log(
+                operation_id,
+                "Downloaded the newest TAMSAT dekad"
+                if other["new"]
+                else "The newest TAMSAT dekad is already held",
+            )
+            result["tamsat"] = other
         return result
 
     def _cycle(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
@@ -203,6 +219,6 @@ class OperationService:
         try:
             result["monitoring"] = self._update_chirps(operation_id, body)
         except Exception as exc:  # the forecast stands; monitoring is retried next time
-            self._log(operation_id, f"The CHIRPS monitoring could not be updated: {exc}")
+            self._log(operation_id, f"The rainfall monitoring could not be updated: {exc}")
             result["monitoring"] = {"error": str(exc)}
         return result

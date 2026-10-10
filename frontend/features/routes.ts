@@ -18,6 +18,7 @@ export type PageKey =
   | "operations"
   | "bulletin"
   | "drafts"
+  | "decision"
   | "copilot"
   | "system";
 
@@ -77,7 +78,6 @@ export const MENUS: Menu[] = [
 
 /** Planned observation sources: listed now, readers come later. */
 export const PLANNED_SOURCES = [
-  { id: "tamsat", title: "TAMSAT" },
   { id: "rfe2", title: "RFE 2.0" },
   { id: "arc2", title: "ARC 2.0" },
   { id: "imerg", title: "GPM IMERG" },
@@ -185,6 +185,13 @@ export const ROUTES: Route[] = [
     page: "drafts",
   },
   {
+    path: "bulletins/action",
+    title: "Bulletin decision",
+    menu: "Bulletin",
+    page: "decision",
+    nav: false,
+  },
+  {
     path: "monitoring",
     title: "Rainfall monitoring",
     menu: "Monitoring",
@@ -210,6 +217,13 @@ export const ROUTES: Route[] = [
     menu: "Data & Tools",
     page: "source",
     param: "chirps",
+  },
+  {
+    path: "data/tamsat",
+    title: "TAMSAT",
+    menu: "Data & Tools",
+    page: "source",
+    param: "tamsat",
   },
   ...PLANNED_SOURCES.map((source) => ({
     path: "data/" + source.id,

@@ -72,7 +72,7 @@ def test_missing_verification_never_returns_mock_scores_and_definitions_follow_t
     followup = ask(env, "What does that mean?", result["session_id"])
     assert "errors" in followup["text"]
     comparison = ask(env, "Compare CHIRPS and TAMSAT", result["session_id"])
-    assert "comparison between observation sources is not available yet" in comparison["text"]
+    assert "verification against TAMSAT is not available yet" in comparison["text"]
 
 
 def test_chat_bulletin_and_map_use_the_same_package_as_forecast(env, fast_maps):

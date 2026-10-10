@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("the Copilot answers from the issued forecast", async ({ page }) => {
   await page.goto("/copilot");
   await expect(
-    page.getByRole("heading", { name: "Forecast in discussion" }),
+    page.getByRole("heading", { name: "Conversations" }),
   ).toBeVisible();
   const saved = page
     .getByRole("navigation", { name: "Saved conversations" })

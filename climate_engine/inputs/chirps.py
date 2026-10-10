@@ -206,9 +206,11 @@ class Server:
         self,
         get: Downloader | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        name: str = "CHIRPS",
     ):
         self.get = get
         self.sleep = sleep
+        self.name = name
         self.listings: dict[str, set[str]] = {}
 
     def fetch(self, url: str) -> bytes | None:
@@ -220,7 +222,7 @@ class Server:
             except Exception as exc:
                 if not _transient(exc) or attempt == attempts:
                     raise CHIRPSUnavailable(
-                        f"The CHIRPS server could not be reached after {attempt} "
+                        f"The {self.name} server could not be reached after {attempt} "
                         f"attempt{'s' if attempt > 1 else ''}: {exc}"
                     ) from exc
                 self.sleep(wait)

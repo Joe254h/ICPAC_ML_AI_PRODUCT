@@ -4,17 +4,18 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
-  Bot,
+  ArrowUp,
   FileText,
+  History,
   LoaderCircle,
-  MessageSquarePlus,
   RefreshCw,
-  Send,
+  SquarePen,
+  X,
 } from "lucide-react";
 import { Button, Notice, PageBanner } from "@/components/ui";
 import { cx } from "@/components/ui";
 import { LAYER_TEXT, layersOf } from "@/features/operational/shared";
-import { day, validDays } from "@/lib/format";
+import { relativeDay, shortPeriod } from "@/lib/format";
 import { mutate, request } from "@/services/api";
 import { useApi } from "@/services/hooks";
 import type { ForecastDetail, Variant } from "@/types/operational";
@@ -82,7 +83,7 @@ function Message({ message }: { message: ChatMessage }) {
     <article className={cx("chat-message", user ? "user" : "assistant")}>
       {!user && (
         <span className="chat-avatar" aria-hidden>
-          <Bot size={18} />
+          <img src="/igad-seal-white.png" alt="" width={22} height={22} />
         </span>
       )}
       <div className="chat-bubble">
@@ -107,8 +108,8 @@ function Message({ message }: { message: ChatMessage }) {
         )}
         {message.fallback && (
           <p className="chat-fallback">
-            The language model could not give a checked answer, so this is the
-            fixed explanation from the forecast.
+            Standard answer from the forecast data; the assistant could not
+            respond just now.
           </p>
         )}
         {!user && <AnswerBasis message={message} />}
@@ -133,6 +134,7 @@ export default function Copilot() {
   const [restoreFailed, setRestoreFailed] = useState(false);
   const [error, setError] = useState("");
   const [awayFromBottom, setAwayFromBottom] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const stream = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const stickToBottom = useRef(true);
@@ -282,69 +284,109 @@ export default function Copilot() {
   if (country !== REGION && !countries.includes(country))
     countries.push(country);
   const locked = pending || restoring;
+  const span =
+    pinned?.valid_start && pinned.valid_end
+      ? [pinned.valid_start, pinned.valid_end]
+      : forecast
+        ? [forecast.valid_start, forecast.valid_end]
+        : null;
+
+  const startNew = () => {
+    newConversation();
+    setHistoryOpen(false);
+  };
 
   return (
-    <div className="page">
+    <div className="page copilot-page">
       <div className="wrap">
         <PageBanner
+          compact
           title="Forecaster Copilot"
           crumbs={[{ label: "Copilot" }]}
-          subtitle="Ask about this week's forecast, observed rainfall and verification, or about weather and climate in general. Forecast figures come from the service's own data and are checked before they are shown."
-          facts={[
-            "Figures from this week's data",
-            "General climate questions too",
-            "Bulletins still need review",
-          ]}
+          subtitle="Questions about this week's forecast, observed rainfall and verification, and about weather and climate."
         />
-        <div className="copilot">
-          <aside className="copilot-side">
-            <Button variant="amber" disabled={locked} onClick={newConversation}>
-              <MessageSquarePlus size={18} /> New conversation
-            </Button>
-            <section className="side-block">
-              <h3>Forecast in discussion</h3>
-              {latest.loading && <p>Loading the latest forecast…</p>}
-              {latest.status === 404 && (
-                <p>
-                  No forecast has been issued yet. Run the weekly cycle in{" "}
-                  <Link href="/data/runs">Operations</Link>.
-                </p>
-              )}
-              {forecast && (
-                <>
-                  <p className="side-strong">
-                    {pinned?.valid_start && pinned.valid_end
-                      ? validDays(pinned.valid_start, pinned.valid_end)
-                      : validDays(forecast.valid_start, forecast.valid_end)}
-                  </p>
-                  <p>
-                    ECMWF run of {day(forecast.initialization)} ·{" "}
-                    {forecast.model?.model_name ?? "registered model"}
-                  </p>
-                  {pinned && pinned.forecast_id !== forecast.forecast_id && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={locked}
-                      onClick={() => {
-                        setResetContext(true);
-                        latest.reload();
-                      }}
-                    >
-                      <RefreshCw size={14} /> Switch to the latest forecast
-                    </Button>
-                  )}
-                </>
-              )}
-              <label className="field">
-                Area
+        <div className={cx("copilot", historyOpen && "history-open")}>
+          <aside className="copilot-history" aria-label="Conversations">
+            <div className="history-head">
+              <h2>Conversations</h2>
+              <button
+                type="button"
+                className="history-new"
+                aria-label="New conversation"
+                disabled={locked}
+                onClick={startNew}
+              >
+                <SquarePen size={16} aria-hidden /> New
+              </button>
+              <button
+                type="button"
+                className="history-close"
+                aria-label="Close conversations"
+                onClick={() => setHistoryOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            {!sessions.length ? (
+              <p className="history-empty">Your conversations are kept here.</p>
+            ) : (
+              <nav className="history-list" aria-label="Saved conversations">
+                {sessions.slice(0, 20).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    disabled={locked}
+                    aria-current={item.id === session ? "true" : undefined}
+                    onClick={() => {
+                      setHistoryOpen(false);
+                      openSession(item.id);
+                    }}
+                  >
+                    <span className="history-title">{item.title}</span>
+                    <span className="history-meta">
+                      {relativeDay(item.updated_at ?? item.created_at)}
+                      {" · "}
+                      {item.message_count} messages
+                    </span>
+                  </button>
+                ))}
+              </nav>
+            )}
+          </aside>
+          <section className="chat-card" aria-label="Conversation">
+            <header className="chat-context">
+              <button
+                type="button"
+                className="context-icon history-toggle"
+                aria-label="Show conversations"
+                onClick={() => setHistoryOpen(true)}
+              >
+                <History size={18} />
+              </button>
+              <div className="context-forecast">
+                <span>Forecast</span>
+                <strong>
+                  {span
+                    ? shortPeriod(
+                        span[0],
+                        new Date(
+                          new Date(span[1]).getTime() - 86_400_000,
+                        ).toISOString(),
+                      )
+                    : latest.loading
+                      ? "Loading…"
+                      : "None yet"}
+                </strong>
+              </div>
+              <label className="context-select context-area">
+                <span>Area</span>
                 <select
                   aria-label="Conversation country"
                   value={country}
                   disabled={locked}
                   onChange={(e) => setCountry(e.target.value)}
                 >
-                  <option value={REGION}>Greater Horn of Africa</option>
+                  <option value={REGION}>Whole region</option>
                   {countries.map((name) => (
                     <option key={name} value={name}>
                       {name}
@@ -352,15 +394,15 @@ export default function Copilot() {
                   ))}
                 </select>
               </label>
-              <label className="field">
-                Forecast layer
+              <label className="context-select context-layer">
+                <span>Layer</span>
                 <select
                   aria-label="Conversation rainfall method"
                   value={variant}
                   disabled={locked}
                   onChange={(e) => setVariant(e.target.value as Variant | "")}
                 >
-                  <option value="">Main forecast</option>
+                  <option value="">Issued forecast</option>
                   {layers.map((layer) => (
                     <option key={layer} value={layer}>
                       {LAYER_TEXT[layer].title}
@@ -368,35 +410,43 @@ export default function Copilot() {
                   ))}
                 </select>
               </label>
-              <Link href="/bulletin" className="link-amber">
-                <FileText size={15} /> Weekly bulletin →
+              <Link href="/bulletin" className="context-link">
+                <FileText size={16} aria-hidden /> Bulletin
               </Link>
-            </section>
-            <section className="side-block">
-              <h3>Conversations</h3>
-              {!sessions.length && <p>No saved conversation yet.</p>}
-              <nav
-                className="conversation-list"
-                aria-label="Saved conversations"
+              <button
+                type="button"
+                className="context-icon context-new"
+                aria-label="New conversation"
+                disabled={locked}
+                onClick={startNew}
               >
-                {sessions.slice(0, 12).map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
+                <SquarePen size={18} />
+              </button>
+            </header>
+            {pinned &&
+              forecast &&
+              pinned.forecast_id !== forecast.forecast_id && (
+                <div className="chat-pinned">
+                  This conversation is about an earlier forecast.
+                  <Button
+                    variant="outline"
+                    size="sm"
                     disabled={locked}
-                    aria-current={item.id === session ? "true" : undefined}
-                    onClick={() => openSession(item.id)}
+                    onClick={() => {
+                      setResetContext(true);
+                      latest.reload();
+                    }}
                   >
-                    <span>{item.title}</span>
-                    <small>
-                      {item.message_count} messages · {day(item.updated_at)}
-                    </small>
-                  </button>
-                ))}
-              </nav>
-            </section>
-          </aside>
-          <section className="chat-card" aria-label="Conversation">
+                    <RefreshCw size={14} /> Use the latest
+                  </Button>
+                </div>
+              )}
+            {latest.status === 404 && (
+              <div className="chat-pinned">
+                No forecast has been issued yet; general questions still work.{" "}
+                <Link href="/data/runs">Run the weekly cycle</Link>
+              </div>
+            )}
             <div
               ref={stream}
               className="chat-stream"
@@ -419,14 +469,11 @@ export default function Copilot() {
                 </p>
               ) : !messages.length ? (
                 <div className="chat-welcome">
-                  <span className="chat-orb" aria-hidden>
-                    <Bot size={30} />
-                  </span>
-                  <h2>How can I help with this week&apos;s forecast?</h2>
+                  <h2>What would you like to know?</h2>
                   <p>
-                    Ask a question, then follow up with “And Somalia?” or “Tell
-                    me more.” The conversation keeps the same forecast until you
-                    switch.
+                    Ask about a country, the region or a forecast layer, then
+                    follow up with “And Somalia?”. The conversation stays on the
+                    same forecast until you start a new one.
                   </p>
                   <div className="suggestions">
                     {SUGGESTIONS.map((text) => (
@@ -448,8 +495,8 @@ export default function Copilot() {
               )}
               {pending && (
                 <p className="chat-status" role="status">
-                  <LoaderCircle size={16} className="spin" /> Preparing the
-                  answer…
+                  <LoaderCircle size={16} className="spin" /> Looking at the
+                  forecast…
                 </p>
               )}
             </div>
@@ -494,12 +541,16 @@ export default function Copilot() {
               <textarea
                 ref={composer}
                 id="copilot-question"
-                rows={2}
+                rows={1}
                 maxLength={2000}
                 disabled={restoring || restoreFailed}
-                placeholder="Ask about the forecast…"
+                placeholder="Ask about the forecast"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  e.target.style.height = "auto";
+                  e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`;
+                }}
                 onKeyDown={(e) => {
                   if (
                     e.key === "Enter" &&
@@ -513,19 +564,24 @@ export default function Copilot() {
               />
               <button
                 type="submit"
-                className="btn btn-green"
+                className="chat-send"
+                aria-label="Send"
                 disabled={
                   pending || restoring || restoreFailed || !input.trim()
                 }
               >
-                <Send size={16} /> Send
+                <ArrowUp size={18} />
               </button>
             </form>
-            <p className="chat-hint">
-              Enter to send · Shift+Enter for a new line · Answers support, and
-              do not replace, the forecaster&apos;s judgement
-            </p>
           </section>
+          {historyOpen && (
+            <button
+              type="button"
+              className="history-scrim"
+              aria-label="Close conversations"
+              onClick={() => setHistoryOpen(false)}
+            />
+          )}
         </div>
       </div>
     </div>

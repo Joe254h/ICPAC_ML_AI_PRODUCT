@@ -1,4 +1,5 @@
 import io
+import re
 import shutil
 import zipfile
 from pathlib import Path
@@ -86,7 +87,8 @@ def test_drafts_are_the_weekly_bulletin_of_the_latest_forecast(env, fast_maps, m
     # maps are the frozen ones.
     assert part(approved, "word/document.xml") == part(word.content, "word/document.xml")
     header = part(approved, "word/header1.xml")
-    assert "APPROVED by Reviewer on 20" in header and "DRAFT - NOT APPROVED" not in header
+    assert re.search(r"APPROVED by Reviewer on \d{1,2} [A-Z][a-z]{2} 20\d\d", header)
+    assert "DRAFT - NOT APPROVED" not in header
     assert "forecaster review required" not in header
     published = client.post(f"/bulletins/{draft['id']}/publish", json=review).json()
     assert published["status"] == "published"

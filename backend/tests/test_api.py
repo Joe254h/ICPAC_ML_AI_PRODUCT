@@ -33,9 +33,12 @@ def test_major_endpoints(client):
 
 def test_data_sources_list_active_and_planned_sources(client):
     sources = {s["id"]: s for s in client.get("/data/sources").json()}
-    assert {k for k, s in sources.items() if s["status"] == "active"} == {"ecmwf", "chirps"}
-    assert {k for k, s in sources.items() if s["status"] == "planned"} == {
+    assert {k for k, s in sources.items() if s["status"] == "active"} == {
+        "ecmwf",
+        "chirps",
         "tamsat",
+    }
+    assert {k for k, s in sources.items() if s["status"] == "planned"} == {
         "rfe2",
         "arc2",
         "imerg",
@@ -51,6 +54,8 @@ def test_health_reports_the_operational_service(client):
     assert components["ECMWF input"].startswith("Warning")
     assert components["MBC + AI/ML forecast"].startswith("In progress")
     assert not any("emonstration" in name for name in components)
+    assert components["TAMSAT monitoring"] == "Warning · no TAMSAT dekad downloaded yet"
+    assert components["Bulletin email"].startswith("Warning · not set up")
 
 
 def test_bulletin_drafts_need_a_forecast(client):

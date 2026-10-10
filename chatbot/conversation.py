@@ -370,7 +370,7 @@ class OperationalConversation:
                 elif intent == "compare_observations":
                     tool = "compare_observations"
                     sentences["comparison"] = (
-                        "Forecasts are verified against CHIRPS. TAMSAT, RFE 2.0, ARC 2.0 and IMERG are planned sources, so a comparison between observation sources is not available yet."
+                        "Forecasts are verified against CHIRPS. TAMSAT is shown next to CHIRPS on the Monitoring page, dekad by dekad; RFE 2.0, ARC 2.0 and IMERG are planned sources. A forecast verification against TAMSAT is not available yet."
                     )
                     evidence["verification"] = detail["verification"]
                 elif intent == "model":

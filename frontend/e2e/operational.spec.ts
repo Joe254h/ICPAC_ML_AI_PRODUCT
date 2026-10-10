@@ -44,7 +44,9 @@ test("the home page leads with this week's outlook", async ({ page }) => {
   await noHorizontalScroll(page);
 });
 
-test("rainfall monitoring shows the newest CHIRPS dekad", async ({ page }) => {
+test("rainfall monitoring shows the newest CHIRPS and TAMSAT dekads", async ({
+  page,
+}) => {
   await page.goto("/monitoring");
   await expect(
     page.getByRole("heading", { level: 1, name: "Rainfall Monitoring" }),
@@ -58,6 +60,20 @@ test("rainfall monitoring shows the newest CHIRPS dekad", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Percent of normal" }),
   ).toBeVisible();
+  // TAMSAT, the second estimate, is one switch away and compared with CHIRPS.
+  const estimate = page.getByRole("group", { name: "Rainfall estimate" });
+  await estimate.getByRole("button", { name: "TAMSAT" }).click();
+  await expect(page).toHaveURL(/source=tamsat/);
+  await expect(page.getByText(/TAMSAT v3\.1/).first()).toBeVisible();
+  await expect(
+    page.locator("tbody tr").filter({ hasText: "Kenya" }).first(),
+  ).toBeVisible();
+  const compare = page.locator(".card").filter({
+    has: page.getByRole("heading", { name: "CHIRPS and TAMSAT" }),
+  });
+  await expect(compare.locator("tbody tr")).toHaveCount(2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await noHorizontalScroll(page);
 });
 
 test("no page shows code, identifiers or checksums", async ({ page }) => {
@@ -72,6 +88,7 @@ test("no page shows code, identifiers or checksums", async ({ page }) => {
     "/countries/kenya",
     "/maps/rainfall",
     "/monitoring",
+    "/monitoring?source=tamsat",
     "/verification",
     "/bulletin",
     "/bulletins",
@@ -79,6 +96,7 @@ test("no page shows code, identifiers or checksums", async ({ page }) => {
     "/data",
     "/data/ecmwf",
     "/data/chirps",
+    "/data/tamsat",
     "/data/runs",
     "/system",
     "/copilot",
@@ -132,7 +150,7 @@ test("a country page has its own map and figures", async ({ page }) => {
   await mapLoaded(page, /Kenya/);
 });
 
-test("data sources: ECMWF and CHIRPS are fetched, the others come later", async ({
+test("data sources: ECMWF, CHIRPS and TAMSAT are fetched, the others come later", async ({
   page,
 }) => {
   await page.goto("/data/ecmwf");
@@ -143,7 +161,12 @@ test("data sources: ECMWF and CHIRPS are fetched, the others come later", async 
   await expect(page.locator("tbody tr").first()).toContainText("Local copy");
   await page.goto("/data/tamsat");
   await expect(
-    page.getByRole("heading", { name: "TAMSAT reader" }),
+    page.getByRole("heading", { name: "Downloaded dekads" }),
+  ).toBeVisible();
+  await expect(page.locator("tbody tr")).toHaveCount(1);
+  await page.goto("/data/arc2");
+  await expect(
+    page.getByRole("heading", { name: "ARC 2.0 reader" }),
   ).toBeVisible();
   await expect(page.getByText("In progress", { exact: true })).toBeVisible();
 });
@@ -158,4 +181,6 @@ test("system status reports the downloaded input and the issued forecast", async
   await expect(row("Operational forecasts")).toContainText("Healthy");
   await expect(row("MBC + AI/ML forecast")).toContainText("In progress");
   await expect(row("CHIRPS monitoring")).toContainText("Healthy");
+  await expect(row("TAMSAT monitoring")).toContainText("Healthy");
+  await expect(row("Bulletin email")).toContainText("Healthy");
 });

@@ -2,7 +2,7 @@
 /** Weekly bulletin drafts and their review: draft → review → approval → publication. */
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { FileDown, FilePlus2, Globe2, RefreshCw } from "lucide-react";
+import { FileDown, FilePlus2, Globe2, Mail, RefreshCw } from "lucide-react";
 import ReviewDialog from "@/components/review-dialog";
 import type { Review } from "@/components/review-dialog";
 import {
@@ -21,9 +21,9 @@ import type { Tone } from "@/components/ui";
 import type { PageProps } from "@/features/view";
 import { useActor } from "@/lib/actor";
 import { dateTime, day } from "@/lib/format";
-import { mutate } from "@/services/api";
+import { mutate, request } from "@/services/api";
 import { useApi } from "@/services/hooks";
-import type { Bulletin } from "@/types/workflows";
+import type { Bulletin, EmailNotice, EmailStatus } from "@/types/workflows";
 
 const STATUS: Record<Bulletin["status"], [string, Tone]> = {
   draft: ["Draft", "info"],
@@ -34,6 +34,40 @@ const STATUS: Record<Bulletin["status"], [string, Tone]> = {
 };
 
 const STEPS = ["draft", "under_review", "approved", "published"] as const;
+
+const DECIDED: Record<string, string> = {
+  submit: "Submitted",
+  approve: "Approved",
+  reject: "Rejected",
+  publish: "Published",
+};
+
+const HEADER: Record<string, string> = {
+  approved: "APPROVED",
+  published: "PUBLISHED",
+  rejected: "REJECTED - NOT FOR RELEASE",
+};
+
+/** The Word document's page header: the draft label until a decision names the
+ * reviewer and date (as the backend stamps it). */
+function documentHeader(draft: Bulletin): string {
+  const state = HEADER[draft.status];
+  const review = [...draft.reviews]
+    .reverse()
+    .find((r) => r.to === draft.status);
+  if (!state || !review) return draft.facts.label;
+  const scope = draft.facts.label
+    .split(" · ")
+    .filter(
+      (part) =>
+        part !== "DRAFT - NOT APPROVED" &&
+        part !== "forecaster review required",
+    );
+  return [
+    `${state} by ${review.actor} on ${day(review.timestamp)}`,
+    ...scope,
+  ].join(" · ");
+}
 
 const ACTIONS: Record<
   string,
@@ -112,6 +146,70 @@ function Stepper({ status }: { status: Bulletin["status"] }) {
   );
 }
 
+const WHO: Record<string, string> = {
+  review: "reviewers",
+  publish: "publishers",
+  published: "distribution list",
+  rejected: "reviewers",
+};
+
+/** Who is emailed at this step, and what was last sent. */
+function EmailLine({
+  draft,
+  status,
+  onResend,
+}: {
+  draft: Bulletin;
+  status?: EmailStatus;
+  onResend: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  if (!status) return null;
+  if (!status.configured)
+    return (
+      <p className="email-line">
+        <Mail size={16} aria-hidden /> Email is not set up, so every step is
+        taken on this page.
+      </p>
+    );
+  const last: EmailNotice | undefined = draft.emails?.at(-1);
+  let text: string;
+  if (draft.status === "draft")
+    text = status.reviewers
+      ? `Submitting emails ${status.reviewers} reviewer${status.reviewers === 1 ? "" : "s"} a link to approve or reject.`
+      : "No reviewers' addresses are set up; review on this page.";
+  else if (last?.sent?.length)
+    text = `Emailed to the ${WHO[last.step ?? ""] ?? "recipients"} (${last.sent.join(", ")}) on ${dateTime(last.at)}.`;
+  else if (last?.skipped) text = last.skipped;
+  else text = "No email has been sent for this step.";
+  const resendable =
+    draft.status === "under_review" || draft.status === "approved";
+  return (
+    <p className="email-line">
+      <Mail size={16} aria-hidden /> {text}
+      {!!last?.failed?.length &&
+        ` Could not reach ${last.failed.map((f) => f.to).join(", ")}.`}
+      {resendable && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await onResend();
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Send again
+        </Button>
+      )}
+    </p>
+  );
+}
+
 function Detail({
   draft,
   onChanged,
@@ -128,6 +226,14 @@ function Detail({
   );
   const [label, tone] = STATUS[draft.status];
   const close = useCallback(() => setDialog(null), []);
+  const email = useApi<EmailStatus>("/bulletins/email-status");
+  const [actor] = useActor();
+  const resend = async () => {
+    await mutate(`/bulletins/${draft.id}/resend`, {
+      actor: actor || "Forecaster",
+    });
+    onChanged(await request<Bulletin>(`/bulletins/${draft.id}`));
+  };
   const submit = async (review: Review) => {
     if (!dialog) return;
     onChanged(
@@ -142,6 +248,7 @@ function Detail({
         action={<Status tone={tone}>{label}</Status>}
       >
         <Stepper status={draft.status} />
+        <EmailLine draft={draft} status={email.data} onResend={resend} />
         <div
           style={{
             display: "flex",
@@ -195,7 +302,7 @@ function Detail({
                 ? "Passed: text matches the frozen sections"
                 : "Failed",
             ],
-            ["Label", draft.facts.label],
+            ["Document header", documentHeader(draft)],
             [
               "Revision",
               draft.parent_id ? "Revision of an earlier draft" : "First draft",
@@ -217,7 +324,9 @@ function Detail({
                 {draft.reviews.map((review, i) => (
                   <tr key={i}>
                     <td>{dateTime(review.timestamp)}</td>
-                    <td className="strong">{review.action}</td>
+                    <td className="strong">
+                      {DECIDED[review.action] ?? review.action}
+                    </td>
                     <td>{review.actor}</td>
                     <td>{review.comment}</td>
                   </tr>

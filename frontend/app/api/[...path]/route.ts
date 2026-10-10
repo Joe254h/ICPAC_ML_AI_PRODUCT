@@ -1,4 +1,9 @@
 import { NextRequest } from "next/server";
+
+// Copilot answers with several model calls and bulletin exports take time; 60 s is allowed on
+// every Vercel plan. Long work (forecast runs, downloads) runs as background operations.
+export const maxDuration = 60;
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },

@@ -7,9 +7,12 @@ from backend.app.schemas import (
     BulletinRequest,
     ChatRequest,
     DescriptorRegisterRequest,
+    EmailActionRequest,
     IndependentTestRequest,
+    ResendRequest,
     ReviewRequest,
 )
+from backend.app.services import bulletin_mail
 from backend.app.services.bulletin_export import WeeklyHTMLExporter
 from backend.app.services.bulletins import WEEKLY, BulletinService, review_label
 from backend.app.services.registry import ModelRegistry
@@ -93,6 +96,23 @@ def install(app: FastAPI, dependency):
         """The weekly bulletin draft of a forecast (the latest by default)."""
         return BulletinService(platform).generate(body.forecast_id, parent_id, body.actor)
 
+    @app.get("/bulletins/email-status")
+    def bulletin_email_status() -> dict:
+        """Whether review emails go out, and to how many reviewers, publishers, readers."""
+        return bulletin_mail.email_status()
+
+    @app.get("/bulletins/email-action")
+    def describe_email_action(token: str, platform=Depends(dependency)) -> dict:
+        """What an emailed link allows; opening it changes nothing."""
+        return bulletin_mail.describe_link(platform, token)
+
+    @app.post("/bulletins/email-action")
+    def email_action(body: EmailActionRequest, platform=Depends(dependency)) -> dict:
+        """Approve, reject or publish from an emailed link, as the person it was sent to."""
+        return bulletin_mail.act_on_link(
+            platform, body.token, body.decision, body.name, body.comment
+        )
+
     @app.get("/bulletins/compare")
     def compare_bulletins(left: str, right: str, platform=Depends(dependency)) -> dict:
         return BulletinService(platform).compare(left, right)
@@ -134,6 +154,13 @@ def install(app: FastAPI, dependency):
         return Response(
             content, media_type="text/html", headers={"Content-Disposition": disposition}
         )
+
+    @app.post("/bulletins/{id}/resend")
+    def resend_bulletin_email(id: str, body: ResendRequest, platform=Depends(dependency)) -> dict:
+        """Send the email of the bulletin's current step again (new links)."""
+        bulletin = platform.repo.get("bulletin", id)
+        platform.repo.audit("bulletin_email_resent", body.actor, id, {"status": bulletin["status"]})
+        return bulletin_mail.notify(platform, bulletin)
 
     @app.post("/bulletins/{id}/{action}")
     def review_bulletin(

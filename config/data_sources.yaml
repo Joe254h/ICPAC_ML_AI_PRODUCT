@@ -49,6 +49,17 @@ chirps:
   climatology: {start: "1991-01-01", end: "2020-12-31", file: null}
   licence: "CHIRPS, Climate Hazards Center, UC Santa Barbara (public domain, cite Funk et al. 2015)"
 
+tamsat:
+  # TAMSAT v3.1 dekadal rainfall estimates (University of Reading), read like CHIRPS: the
+  # newest dekad is found by listing the month's folder, downloaded once, checked and
+  # cropped. TAMSAT_BASE_URL overrides the server (a mirror or the test server).
+  base_url: "https://gws-access.jasmin.ac.uk/public/tamsat/rfe/data/v3.1"
+  dekad_dir: "{base}/dekadal/{year}/{month:02d}/"
+  # rfe_filled has gaps filled from the climatology; rfe is used when it is absent.
+  variables: [rfe_filled, rfe]
+  resolution_degrees: 0.0375
+  licence: "TAMSAT, University of Reading (CC BY 4.0; cite Maidment et al. 2017)"
+
 sources:
   - id: ecmwf
     name: ECMWF ensemble (ENS)
@@ -65,10 +76,10 @@ sources:
     provider: Climate Hazards Center, UC Santa Barbara
     url: https://www.chc.ucsb.edu/data/chirps
   - id: tamsat
-    name: TAMSAT
-    role: verification (observed rainfall)
-    status: planned
-    description: "Daily rainfall estimates for Africa, 0.0375 degree"
+    name: TAMSAT v3.1
+    role: rainfall monitoring (observed rainfall)
+    status: active
+    description: "Dekadal satellite rainfall estimates for Africa, 0.0375 degree"
     provider: University of Reading
     url: https://www.tamsat.org.uk/
   - id: rfe2

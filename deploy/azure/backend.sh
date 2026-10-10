@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy the ICPAC backend (FastAPI, ECMWF Open Data and CHIRPS downloads, MBC and the
+# Deploy the ICPAC backend (FastAPI, ECMWF Open Data, CHIRPS and TAMSAT downloads, MBC and the
 # Atmos37 CatBoost registry) to Azure Container Apps.
 #
 # Run it in Azure Cloud Shell (Bash) at https://shell.azure.com:
@@ -39,6 +39,17 @@
 #   LLM_OVERRIDES Set by llm.sh: the Copilot settings for the self-hosted model. Without it
 #                 (and without ANTHROPIC_API_KEY or GEMINI_API_KEY), the Copilot settings on
 #                 the app are kept.
+#   Bulletin email (see docs/operations.md, "Bulletin approval by email"):
+#     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_SECURITY, MAIL_FROM  The mail
+#                 server, e.g. Gmail with an app password: smtp.gmail.com, 587, your address,
+#                 the 16-letter app password. SMTP_PASSWORD is stored as an app secret.
+#     BULLETIN_REVIEWERS, BULLETIN_PUBLISHERS, BULLETIN_DISTRIBUTION  Comma-separated
+#                 addresses: who approves, who publishes (default the reviewers), and who
+#                 receives the published bulletin.
+#     PUBLIC_SITE_URL  The website the email links open (default the Vercel site).
+#     EMAIL_ACTION_SECRET  Signs the email links; generated once and kept as an app secret.
+#   TAMSAT_BASE_URL  Another server laid out like TAMSAT's (default TAMSAT's own).
+#   Each of these is kept from the previous deployment unless it is given again.
 set -euo pipefail
 
 LOCATION=${LOCATION:-southafricanorth}
@@ -208,6 +219,7 @@ APP="$APP" LOCATION="$LOCATION" ENVIRONMENT_ID="$ENVIRONMENT_ID" IMAGE="$IMAGE" 
   python3 - "$DEFINITION" <<'PY'
 import json
 import os
+import secrets as tokens
 import sys
 import time
 
@@ -248,6 +260,45 @@ for setting in [] if overrides else json.loads(e["CURRENT_ENV"] or "[]") or []:
     else:
         # Azure refuses a variable without a value; for the app an empty one means unset.
         print(f"Skipping {setting['name']}: it is empty, which the backend treats as unset")
+# Bulletin email and TAMSAT: a value given now wins, else the deployed one is kept.
+current = {s.get("name"): s for s in json.loads(e["CURRENT_ENV"] or "[]") or []}
+SITE = "https://icpac-ml-ai-product-three.vercel.app"
+for name in (
+    "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_USER",
+    "SMTP_SECURITY",
+    "MAIL_FROM",
+    "BULLETIN_REVIEWERS",
+    "BULLETIN_PUBLISHERS",
+    "BULLETIN_DISTRIBUTION",
+    "PUBLIC_SITE_URL",
+    "TAMSAT_BASE_URL",
+):
+    value = (e.get(name) or "").strip() or (current.get(name) or {}).get("value")
+    if name == "PUBLIC_SITE_URL":
+        value = value or SITE
+    if value:
+        env.append({"name": name, "value": value})
+for name, reference in (
+    ("SMTP_PASSWORD", "smtp-password"),
+    ("EMAIL_ACTION_SECRET", "email-action-secret"),
+):
+    value = (e.get(name) or "").strip() or stored.get(reference)
+    if name == "EMAIL_ACTION_SECRET" and not value:
+        value = tokens.token_urlsafe(48)  # links keep working across restarts
+    if value:
+        secrets.append({"name": reference, "value": value})
+        env.append({"name": name, "secretRef": reference})
+mail = {s["name"]: s.get("value") for s in env}
+print(
+    "Bulletin email: "
+    + (
+        f"through {mail['SMTP_HOST']}, reviewers {mail.get('BULLETIN_REVIEWERS') or 'not set'}"
+        if mail.get("SMTP_HOST")
+        else "not set up (bulletins are approved and published on the website)"
+    )
+)
 definition = {
     "location": e["LOCATION"],
     "properties": {
@@ -345,7 +396,8 @@ import json, sys
 health = json.load(sys.stdin)
 print("Status:", health["status"], "| version:", health.get("version", "previous release"))
 for name, value in health["components"].items():
-    if name.startswith(("Operational", "Model", "Database", "Storage", "ECMWF", "CHIRPS", "MBC", "Copilot")):
+    if name.startswith(("Operational", "Model", "Database", "Storage", "ECMWF", "CHIRPS",
+                        "TAMSAT", "MBC", "Copilot", "Bulletin")):
         print(f"  {name}: {value}")
 ' || echo "The API is not answering yet; check: az containerapp logs show -n $APP -g $GROUP --follow"
 

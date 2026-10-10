@@ -48,7 +48,8 @@ The list shown in the interface comes from `config/data_sources.yaml`.
 | ECMWF ensemble (ENS), ECMWF Open Data | forecast input | in use |
 | CHIRPS v2.0 daily | verification | in use |
 | CHIRPS v2.0 dekadal (preliminary) | rainfall monitoring | in use |
-| TAMSAT, RFE 2.0, ARC 2.0, GPM IMERG | further verification references | coming later: listed, no reader yet, nothing is computed from them |
+| TAMSAT v3.1 dekadal | rainfall monitoring, next to CHIRPS | in use |
+| RFE 2.0, ARC 2.0, GPM IMERG | further verification references | coming later: listed, no reader yet, nothing is computed from them |
 
 ### ECMWF Open Data
 
@@ -82,7 +83,7 @@ The downloads follow ICPAC's
 * `CHIRPS_BASE_URL` points every request at another server laid out like the CHC one (a
   mirror, or the test server below).
 
-## Rainfall monitoring (CHIRPS dekads)
+## Rainfall monitoring (CHIRPS and TAMSAT dekads)
 
 The Monitoring page shows observed rainfall dekad by dekad, as ICPAC's monitoring
 products do: the **dekad total** from the preliminary dekadal NetCDF
@@ -104,6 +105,71 @@ are left out.
 
 Monthly and seasonal totals, anomalies and SPI, which the framework also produces, are
 listed as coming later.
+
+### TAMSAT v3.1
+
+TAMSAT (University of Reading) is a second, independent estimate of each dekad, from
+Meteosat thermal-infrared imagery calibrated against gauges. The Monitoring page switches
+between CHIRPS and TAMSAT and compares the two; where they agree the observed picture is
+firm, where they differ it is uncertain. CHIRPS stays the verification reference.
+
+* The update that downloads the CHIRPS dekad (`update_chirps`, also part of the weekly
+  cycle) then looks for the newest TAMSAT dekad. A TAMSAT failure is logged and never
+  holds up CHIRPS.
+* The dekads are found by listing the month's folder
+  (`<base>/dekadal/<year>/<month>/`, this month and last month) and the name the server
+  lists is downloaded (`rfe<year>_<month>-dk<n>.v3.1.nc`). Requests retry like CHIRPS's.
+* Each file is checked (a rainfall variable, `rfe_filled` else `rfe`; dated inside the
+  dekad; TAMSAT's 0.0375° grid), cropped to the same box as CHIRPS and kept under
+  `DATA_ROOT/tamsat/dekad`; it is interpolated bilinearly to the 0.05° grid for the maps
+  and country figures.
+* Percent of normal is shown from CHIRPS only: TAMSAT's own 1991–2020 dekadal normal is
+  not held.
+* The server is `tamsat.base_url` in `config/data_sources.yaml`
+  (`gws-access.jasmin.ac.uk/public/tamsat/rfe/data/v3.1`); `TAMSAT_BASE_URL` points at
+  another server laid out the same way. If TAMSAT reorganises its folders, set it there;
+  the System page shows "TAMSAT monitoring" with the latest dekad held.
+
+## Bulletin approval by email
+
+A bulletin moves draft → under review → approved → published, on the website or by email,
+in any mix. Every step is recorded with who took it and when.
+
+| Status reached | Who is emailed | What the email holds |
+|---|---|---|
+| Under review (submitted) | `BULLETIN_REVIEWERS` | A personal link to approve or reject, and the Word bulletin |
+| Approved (web or email) | `BULLETIN_PUBLISHERS` (default: the reviewers) | A personal link to publish, and the approved Word bulletin |
+| Published (web or email) | `BULLETIN_DISTRIBUTION` | The published Word bulletin |
+| Rejected | `BULLETIN_REVIEWERS` | Who rejected it and why |
+
+* A link opens the bulletin on the website with the decision buttons. **Nothing changes
+  until the person presses Approve, Reject or Publish there**, so mail scanners that open
+  links cannot approve anything. Rejecting needs a reason.
+* Each link names one bulletin, one step and one address; it is signed, **works once** and
+  **expires after 7 days**. It stops working when the bulletin has moved on (for example,
+  another reviewer approved it first) or when the address is no longer on the list. The
+  decision is recorded as "Name (address)".
+* The bulletin page shows to whom each email went and has **Send again**, which sends new
+  links (for example after a link expired).
+* Without a mail server, everything works on the website as before; the bulletin page and
+  the System page say that email is not set up.
+
+Settings (environment; on Azure pass them to `deploy/azure/backend.sh`, which keeps them
+on later runs):
+
+| Variable | Meaning |
+|---|---|
+| `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_SECURITY` (`starttls`; `ssl` for 465) | The mail server |
+| `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM` (default the user) | Its login and the sender |
+| `BULLETIN_REVIEWERS`, `BULLETIN_PUBLISHERS`, `BULLETIN_DISTRIBUTION` | Comma-separated addresses |
+| `PUBLIC_SITE_URL` | The website the links open, e.g. `https://icpac-ml-ai-product-three.vercel.app` |
+| `EMAIL_ACTION_SECRET` | Signs the links (the deploy script generates one); without it a key is kept in the database |
+| `MAIL_OUTBOX_DIR` | Write the emails to this folder instead of sending them (testing) |
+
+**Gmail** works for a start: turn on 2-Step Verification for the account, create an *app
+password* (Google Account → Security → App passwords), and use `SMTP_HOST=smtp.gmail.com`,
+`SMTP_PORT=587`, `SMTP_USER=<the address>`, `SMTP_PASSWORD=<the 16-letter app password>`.
+For ICPAC's own domain, use its mail server's settings the same way.
 
 ## Operational choice: 0.25° input on the 1.5° training grid
 
@@ -138,8 +204,9 @@ changes.
 ## Network access
 
 The API needs outbound HTTPS to `data.ecmwf.int`, `ecmwf-forecasts.s3.eu-central-1.amazonaws.com`
-(the AWS mirror), `data.chc.ucsb.edu` and, when the Copilot uses Claude,
-`api.anthropic.com`. Azure Container Apps allows this by default.
+(the AWS mirror), `data.chc.ucsb.edu`, `gws-access.jasmin.ac.uk` (TAMSAT), the mail
+server when bulletin email is set up, and the Copilot's model (`api.anthropic.com` or
+`generativelanguage.googleapis.com`). Azure Container Apps allows this by default.
 
 ## Testing without the internet
 
@@ -149,11 +216,13 @@ like `data.ecmwf.int`, and serves them with byte ranges:
 ```bash
 python -m backend.tests.ecmwf_mirror --root /tmp/mirror --port 8998   # yesterday's run
 ECMWF_OPENDATA_MIRRORS=http://127.0.0.1:8998 CHIRPS_BASE_URL=http://127.0.0.1:8998/chc \
-  python -m uvicorn backend.app.main:app
+  TAMSAT_BASE_URL=http://127.0.0.1:8998/tamsat MAIL_OUTBOX_DIR=/tmp/outbox \
+  BULLETIN_REVIEWERS=reviewer@example.org python -m uvicorn backend.app.main:app
 ```
 
-The same server also serves the latest finished CHIRPS dekad under `/chc`, laid out like
-the CHC server.
+The same server also serves the latest finished CHIRPS dekad under `/chc` and TAMSAT dekad
+under `/tamsat`, laid out like their servers. With `MAIL_OUTBOX_DIR` the bulletin emails
+are written there as `.eml` files, whose links can be opened in the browser.
 
 The browser tests (`frontend/e2e`) start this mirror and run the weekly cycle through the
 Operations page before checking every page. The mirror's rainfall is a made-up pattern on

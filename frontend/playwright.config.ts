@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 
 // Browser tests run the real service: a local mirror (ECMWF Open Data GRIB2 files and
-// indexes for yesterday's 00 UTC run, and the newest CHIRPS dekad laid out as on the CHC
-// server), the API on a fresh database, and the web app.
+// indexes for yesterday's 00 UTC run, and the newest CHIRPS and TAMSAT dekads laid out as on
+// their servers), the API on a fresh database, and the web app.
 const state = process.env.E2E_STATE ?? path.join(os.tmpdir(), "icpac-e2e");
 const mirror = "http://127.0.0.1:8998";
 
@@ -44,7 +44,14 @@ export default defineConfig({
         DATA_ROOT: path.join(state, "service", "data"),
         ECMWF_OPENDATA_MIRRORS: mirror,
         CHIRPS_BASE_URL: mirror + "/chc",
+        TAMSAT_BASE_URL: mirror + "/tamsat",
         LLM_PROVIDER: "mock",
+        // Bulletin emails are written to this folder; the tests open their links.
+        MAIL_OUTBOX_DIR: path.join(state, "service", "outbox"),
+        BULLETIN_REVIEWERS: "reviewer@icpac.test",
+        BULLETIN_PUBLISHERS: "publisher@icpac.test",
+        BULLETIN_DISTRIBUTION: "list@icpac.test",
+        PUBLIC_SITE_URL: "http://127.0.0.1:3000",
       },
     },
     {

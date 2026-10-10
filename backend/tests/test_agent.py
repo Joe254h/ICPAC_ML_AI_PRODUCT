@@ -140,6 +140,25 @@ def test_an_invented_figure_falls_back_to_the_checked_answer(env, fast_maps, cla
     assert "Kenya" in answer["text"]
 
 
+def test_an_invented_figure_is_corrected_once_before_falling_back(env, fast_maps, claude):
+    run(env)
+
+    def script(request: dict) -> list[dict]:
+        last = request["messages"][-1]["content"]
+        if isinstance(last, str) and last.startswith("(Automatic check"):
+            assert "999 mm" in last
+            result = tool_results(request)[0]
+            mean = result["statistics_mm"][result["layer"]]["mean"]
+            return [{"type": "text", "text": f"Kenya expects a mean of {mean} mm."}]
+        return country_then(lambda r: "Kenya will see about 999 mm this week.")(request)
+
+    fake = claude(script)
+    answer = Copilot(env.platform).answer(ChatRequest(message="How wet will Kenya be?"))
+    assert answer["fallback"] is None and "999" not in answer["text"]
+    assert answer["text"].startswith("Kenya expects a mean of")
+    assert len(fake.requests) == 3
+
+
 def test_general_questions_are_answered_from_the_model(env, fast_maps, claude):
     run(env)
     text = (
@@ -194,6 +213,11 @@ def test_the_openai_compatible_path_uses_tool_calls(env, fast_maps, monkeypatch)
         assert json["tools"][0]["type"] == "function"
         # Room for a thinking model's reasoning, and how much it reasons.
         assert json["max_tokens"] >= 4096 and json["reasoning_effort"] == "low"
+        # What Gemini accepts: a tool without inputs has no parameters, and only plain
+        # JSON-schema keywords are sent.
+        functions = {t["function"]["name"]: t["function"] for t in json["tools"]}
+        assert "parameters" not in functions["get_data_sources"]
+        assert "minItems" not in str(functions["compare_countries"]["parameters"])
         tools = [m for m in json["messages"] if m["role"] == "tool"]
         message: dict[str, Any]
         if not tools:
@@ -204,10 +228,16 @@ def test_the_openai_compatible_path_uses_tool_calls(env, fast_maps, monkeypatch)
                         "id": "call_1",
                         "type": "function",
                         "function": {"name": "get_forecast", "arguments": "{}"},
+                        "extra_content": {"google": {"thought_signature": "sig-1"}},
                     }
                 ],
             }
         else:
+            # The tool call goes back exactly as the model sent it (thought signature kept).
+            replayed = next(m for m in json["messages"] if m.get("tool_calls"))
+            assert replayed["tool_calls"][0]["extra_content"] == {
+                "google": {"thought_signature": "sig-1"}
+            }
             result = loads(tools[0]["content"])
             region = result["regional_mean_mm"]
             layer = result["main_layer"]

@@ -116,6 +116,19 @@ class VerificationRequest(BaseModel):
     actor: str = Field(min_length=2, max_length=80)
 
 
+class EmailActionRequest(BaseModel):
+    """A decision taken from an emailed link: the link's token and who confirmed it."""
+
+    token: str = Field(min_length=20, max_length=600)
+    decision: Literal["approve", "reject", "publish"]
+    name: str | None = Field(default=None, max_length=60)
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class ResendRequest(BaseModel):
+    actor: str = Field(min_length=2, max_length=80)
+
+
 class BulletinRequest(BaseModel):
     """Generate the weekly bulletin draft of a forecast (the latest by default)."""
 

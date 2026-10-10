@@ -64,7 +64,7 @@ const STEPS: {
   {
     action: "update_chirps",
     title: "Update rainfall monitoring",
-    text: "Download the newest CHIRPS dekad, if there is one.",
+    text: "Download the newest CHIRPS and TAMSAT dekads, if new ones are out.",
     icon: BarChart3,
   },
 ];

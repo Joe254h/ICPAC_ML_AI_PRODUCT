@@ -39,13 +39,18 @@ On Azure, `ANTHROPIC_API_KEY=... bash deploy/azure/backend.sh` stores the key as
 
 ### Free: Google Gemini
 
-The Gemini API has a free tier (Flash models; key from https://aistudio.google.com/apikey, no card). On Azure:
+The Gemini API has a free tier (Flash models; key from https://aistudio.google.com/apikey, no card). On Azure (Cloud Shell in PowerShell):
 
-```bash
-GEMINI_API_KEY=... bash deploy/azure/backend.sh      # GEMINI_MODEL picks another model
+```powershell
+$env:GEMINI_API_KEY = Read-Host "Gemini key" -MaskInput   # GEMINI_MODEL picks another model
+bash backend.sh
 ```
 
-This sets `LLM_PROVIDER=openai_compatible`, `LLM_TOOLS=true`, Gemini's OpenAI-compatible endpoint (`https://generativelanguage.googleapis.com/v1beta/openai`), `gemini-2.5-flash` and `LLM_REASONING_EFFORT=low`. The Copilot then answers the same way as with Claude, and the same figure check applies. Free-tier limits are per minute and per day, and each question uses two or three requests; when a limit is reached, the checked fixed sentences answer. On the free tier Google may use what is sent to improve its products: the Copilot sends the question and the forecast figures, which are public, but forecasters should not type anything confidential. Check the current limits in Google AI Studio.
+In Bash, `GEMINI_API_KEY=... bash backend.sh` does the same.
+
+This sets `LLM_PROVIDER=openai_compatible`, `LLM_TOOLS=true`, Gemini's OpenAI-compatible endpoint (`https://generativelanguage.googleapis.com/v1beta/openai`), `gemini-2.5-flash` and `LLM_REASONING_EFFORT=low`. The Copilot then answers the same way as with Claude, and the same figure check applies. Free-tier limits are per minute and per day, and each question uses two or three requests; a request refused for the per-minute limit (or a brief server error) is retried once after the wait Gemini asks for, and when a limit is still reached, the checked fixed sentences answer.
+
+Gemini is strict about tool definitions: it refuses the whole request when a tool's parameter schema is an object with no properties, or uses JSON Schema keywords it does not support. Each tool is therefore sent with only the keywords Gemini accepts (`type`, `description`, `properties`, `required`, `enum`, `items`), and a tool without inputs is sent without parameters. Gemini's thinking models also attach a signature to each tool call that must come back unchanged with the tool's result; the Copilot returns the calls exactly as Gemini sent them. When Gemini refuses a request, the server log says why (`Copilot model ... answered 400: ...`). On the free tier Google may use what is sent to improve its products: the Copilot sends the question and the forecast figures, which are public, but forecasters should not type anything confidential. Check the current limits in Google AI Studio.
 
 ### Cheapest Claude
 

@@ -30,7 +30,11 @@ def install(app: FastAPI, dependency) -> None:
         """Observation and forecast sources: active ones with what has been fetched,
         planned ones as listed for later."""
         service = ForecastService(platform)
-        fetched = {"ecmwf": service.ecmwf_inputs(), "chirps": service.chirps_inputs()}
+        fetched = {
+            "ecmwf": service.ecmwf_inputs(),
+            "chirps": service.chirps_inputs(),
+            "tamsat": MonitoringService(platform, "tamsat").dekads(),
+        }
         return [
             {
                 **source,
@@ -48,35 +52,40 @@ def install(app: FastAPI, dependency) -> None:
     def chirps_inputs(platform=Depends(dependency)) -> list[dict]:
         return ForecastService(platform).chirps_inputs()
 
-    def with_overlays(record: dict) -> dict:
-        base = f"/monitoring/dekads/{record['dekad']}/overlay?product="
+    Source = Query("chirps", pattern=r"^(chirps|tamsat)$")
+
+    def with_overlays(record: dict, source: str) -> dict:
+        base = f"/monitoring/dekads/{record['dekad']}/overlay?source={source}&product="
         overlays = {"total": base + "total"}
         if record["percent_of_normal"]["status"] == "available":
             overlays["percent"] = base + "percent"
         return {**record, "overlays": overlays, "overlay_bounds": MonitoringService.bounds()}
 
     @app.get("/monitoring/dekads")
-    def monitoring_dekads(platform=Depends(dependency)) -> list[dict]:
-        """CHIRPS preliminary dekads downloaded for rainfall monitoring, newest first."""
-        return MonitoringService(platform).dekads()
+    def monitoring_dekads(source: str = Source, platform=Depends(dependency)) -> list[dict]:
+        """Dekads of observed rainfall (CHIRPS or TAMSAT) held for monitoring, newest first."""
+        return MonitoringService(platform, source).dekads()
 
     @app.get("/monitoring/dekads/latest")
-    def monitoring_latest(platform=Depends(dependency)) -> dict:
-        return with_overlays(MonitoringService(platform).latest())
+    def monitoring_latest(source: str = Source, platform=Depends(dependency)) -> dict:
+        return with_overlays(MonitoringService(platform, source).latest(), source)
 
     @app.get("/monitoring/dekads/{dekad}")
-    def monitoring_dekad(dekad: str = DekadId, platform=Depends(dependency)) -> dict:
-        return with_overlays(MonitoringService(platform).get(dekad))
+    def monitoring_dekad(
+        dekad: str = DekadId, source: str = Source, platform=Depends(dependency)
+    ) -> dict:
+        return with_overlays(MonitoringService(platform, source).get(dekad), source)
 
     @app.get("/monitoring/dekads/{dekad}/overlay")
     def monitoring_overlay(
         dekad: str = DekadId,
         product: str = Query("total", pattern=r"^(total|percent)$"),
+        source: str = Source,
         platform=Depends(dependency),
     ):
         """The dekad's total (or percent of normal) as a transparent Web Mercator PNG."""
         return Response(
-            MonitoringService(platform).overlay_png(dekad, product),
+            MonitoringService(platform, source).overlay_png(dekad, product),
             media_type="image/png",
             headers={"Cache-Control": "public, max-age=86400"},
         )

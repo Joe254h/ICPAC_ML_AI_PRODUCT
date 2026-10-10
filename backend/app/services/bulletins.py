@@ -9,6 +9,7 @@ them before every transition. Without a forecast there is nothing to draft.
 import hashlib
 import json
 import os
+from datetime import date
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -82,7 +83,8 @@ def review_label(bulletin: dict) -> str | None:
         for part in bulletin["facts"]["label"].split(" · ")
         if part not in ("DRAFT - NOT APPROVED", "forecaster review required")
     ]
-    return " · ".join([f"{state} by {review['actor']} on {review['timestamp'][:10]}", *scope])
+    day = date.fromisoformat(review["timestamp"][:10])
+    return " · ".join([f"{state} by {review['actor']} on {day.day} {day:%b %Y}", *scope])
 
 
 def check_consistency(bulletin: dict) -> dict:
@@ -273,6 +275,14 @@ class BulletinService:
                 )
             )
             session.commit()
+        # Tell the people the new status concerns; a mail problem never undoes the decision.
+        from backend.app.services.bulletin_mail import notify
+
+        bulletin["id"] = identifier
+        try:
+            bulletin["notification"] = notify(self.platform, bulletin)
+        except Exception as exc:  # reported with the decision, never raised
+            bulletin["notification"] = {"skipped": f"Email failed ({type(exc).__name__})."}
         return bulletin
 
     def map(self, bulletin: dict) -> bytes:

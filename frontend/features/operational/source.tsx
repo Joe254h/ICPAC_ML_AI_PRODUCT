@@ -1,8 +1,8 @@
 "use client";
-/** One data source: ECMWF ensemble, CHIRPS, or a source that is coming later. */
+/** One data source: ECMWF ensemble, CHIRPS, TAMSAT, or a source that is coming later. */
 import Link from "next/link";
 import { useState } from "react";
-import { CheckCircle2, Download, ExternalLink } from "lucide-react";
+import { CheckCircle2, Download, ExternalLink, RefreshCw } from "lucide-react";
 import {
   Button,
   Card,
@@ -17,12 +17,13 @@ import {
 } from "@/components/ui";
 import type { PageProps } from "@/features/view";
 import { useActor } from "@/lib/actor";
-import { dateTime, day, validDays } from "@/lib/format";
+import { dateTime, day, num, period, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
 import type {
   ChirpsWindow,
   DataSource,
+  Dekad,
   EcmwfInput,
   Operation,
 } from "@/types/operational";
@@ -292,6 +293,113 @@ function Chirps() {
   );
 }
 
+function Tamsat() {
+  const dekads = useApi<Dekad[]>("/monitoring/dekads?source=tamsat");
+  const [actor] = useActor();
+  const { operation, error, running, start } = useOperation(() =>
+    dekads.reload(),
+  );
+  return (
+    <>
+      <PageBanner
+        title="TAMSAT v3.1"
+        crumbs={[{ label: "Data & Tools", href: "/data" }, { label: "TAMSAT" }]}
+        subtitle="A second observed-rainfall estimate for the monitoring: dekadal rainfall over Africa from Meteosat thermal-infrared imagery, calibrated against rain gauges, at 0.0375°."
+        actions={
+          <Button
+            variant="amber"
+            disabled={running}
+            onClick={() => start("update_chirps", actor || "Forecaster")}
+          >
+            <RefreshCw size={17} className={running ? "spin" : undefined} />
+            {running ? "Checking…" : "Check for a new dekad"}
+          </Button>
+        }
+      />
+      <OperationNotice operation={operation} error={error} />
+      <Card
+        title="Downloaded dekads"
+        subtitle="Each one is shown on the Monitoring page next to CHIRPS."
+      >
+        {dekads.loading && <Skeleton height={160} />}
+        {dekads.error && (
+          <ErrorState message={dekads.error} retry={dekads.reload} />
+        )}
+        {dekads.data && !dekads.data.length && (
+          <p style={{ margin: 0 }}>
+            No dekad downloaded yet. The weekly cycle and the daily task look
+            for a new one, or use the button above.
+          </p>
+        )}
+        {dekads.data && dekads.data.length > 0 && (
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Dekad</th>
+                  <th className="num">Regional mean (mm)</th>
+                  <th className="num">Below 1 mm</th>
+                  <th>Fetched</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dekads.data.map((row) => (
+                  <tr key={row.dekad}>
+                    <td className="strong">
+                      <Link href="/monitoring?source=tamsat">
+                        {period(row.start, row.end)}
+                      </Link>
+                    </td>
+                    <td className="num">{num(row.region.mean_mm)}</td>
+                    <td className="num">
+                      {Math.round(row.region.dry_fraction * 100)}%
+                    </td>
+                    <td style={{ color: "var(--muted)" }}>
+                      {dateTime(row.fetched_at)} · {row.fetched_by}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      <div className="grid-2">
+        <Card title="How it is processed">
+          <ol style={{ margin: 0, paddingLeft: 22, display: "grid", gap: 8 }}>
+            <li>
+              The month&apos;s folder on the TAMSAT server is listed and the
+              newest dekad is downloaded once.
+            </li>
+            <li>
+              The file is checked: a rainfall field, dated inside the dekad, on
+              TAMSAT&apos;s 0.0375° grid. Gap-filled rainfall is used where
+              TAMSAT provides it.
+            </li>
+            <li>
+              It is cut to Eastern Africa, interpolated to the 0.05° ICPAC grid
+              and summarised by member state.
+            </li>
+          </ol>
+        </Card>
+        <Card title="Use">
+          <KeyValues
+            items={[
+              ["Monitoring", "Dekad totals, next to CHIRPS"],
+              [
+                "Percent of normal",
+                "From CHIRPS; TAMSAT's own 1991–2020 normal is not held",
+              ],
+              ["Verification", "CHIRPS stays the reference"],
+              ["Licence", "CC BY 4.0, University of Reading"],
+            ]}
+          />
+        </Card>
+      </div>
+    </>
+  );
+}
+
 function Planned({ source, title }: { source?: DataSource; title: string }) {
   return (
     <>
@@ -345,7 +453,8 @@ export default function Source({ route }: PageProps) {
       <div className="wrap">
         {id === "ecmwf" && <Ecmwf source={source} />}
         {id === "chirps" && <Chirps />}
-        {id !== "ecmwf" && id !== "chirps" && (
+        {id === "tamsat" && <Tamsat />}
+        {id !== "ecmwf" && id !== "chirps" && id !== "tamsat" && (
           <Planned source={source} title={route.title} />
         )}
       </div>

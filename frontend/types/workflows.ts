@@ -88,4 +88,39 @@ export type Bulletin = {
     from?: string;
     to?: string;
   }[];
+  /** Emails sent at each step, newest last. */
+  emails?: EmailNotice[];
+  /** The email of the decision just taken. */
+  notification?: EmailNotice;
+};
+
+export type EmailNotice = {
+  step?: string;
+  at?: string;
+  sent?: string[];
+  failed?: { to: string; reason: string }[];
+  skipped?: string | null;
+};
+
+export type EmailStatus = {
+  configured: boolean;
+  problem: string | null;
+  reviewers: number;
+  publishers: number;
+  distribution: number;
+};
+
+export type EmailAction = {
+  step: "review" | "publish";
+  email: string;
+  decisions: ("approve" | "reject" | "publish")[];
+  reason: string | null;
+  bulletin: {
+    id: string;
+    title: string;
+    status: Bulletin["status"];
+    headline: string;
+    period?: string;
+    reviews: Bulletin["reviews"];
+  };
 };

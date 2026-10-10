@@ -208,6 +208,35 @@ def build_chirps_dekad(root: Path, today: date) -> Path:
     return path
 
 
+def build_tamsat_dekad(root: Path, today: date) -> Path:
+    """The newest dekad that has ended before ``today``, as a TAMSAT v3.1 dekadal NetCDF
+    (rfe_filled on TAMSAT's 0.0375 degree grid, latitude north to south) under /tamsat."""
+    import xarray as xr
+
+    from climate_engine.inputs.chirps_dekad import Dekad
+
+    year, month = today.year, today.month
+    if today.day > 20:
+        dekad = Dekad(year, month, 2)
+    elif today.day > 10:
+        dekad = Dekad(year, month, 1)
+    else:
+        previous = date(year, month, 1) - timedelta(days=1)
+        dekad = Dekad(previous.year, previous.month, 3)
+    lat = np.round(np.arange(24.98125, -14.99, -0.0375), 5)
+    lon = np.round(np.arange(19.01875, 53.99, 0.0375), 5)
+    pattern = 35 * (1 + np.cos(np.deg2rad(lat * 8))[:, None] * np.sin(np.deg2rad(lon * 6)))
+    folder = root / f"tamsat/dekadal/{dekad.year}/{dekad.month:02d}"
+    folder.mkdir(parents=True, exist_ok=True)
+    data = xr.Dataset(
+        {"rfe_filled": (("time", "lat", "lon"), pattern[None].astype(np.float32))},
+        coords={"time": [np.datetime64(dekad.start.isoformat())], "lat": lat, "lon": lon},
+    )
+    path = folder / f"rfe{dekad.year}_{dekad.month:02d}-dk{dekad.number}.v3.1.nc"
+    data.to_netcdf(path)
+    return path
+
+
 class _Quiet(SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -252,8 +281,8 @@ class _RangeHandler(_Quiet):
 
 def main() -> None:
     """Build and serve a mirror holding yesterday's run, the newest a forecaster would find,
-    and the newest ended CHIRPS dekad (browser tests point ECMWF_OPENDATA_MIRRORS at the
-    mirror and CHIRPS_BASE_URL at its /chc folder)."""
+    and the newest ended CHIRPS and TAMSAT dekads (browser tests point ECMWF_OPENDATA_MIRRORS
+    at the mirror, CHIRPS_BASE_URL at its /chc folder and TAMSAT_BASE_URL at /tamsat)."""
     parser = argparse.ArgumentParser(description=main.__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8998)
@@ -264,6 +293,7 @@ def main() -> None:
     shutil.rmtree(args.root, ignore_errors=True)
     build(args.root, day, args.members)
     build_chirps_dekad(args.root, day + timedelta(days=1))
+    build_tamsat_dekad(args.root, day + timedelta(days=1))
     handler = partial(_RangeHandler, directory=str(args.root))
     print(f"ECMWF mirror of the {day} 00 UTC run on http://127.0.0.1:{args.port}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", args.port), handler).serve_forever()

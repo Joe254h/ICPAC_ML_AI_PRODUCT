@@ -4,7 +4,8 @@ Operational web service for ICPAC Week-2 (Days 8–14) rainfall forecasts over t
 member states, designed after [icpac.net](https://www.icpac.net/). Each week it downloads
 the ECMWF ensemble from ECMWF Open Data, issues the forecast on the authoritative
 800 × 700 grid (205,999-cell ICPAC-11 domain), drafts the ICPAC weekly bulletin for
-review and verifies finished forecasts against CHIRPS. It shows three forecast layers:
+review (approved and published on the website or from emailed links) and verifies finished
+forecasts against CHIRPS. It shows three forecast layers:
 
 * **Raw ECMWF**: the ensemble mean of the Week-2 total (50 perturbed members);
 * **MBC**: the locked multiplicative bias correction, `max(0, raw × R[month, cell])`,
@@ -14,14 +15,15 @@ review and verifies finished forecasts against CHIRPS. It shows three forecast l
   **in progress**: it needs the pressure-level inputs described in
   [weekly operations](docs/operations.md#the-mbc--aiml-hybrid-layer-in-progress).
 
-It also monitors observed rainfall dekad by dekad from CHIRPS, downloaded the way ICPAC's
+It also monitors observed rainfall dekad by dekad from CHIRPS and TAMSAT, downloaded the
+way ICPAC's
 [climate monitoring framework](https://github.com/misianihabat/ICPAC-Climate-Monitoring-operational-framework)
 does, and its Forecaster Copilot answers questions about the forecast from the service's
-own results (checked number by number) and general climate questions, with Claude through
-the Anthropic API ([Copilot](docs/chatbot.md)).
+own results (checked number by number) and general climate questions, with Claude or the
+free Gemini API ([Copilot](docs/chatbot.md)).
 
-Observation datasets other than CHIRPS (TAMSAT, RFE 2.0, ARC 2.0, GPM IMERG) are listed as
-coming later; nothing is computed from them yet.
+Other observation datasets (RFE 2.0, ARC 2.0, GPM IMERG) are listed as coming later;
+nothing is computed from them yet.
 
 The model in use is the **candidate** `mbc_atmos37_catboost_candidate_v1` (378 trees,
 trained 2008–2019, validated 2020–2021). It is not the production model: production
@@ -33,7 +35,8 @@ arrives as a new version.
 | Interface (Next.js 16, Tailwind 4, MapLibre; icpac.net design) | `frontend/` |
 | API (FastAPI) | `backend/app/` |
 | Science: grid, Week-2 processing, MBC, Atmos37 features, inference, verification | `climate_engine/` |
-| ECMWF Open Data and CHIRPS downloads, rainfall monitoring | `climate_engine/inputs/`, `config/data_sources.yaml`, `backend/app/services/monitoring.py` |
+| ECMWF Open Data, CHIRPS and TAMSAT downloads, rainfall monitoring | `climate_engine/inputs/`, `config/data_sources.yaml`, `backend/app/services/monitoring.py` |
+| Bulletin approval by email | `backend/app/services/mail.py`, `backend/app/services/bulletin_mail.py` |
 | Forecaster Copilot (tool-using assistant, fixed-sentence fallback) | `chatbot/` |
 | ICPAC map standard | `climate_engine/cartography/icpac_maps.py` |
 | Product packages and bulletin interface | `climate_engine/products/` |
@@ -114,12 +117,13 @@ candidate with the refitted model is described in
 | Models, model in use, registration | `GET /models`, `GET /models/current`, `POST /models/register` |
 | Independent test, promotion | `POST /models/{id}/independent-test`, `POST /models/{id}/promote` |
 | Weekly cycle and its steps | `POST /operations` (`cycle`, `fetch_ecmwf`, `run_forecast`, `verify_due`, `verify_forecast`, `update_chirps`), `GET /operations`, `GET /operations/{id}` |
-| Rainfall monitoring (CHIRPS dekads) | `GET /monitoring/dekads`, `GET /monitoring/dekads/latest`, `GET /monitoring/dekads/{dekad}`, `/overlay?product=total\|percent` |
+| Rainfall monitoring (CHIRPS and TAMSAT dekads) | `GET /monitoring/dekads`, `GET /monitoring/dekads/latest`, `GET /monitoring/dekads/{dekad}`, `/overlay?product=total\|percent`; each takes `?source=chirps\|tamsat` |
 | Forecaster Copilot | `POST /chat`, `GET /chat/sessions`, `GET /chat/sessions/{id}` |
 | Data sources | `GET /data/sources`, `GET /data/ecmwf`, `GET /data/chirps` |
 | Forecasts | `GET /forecasts`, `GET /forecasts/latest`, `POST /forecasts/run`, `POST /forecasts/import` |
 | One forecast | `GET /forecasts/{id}`, `/map?layer=mbc\|raw`, `/overlay?layer=`, `/countries`, `/verification`, `/bulletin`, `/package/{file}` |
 | Weekly bulletin drafts | `GET /bulletins`, `POST /bulletins/generate`, `POST /bulletins/{id}/submit\|approve\|reject\|publish`, `GET /bulletins/{id}/export` |
+| Bulletin approval by email | `GET /bulletins/email-status`, `GET\|POST /bulletins/email-action` (the emailed links), `POST /bulletins/{id}/resend` |
 | Verification | `POST /forecasts/{id}/verification`, `GET /verification/seasonal`, `GET /verification/maps/{metric}` |
 | System health | `GET /health` |
 

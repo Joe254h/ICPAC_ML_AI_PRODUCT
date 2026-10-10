@@ -1,10 +1,11 @@
-"""Rainfall monitoring: the latest CHIRPS preliminary dekad, as ICPAC's climate monitoring
-framework produces it (total rainfall and, with the 1991-2020 normal, percent of normal).
+"""Rainfall monitoring: the latest dekad of observed rainfall from CHIRPS (preliminary) and
+TAMSAT v3.1, as ICPAC's climate monitoring framework produces it (total rainfall and, with
+the 1991-2020 normal, percent of normal).
 
-Each update lists the server, downloads the newest dekad only if it is not held yet, checks
-and crops it, and records its regional and country figures. The cropped file is kept under
-DATA_ROOT/chirps/dekad (and in Blob Storage when configured, so a restarted server finds it
-again).
+Each update lists the source's server, downloads the newest dekad only if it is not held
+yet, checks and crops it, and records its regional and country figures. The cropped file is
+kept under DATA_ROOT/<source>/dekad (and in Blob Storage when configured, so a restarted
+server finds it again).
 """
 
 import os
@@ -17,12 +18,14 @@ import xarray as xr
 
 from backend.app.services import operational
 from climate_engine.core import ROOT
-from climate_engine.inputs import chirps, chirps_dekad
+from climate_engine.inputs import chirps, chirps_dekad, tamsat
 from climate_engine.inputs.chirps_dekad import Dekad
 from climate_engine.operational.grid import DomainGrid, country_selections
 from climate_engine.products.store import package_store
 
 KIND = "chirps_dekad"
+#: Record kind of each source's dekads.
+SOURCES = {"chirps": "chirps_dekad", "tamsat": "tamsat_dekad"}
 PRODUCTS = ("total", "percent")
 
 
@@ -67,54 +70,78 @@ def figures(
 
 
 class MonitoringService:
-    def __init__(self, platform):
+    def __init__(self, platform, source: str = "chirps"):
+        if source not in SOURCES:
+            raise ValueError("Monitoring sources: chirps, tamsat")
         self.platform = platform
         self.repo = platform.repo
+        self.source = source
+        self.kind = SOURCES[source]
 
-    @staticmethod
-    def root() -> Path:
+    def root(self) -> Path:
         data_root = Path(os.getenv("DATA_ROOT", str(ROOT / "data" / "observations")))
-        return data_root / "chirps" / "dekad"
+        return data_root / self.source / "dekad"
 
     def dekads(self) -> list[dict[str, Any]]:
-        return sorted(self.repo.list(KIND), key=lambda r: r["dekad"], reverse=True)
+        return sorted(self.repo.list(self.kind), key=lambda r: r["dekad"], reverse=True)
 
     def latest(self) -> dict[str, Any]:
         records = self.dekads()
         if not records:
-            raise KeyError("no CHIRPS dekad downloaded yet")
+            raise KeyError(f"no {self.source.upper()} dekad downloaded yet")
         return records[0]
 
+    def key(self, dekad: Dekad) -> str:
+        """The record's id: record ids are shared by every kind, so TAMSAT's are prefixed
+        (CHIRPS keeps the plain dekad, as before)."""
+        return dekad.id if self.source == "chirps" else f"{self.source}-{dekad.id}"
+
     def get(self, identifier: str) -> dict[str, Any]:
-        return self.repo.get(KIND, Dekad.from_id(identifier).id)
+        return self.repo.get(self.kind, self.key(Dekad.from_id(identifier)))
 
     def update(self, actor: str, server: chirps.Server | None = None) -> dict[str, Any]:
         """Download the newest published dekad if it is not held yet."""
-        server = server or chirps.Server()
-        listed = chirps_dekad.published(server)
-        if not listed:
-            raise chirps.CHIRPSUnavailable("The CHIRPS server lists no preliminary dekad")
+        if self.source == "tamsat":
+            server = server or tamsat.server()
+            listed = tamsat.published(server)
+            if not listed:
+                raise tamsat.TAMSATUnavailable("The TAMSAT server lists no recent dekad")
+        else:
+            server = server or chirps.Server()
+            listed = chirps_dekad.published(server)
+            if not listed:
+                raise chirps.CHIRPSUnavailable("The CHIRPS server lists no preliminary dekad")
         dekad = listed[-1]
-        if any(r["dekad"] == dekad.id for r in self.repo.list(KIND)):
-            return {"dekad": dekad.id, "new": False}
-        field, source = chirps_dekad.fetch(dekad, server)
-        path = self.root() / dekad.name
+        if any(r["dekad"] == dekad.id for r in self.repo.list(self.kind)):
+            return {"source": self.source, "dekad": dekad.id, "new": False}
+        if self.source == "tamsat":
+            field, origin = tamsat.fetch(dekad, server)
+            name = origin["url"].rsplit("/", 1)[-1]
+        else:
+            field, origin = chirps_dekad.fetch(dekad, server)
+            name = dekad.name
+        path = self.root() / name
         path.parent.mkdir(parents=True, exist_ok=True)
         partial = path.with_name(f".{path.name}.partial")
         field.to_dataset().to_netcdf(partial)
         partial.replace(path)
         store = package_store()
         if store is not None:
-            store.put(f"inputs/chirps/dekad/{dekad.name}", path.read_bytes())
-        record = self._record(dekad, field, source, actor)
-        self.repo.save(KIND, record, dekad.id)
-        return {"dekad": dekad.id, "new": True}
+            store.put(f"inputs/{self.source}/dekad/{name}", path.read_bytes())
+        record = self._record(dekad, field, origin, actor, name)
+        self.repo.save(self.kind, record, self.key(dekad))
+        return {"source": self.source, "dekad": dekad.id, "new": True}
+
+    def on_grid(self, field: xr.DataArray, grid: DomainGrid) -> np.ndarray:
+        if self.source == "tamsat":
+            return tamsat.on_grid(field, grid)
+        return chirps_dekad.on_grid(field, grid)
 
     def _record(
-        self, dekad: Dekad, field: xr.DataArray, source: dict[str, Any], actor: str
+        self, dekad: Dekad, field: xr.DataArray, origin: dict[str, Any], actor: str, name: str
     ) -> dict[str, Any]:
         grid = operational.authoritative_grid()
-        total = chirps_dekad.on_grid(field, grid)
+        total = self.on_grid(field, grid)
         normal, reason = self._normal(dekad, grid)
         region, countries = figures(total, normal, grid)
         return {
@@ -124,9 +151,10 @@ class MonitoringService:
             "number": dekad.number,
             "start": dekad.start.isoformat(),
             "end": dekad.end.isoformat(),
-            "product": "preliminary",
-            "file": dekad.name,
-            **source,
+            "source": self.source,
+            "product": "preliminary" if self.source == "chirps" else "v3.1",
+            "file": name,
+            **origin,
             "region": region,
             "countries": countries,
             "percent_of_normal": {
@@ -137,8 +165,12 @@ class MonitoringService:
             "fetched_by": actor,
         }
 
-    @staticmethod
-    def _normal(dekad: Dekad, grid: DomainGrid) -> tuple[np.ndarray | None, str | None]:
+    def _normal(self, dekad: Dekad, grid: DomainGrid) -> tuple[np.ndarray | None, str | None]:
+        if self.source == "tamsat":
+            return None, (
+                "Percent of normal from TAMSAT needs TAMSAT's own 1991–2020 mean of each "
+                "dekad; it is shown from CHIRPS."
+            )
         path = chirps_dekad.climatology_path()
         if path is None:
             return None, (
@@ -154,9 +186,11 @@ class MonitoringService:
         path = self.root() / record["file"]
         if not path.exists():
             store = package_store()
-            saved = store.get(f"inputs/chirps/dekad/{record['file']}") if store else None
+            saved = store.get(f"inputs/{self.source}/dekad/{record['file']}") if store else None
             if saved is None:
-                raise FileNotFoundError(f"The CHIRPS dekad {identifier} file is not available")
+                raise FileNotFoundError(
+                    f"The {self.source.upper()} dekad {identifier} file is not available"
+                )
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(saved)
         with xr.open_dataset(path) as data:
@@ -174,7 +208,7 @@ class MonitoringService:
         cache = self.root() / "overlays" / f"{record['dekad']}-{product}-v1.png"
         if not cache.exists():
             grid = operational.authoritative_grid()
-            total = chirps_dekad.on_grid(self.field(identifier), grid)
+            total = self.on_grid(self.field(identifier), grid)
             if product == "total":
                 values, scale = total, chirps_dekad.TOTAL
             else:

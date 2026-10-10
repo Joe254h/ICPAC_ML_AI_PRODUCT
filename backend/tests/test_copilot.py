@@ -27,7 +27,7 @@ def test_copilot_answers_from_the_operational_forecast(env, fast_maps):
     second = copilot.answer(
         ChatRequest(message="What datasets are available?", session_id=answer["session_id"])
     )
-    assert "CHIRPS" in second["text"] and "Coming later: TAMSAT" in second["text"]
+    assert "TAMSAT v3.1" in second["text"] and "Coming later: RFE 2.0" in second["text"]
     assert len(env.platform.repo.get("chat_session", answer["session_id"])["messages"]) == 4
 
 

@@ -330,9 +330,11 @@ export type DekadFigures = {
   percent_of_normal?: number | null;
 };
 
-/** A CHIRPS preliminary dekad downloaded for rainfall monitoring. */
+/** A dekad of observed rainfall (CHIRPS preliminary or TAMSAT) held for monitoring. */
 export type Dekad = {
   dekad: string;
+  /** Older CHIRPS records have no source. */
+  source?: "chirps" | "tamsat";
   year: number;
   month: number;
   number: number;

@@ -1,7 +1,8 @@
 "use client";
-/** Rainfall monitoring: observed rainfall of the latest CHIRPS dekad, by country. */
+/** Rainfall monitoring: observed rainfall of the latest dekad from CHIRPS or TAMSAT, by
+ * country. */
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import RainMap, { LegendBar } from "@/components/rain-map";
 import {
@@ -22,6 +23,43 @@ import { useOperation } from "@/services/operations";
 import type { Dekad } from "@/types/operational";
 
 type Product = "total" | "percent";
+type Source = "chirps" | "tamsat";
+
+const SOURCES: Record<
+  Source,
+  { name: string; product: string; credit: string; about: React.ReactNode }
+> = {
+  chirps: {
+    name: "CHIRPS",
+    product: "CHIRPS preliminary",
+    credit: "Observed: CHIRPS, Climate Hazards Center (UCSB)",
+    about: (
+      <p>
+        CHIRPS blends satellite rainfall estimates with station observations at
+        about 5 km. The preliminary dekad is published a few days after it ends;
+        percent of normal compares it with the 1991–2020 average of the same
+        dekad.
+      </p>
+    ),
+  },
+  tamsat: {
+    name: "TAMSAT",
+    product: "TAMSAT v3.1",
+    credit: "Observed: TAMSAT, University of Reading",
+    about: (
+      <p>
+        TAMSAT estimates rainfall over Africa from Meteosat thermal-infrared
+        imagery, calibrated against rain gauges, at about 4 km. It is a second,
+        independent estimate: where the two agree the picture is firm, where
+        they differ the observations are uncertain.
+      </p>
+    ),
+  },
+};
+
+function sourceOf(dekad: Dekad): Source {
+  return dekad.source === "tamsat" ? "tamsat" : "chirps";
+}
 
 const CLASSES: Record<
   Product,
@@ -72,7 +110,7 @@ function DekadMap({ dekad }: { dekad: Dekad }) {
         overlay={dekad.overlays[product] ?? dekad.overlays.total}
         bounds={dekad.overlay_bounds}
         height={620}
-        credit="Observed: CHIRPS, Climate Hazards Center (UCSB)"
+        credit={SOURCES[sourceOf(dekad)].credit}
         hover={(name) => {
           const row = dekad.countries.find((c) => c.country === name);
           if (!row) return null;
@@ -114,16 +152,69 @@ function DekadMap({ dekad }: { dekad: Dekad }) {
   );
 }
 
-function Body({ dekad, history }: { dekad: Dekad; history?: Dekad[] }) {
+function Compare({ dekad, other }: { dekad: Dekad; other?: Dekad }) {
+  const both = (["chirps", "tamsat"] as Source[])
+    .map((key) => [dekad, other].find((d) => d && sourceOf(d) === key))
+    .filter((item): item is Dekad => Boolean(item));
+  const same = other && other.dekad === dekad.dekad;
+  return (
+    <Card
+      title="CHIRPS and TAMSAT"
+      subtitle={
+        same
+          ? "The two estimates of the same dekad."
+          : other
+            ? "The latest dekad of each; they cover different dekads."
+            : `No ${SOURCES[sourceOf(dekad) === "chirps" ? "tamsat" : "chirps"].name} dekad yet to compare with.`
+      }
+    >
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Estimate</th>
+              <th>Dekad</th>
+              <th className="num">Mean (mm)</th>
+              <th className="num">Below 1 mm</th>
+            </tr>
+          </thead>
+          <tbody>
+            {both.map((item) => (
+              <tr key={sourceOf(item)}>
+                <td className="strong">{SOURCES[sourceOf(item)].name}</td>
+                <td>{shortPeriod(item.start, item.end)}</td>
+                <td className="num">{num(item.region.mean_mm)}</td>
+                <td className="num">
+                  {Math.round(item.region.dry_fraction * 100)}%
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function Body({
+  dekad,
+  history,
+  other,
+}: {
+  dekad: Dekad;
+  history?: Dekad[];
+  other?: Dekad;
+}) {
   const rows = [...dekad.countries].sort((a, b) => b.mean_mm - a.mean_mm);
   const percent = dekad.percent_of_normal.status === "available";
+  const source = SOURCES[sourceOf(dekad)];
   return (
     <>
       <div className="stats">
         <Stat
           label="Dekad"
           value={shortPeriod(dekad.start, dekad.end)}
-          hint={`${dekad.start.slice(0, 4)} · CHIRPS preliminary`}
+          hint={`${dekad.start.slice(0, 4)} · ${source.product}`}
         />
         <Stat
           label="Regional mean"
@@ -183,6 +274,7 @@ function Body({ dekad, history }: { dekad: Dekad; history?: Dekad[] }) {
           </div>
         </Card>
         <div style={{ display: "grid", gap: 20 }}>
+          <Compare dekad={dekad} other={other} />
           {!percent && (
             <InProgress title="Percent of normal">
               {dekad.percent_of_normal.reason ??
@@ -199,13 +291,8 @@ function Body({ dekad, history }: { dekad: Dekad; history?: Dekad[] }) {
               ))}
             </ul>
           </Card>
-          <Card title="About the data">
-            <p>
-              CHIRPS combines satellite rainfall estimates with station
-              observations at about 5 km. The preliminary dekad is published a
-              few days after it ends; percent of normal compares it with the
-              1991–2020 average of the same dekad.
-            </p>
+          <Card title={`About ${source.name}`}>
+            {source.about}
             <p>
               Forecasts are verified against the daily CHIRPS files, see{" "}
               <Link href="/verification">Verification</Link>.
@@ -250,39 +337,78 @@ function Body({ dekad, history }: { dekad: Dekad; history?: Dekad[] }) {
   );
 }
 
+function initialSource(): Source {
+  if (typeof window === "undefined") return "chirps";
+  return new URLSearchParams(window.location.search).get("source") === "tamsat"
+    ? "tamsat"
+    : "chirps";
+}
+
 export default function Monitoring() {
-  const latest = useApi<Dekad>("/monitoring/dekads/latest");
-  const history = useApi<Dekad[]>("/monitoring/dekads");
+  const [source, setSource] = useState<Source>("chirps");
+  useEffect(() => setSource(initialSource()), []);
+  const other: Source = source === "chirps" ? "tamsat" : "chirps";
+  const latest = useApi<Dekad>(`/monitoring/dekads/latest?source=${source}`);
+  const history = useApi<Dekad[]>(`/monitoring/dekads?source=${source}`);
+  const compare = useApi<Dekad>(`/monitoring/dekads/latest?source=${other}`);
   const [actor] = useActor();
   const { operation, error, running, start } = useOperation(() => {
     latest.reload();
     history.reload();
+    compare.reload();
   });
   const check = () => start("update_chirps", actor || "Forecaster");
-  const dekad = latest.data;
+  const choose = (next: Source) => {
+    setSource(next);
+    const url = new URL(window.location.href);
+    if (next === "chirps") url.searchParams.delete("source");
+    else url.searchParams.set("source", next);
+    window.history.replaceState(null, "", url);
+  };
+  const dekad =
+    latest.data && sourceOf(latest.data) === source ? latest.data : undefined;
+  const outcome = operation?.messages
+    .map((m) => m.text)
+    .filter((text) => !/^(Started|Finished|Looking for)/.test(text))
+    .join(". ");
   return (
     <div className="page">
       <div className="wrap">
         <PageBanner
           title="Rainfall Monitoring"
           crumbs={[{ label: "Monitoring" }]}
-          subtitle="Observed rainfall over the Greater Horn of Africa from CHIRPS, dekad by dekad, as ICPAC's climate monitoring presents it."
-          facts={
-            dekad
-              ? [
-                  `Latest dekad ${period(dekad.start, dekad.end)}`,
-                  "CHIRPS preliminary",
-                  "Checked daily",
-                ]
-              : ["CHIRPS preliminary", "Checked daily"]
-          }
+          subtitle="Observed rainfall over the Greater Horn of Africa, dekad by dekad, from two satellite estimates: CHIRPS and TAMSAT."
           actions={
             <Button variant="amber" disabled={running} onClick={check}>
               <RefreshCw size={17} className={running ? "spin" : undefined} />
-              {running ? "Checking…" : "Check for a new dekad"}
+              {running ? "Checking…" : "Check for new dekads"}
             </Button>
           }
         />
+        <div className="source-bar">
+          <div
+            className="segmented light"
+            role="group"
+            aria-label="Rainfall estimate"
+          >
+            {(["chirps", "tamsat"] as Source[]).map((key) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={source === key}
+                onClick={() => choose(key)}
+              >
+                {SOURCES[key].name}
+              </button>
+            ))}
+          </div>
+          {dekad && (
+            <p className="source-bar-note">
+              Latest dekad {period(dekad.start, dekad.end)} ·{" "}
+              {SOURCES[source].product}
+            </p>
+          )}
+        </div>
         {error && <ErrorState message={error} />}
         {operation &&
           operation.status !== "running" &&
@@ -295,31 +421,31 @@ export default function Monitoring() {
                   : "The check failed."
               }
             >
-              {operation.status === "complete"
-                ? operation.messages.at(-2)?.text
-                : operation.error}
+              {operation.status === "complete" ? outcome : operation.error}
             </Notice>
           )}
-        {latest.loading && <Skeleton height={520} />}
+        {latest.loading && !dekad && <Skeleton height={520} />}
         {latest.status === 404 && (
           <EmptyState
-            title="No dekad downloaded yet"
+            title={`No ${SOURCES[source].name} dekad downloaded yet`}
             action={
               <Button variant="amber" disabled={running} onClick={check}>
-                Download the newest dekad
+                Download the newest dekads
               </Button>
             }
           >
             <p style={{ margin: 0 }}>
-              The newest CHIRPS dekad is downloaded by the weekly cycle and the
-              daily task, or now with the button.
+              The newest CHIRPS and TAMSAT dekads are downloaded by the weekly
+              cycle and the daily task, or now with the button.
             </p>
           </EmptyState>
         )}
         {latest.error && latest.status !== 404 && (
           <ErrorState message={latest.error} retry={latest.reload} />
         )}
-        {dekad && <Body dekad={dekad} history={history.data} />}
+        {dekad && (
+          <Body dekad={dekad} history={history.data} other={compare.data} />
+        )}
       </div>
     </div>
   );

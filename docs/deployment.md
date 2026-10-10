@@ -124,8 +124,24 @@ scales to zero when idle.
    list of regions, shown by `az policy assignment list --disable-scope-strict-match
    --query "[].parameters.listOfAllowedLocations.value" -o tsv`; choose the one nearest the
    database), `IMAGE`, `CPU` and `MEMORY`. Container Apps allow outbound HTTPS, so the
-   app downloads ECMWF Open Data and CHIRPS itself; run the weekly cycle from the
+   app downloads ECMWF Open Data, CHIRPS and TAMSAT itself; run the weekly cycle from the
    Operations page.
+4. Bulletin approval by email (optional): give the mail server and the addresses once;
+   later runs keep them. In Cloud Shell's PowerShell, for Gmail with an app password:
+
+   ```powershell
+   $env:SMTP_HOST = "smtp.gmail.com"; $env:SMTP_PORT = "587"
+   $env:SMTP_USER = "forecasts.account@gmail.com"
+   $env:SMTP_PASSWORD = Read-Host "Gmail app password" -MaskInput
+   $env:BULLETIN_REVIEWERS = "reviewer1@icpac.net, reviewer2@icpac.net"
+   $env:BULLETIN_PUBLISHERS = "publisher@icpac.net"
+   $env:BULLETIN_DISTRIBUTION = "bulletin-list@icpac.net"
+   bash backend.sh
+   ```
+
+   The password is stored as an app secret, a link-signing secret is generated once, and
+   the links open `PUBLIC_SITE_URL` (default the Vercel site). See
+   [Bulletin approval by email](operations.md#bulletin-approval-by-email).
 
 Azure for Students creates **express** Container Apps environments, which cannot mount
 Azure Files. The app therefore needs no mounted disk: with `PACKAGE_STORE_CONNECTION` (a
