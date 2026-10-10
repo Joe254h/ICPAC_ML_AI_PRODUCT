@@ -29,8 +29,13 @@
 #   ANTHROPIC_API_KEY  Optional: the Copilot answers with Claude (Anthropic API) from the
 #                 forecast's own data and answers general questions; the key is stored as an
 #                 app secret. CLAUDE_MODEL picks the model (default claude-opus-5-5).
+#   GEMINI_API_KEY  Optional, free: the Copilot answers with Google Gemini (free tier of the
+#                 Gemini API, key from https://aistudio.google.com/apikey) the same way, through
+#                 Gemini's OpenAI-compatible endpoint. GEMINI_MODEL picks the model (default
+#                 gemini-2.5-flash). ANTHROPIC_API_KEY wins when both are set.
 #   LLM_OVERRIDES Set by llm.sh: the Copilot settings for the self-hosted model. Without it
-#                 (and without ANTHROPIC_API_KEY), the Copilot settings on the app are kept.
+#                 (and without ANTHROPIC_API_KEY or GEMINI_API_KEY), the Copilot settings on
+#                 the app are kept.
 set -euo pipefail
 
 LOCATION=${LOCATION:-southafricanorth}
@@ -48,6 +53,23 @@ print(json.dumps({
     "env": [
         {"name": "LLM_PROVIDER", "value": "anthropic"},
         {"name": "LLM_MODEL", "value": e["MODEL"]},
+        {"name": "LLM_API_KEY", "secretRef": "llm-api-key"},
+        {"name": "LLM_TIMEOUT_SECONDS", "value": "60"},
+    ],
+    "secrets": [{"name": "llm-api-key", "value": e["KEY"]}],
+}))')
+elif [ -n "${GEMINI_API_KEY:-}" ]; then
+  # Gemini replaces every earlier Copilot setting (see docs/chatbot.md).
+  LLM_OVERRIDES=$(KEY="$GEMINI_API_KEY" MODEL="${GEMINI_MODEL:-gemini-2.5-flash}" python3 -c '
+import json, os
+e = os.environ
+print(json.dumps({
+    "env": [
+        {"name": "LLM_PROVIDER", "value": "openai_compatible"},
+        {"name": "LLM_TOOLS", "value": "true"},
+        {"name": "LLM_BASE_URL", "value": "https://generativelanguage.googleapis.com/v1beta/openai"},
+        {"name": "LLM_MODEL", "value": e["MODEL"]},
+        {"name": "LLM_REASONING_EFFORT", "value": "low"},
         {"name": "LLM_API_KEY", "secretRef": "llm-api-key"},
         {"name": "LLM_TIMEOUT_SECONDS", "value": "60"},
     ],

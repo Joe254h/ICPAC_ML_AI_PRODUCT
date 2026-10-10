@@ -37,9 +37,23 @@ The Copilot calls Claude through Anthropic's official Python SDK (`anthropic`). 
 
 On Azure, `ANTHROPIC_API_KEY=... bash deploy/azure/backend.sh` stores the key as a Container Apps secret and sets the rest (`CLAUDE_MODEL` picks another model). Claude is the default because it calls tools reliably and answers general climate questions well; the grounding check above holds whichever model is used. Questions and tool results are sent to Anthropic's API; nothing else is.
 
+### Free: Google Gemini
+
+The Gemini API has a free tier (Flash models; key from https://aistudio.google.com/apikey, no card). On Azure:
+
+```bash
+GEMINI_API_KEY=... bash deploy/azure/backend.sh      # GEMINI_MODEL picks another model
+```
+
+This sets `LLM_PROVIDER=openai_compatible`, `LLM_TOOLS=true`, Gemini's OpenAI-compatible endpoint (`https://generativelanguage.googleapis.com/v1beta/openai`), `gemini-2.5-flash` and `LLM_REASONING_EFFORT=low`. The Copilot then answers the same way as with Claude, and the same figure check applies. Free-tier limits are per minute and per day, and each question uses two or three requests; when a limit is reached, the checked fixed sentences answer. On the free tier Google may use what is sent to improve its products: the Copilot sends the question and the forecast figures, which are public, but forecasters should not type anything confidential. Check the current limits in Google AI Studio.
+
+### Cheapest Claude
+
+`CLAUDE_MODEL=claude-haiku-5-5` with `ANTHROPIC_API_KEY` costs $0.10 per million tokens read and $0.50 per million written; a Copilot question uses roughly 8,000 to 15,000 tokens, about $0.002, so $5 of credit lasts for thousands of questions.
+
 ### Another provider with tool calling
 
-Any OpenAI-compatible chat completions API that supports tools (Azure OpenAI, OpenAI, Groq, Ollama, vLLM, llama.cpp with `--jinja`) works the same way with `LLM_PROVIDER=openai_compatible`, `LLM_TOOLS=true` and the variables below. Small models call tools less reliably; their answers fall back to the fixed sentences more often.
+Any OpenAI-compatible chat completions API that supports tools (Azure OpenAI, OpenAI, Groq, Ollama, vLLM, llama.cpp with `--jinja`) works the same way with `LLM_PROVIDER=openai_compatible`, `LLM_TOOLS=true` and the variables below; `LLM_REASONING_EFFORT` is passed to the model and `LLM_MAX_TOKENS` (default 4096) leaves room for a thinking model's reasoning. Small models call tools less reliably, and free plans with low per-minute token limits (such as Groq's) cut multi-step answers short; their answers fall back to the fixed sentences more often.
 
 ### Fixed sentences only
 

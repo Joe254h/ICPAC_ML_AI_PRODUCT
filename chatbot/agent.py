@@ -769,18 +769,22 @@ class OpenAIToolsModel:
                     messages.append(
                         {"role": "tool", "tool_call_id": result["id"], "content": result["content"]}
                     )
+        body: dict[str, Any] = {
+            "model": self.model,
+            "temperature": 0.2,
+            # Thinking models (Gemini 2.5, Qwen 3) count their reasoning in this limit.
+            "max_tokens": int(os.getenv("LLM_MAX_TOKENS") or 4096),
+            "messages": messages,
+            "tools": [{"type": "function", "function": t} for t in tools],
+            "tool_choice": "auto",
+        }
+        if effort := os.getenv("LLM_REASONING_EFFORT"):
+            body["reasoning_effort"] = effort
         response = httpx.post(
             self.base + "/chat/completions",
             headers={"Authorization": f"Bearer {self.key}"} if self.key else {},
             timeout=_timeout(),
-            json={
-                "model": self.model,
-                "temperature": 0.2,
-                "max_tokens": 1500,
-                "messages": messages,
-                "tools": [{"type": "function", "function": t} for t in tools],
-                "tool_choice": "auto",
-            },
+            json=body,
         )
         response.raise_for_status()
         message = response.json()["choices"][0]["message"]

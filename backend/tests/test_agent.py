@@ -187,10 +187,13 @@ def test_the_openai_compatible_path_uses_tool_calls(env, fast_maps, monkeypatch)
     monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
     monkeypatch.setenv("LLM_TOOLS", "true")
     monkeypatch.setenv("LLM_BASE_URL", "https://llm.example/v1")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "low")
 
     def post(url: str, headers: dict, timeout: float, json: dict) -> httpx.Response:
         assert url == "https://llm.example/v1/chat/completions"
         assert json["tools"][0]["type"] == "function"
+        # Room for a thinking model's reasoning, and how much it reasons.
+        assert json["max_tokens"] >= 4096 and json["reasoning_effort"] == "low"
         tools = [m for m in json["messages"] if m["role"] == "tool"]
         message: dict[str, Any]
         if not tools:
