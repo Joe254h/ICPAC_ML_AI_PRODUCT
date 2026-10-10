@@ -285,7 +285,7 @@ import json, sys
 health = json.load(sys.stdin)
 print("Status:", health["status"], "| version:", health.get("version", "previous release"))
 for name, value in health["components"].items():
-    if name.startswith(("Operational", "Model", "Database", "Storage", "ECMWF", "CHIRPS", "MBC")):
+    if name.startswith(("Operational", "Model", "Database", "Storage", "ECMWF", "CHIRPS", "MBC", "Copilot")):
         print(f"  {name}: {value}")
 ' || echo "The API is not answering yet; check: az containerapp logs show -n $APP -g $GROUP --follow"
 
