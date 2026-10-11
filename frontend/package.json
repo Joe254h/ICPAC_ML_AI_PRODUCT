@@ -14,6 +14,7 @@
     "format:check": "prettier --check app components features services types tests e2e scripts \"*.ts\" \"*.mjs\" \"*.json\" \"*.yaml\""
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "echarts": "^6.0.0",
     "lucide-react": "^0.577.0",
     "maplibre-gl": "^5.12.0",
