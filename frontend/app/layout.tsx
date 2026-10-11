@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import Shell from "@/components/shell";
+import { Analytics } from "@vercel/analytics/next";
 
 export const metadata: Metadata = {
   title: {
@@ -33,6 +34,7 @@ export default function Layout({
       </head>
       <body>
         <Shell>{children}</Shell>
+        <Analytics />
       </body>
     </html>
   );
