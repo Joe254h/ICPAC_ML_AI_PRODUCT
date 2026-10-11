@@ -227,6 +227,13 @@ export type BulletinStatus = {
     leads?: string[];
     map?: string;
     missing_dependency?: string;
+    /** Member states' rainfall (the "countries" section). */
+    rows?: {
+      country: string;
+      mean_mm: number;
+      median_mm: number;
+      max_mm: number;
+    }[];
   }[];
   inputs: {
     interpretation: string;

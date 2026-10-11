@@ -45,9 +45,16 @@ test("a bulletin goes from draft to review, approval and publication", async ({
   await expect(
     page.getByRole("heading", { name: "Total Rainfall" }),
   ).toBeVisible();
+  // The bulletin carries what the service has: rainfall, the member states, Somalia.
+  await expect(
+    page.getByRole("heading", { name: "Rainfall by Country" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "About this forecast" }),
+  ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Products in progress" }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await page.getByRole("button", { name: "Create draft for review" }).click();
   await page.waitForURL(/\/bulletins\?id=/, { timeout: 60_000 });
   await expect(page.getByText("Draft", { exact: true }).first()).toBeVisible();

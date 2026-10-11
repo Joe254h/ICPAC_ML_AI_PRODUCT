@@ -145,14 +145,53 @@ function Body({ detail }: { detail: ForecastDetail }) {
           eyebrow="Regional outlook"
         />
       )}
+      {!!get("countries")?.rows?.length && (
+        <Card
+          eyebrow="Member states"
+          title={get("countries")?.title}
+          subtitle="Means and medians over each country's 0.05° grid cells; the highest value is its wettest cell."
+        >
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Country</th>
+                  <th className="num">Mean (mm)</th>
+                  <th className="num">Median (mm)</th>
+                  <th className="num">Highest (mm)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {get("countries")?.rows?.map((row) => (
+                  <tr key={row.country}>
+                    <td className="strong">{row.country}</td>
+                    <td className="num">{row.mean_mm.toFixed(1)}</td>
+                    <td className="num">{row.median_mm.toFixed(1)}</td>
+                    <td className="num">{row.max_mm.toFixed(1)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
       {get("somalia") && !get("somalia")?.missing_dependency && (
         <Product section={get("somalia") as Section} eyebrow="Country focus" />
+      )}
+      {get("about") && (
+        <Card title="About this forecast">
+          {get("about")?.text.map((text, i) => (
+            <p key={i} style={{ margin: "0 0 8px" }}>
+              <Rich text={text} lead={get("about")?.leads?.[i]} />
+            </p>
+          ))}
+        </Card>
       )}
       {pending.length > 0 && (
         <Card
           eyebrow="Coming soon"
           title="Products in progress"
-          subtitle="These sections keep their place in the bulletin and say what they need; nothing is inferred for them."
+          subtitle="Products the bulletin will carry once their inputs exist; nothing is inferred for them."
         >
           <div className="grid-3">
             {pending.map((section) => (

@@ -35,7 +35,21 @@ def facts(**changes) -> dict:
         "method": {"label": "MBC + ATMOS37 CATBOOST"},
         "model": {"model_id": "reviewed_candidate", "status": "candidate"},
         "input": {"synthetic": True},
-        "countries": [],
+        "initialization": "2026-10-08T00:00:00+00:00",
+        "countries": [
+            {
+                "country": "Kenya",
+                "forecast_mean_mm": 20.0,
+                "forecast_median_mm": 20.0,
+                "forecast_max_mm": 20.0,
+            },
+            {
+                "country": "Somalia",
+                "forecast_mean_mm": 150.46,
+                "forecast_median_mm": 80.0,
+                "forecast_max_mm": 250.0,
+            },
+        ],
         **changes,
     }
 
@@ -84,7 +98,7 @@ def test_weeks_are_named_by_their_boundary_dates_as_in_the_reference(inputs):
     assert weekly.period_label("2026-12-29T00:00:00", "2027-01-05T00:00:00", "%b") == (
         "29 Dec 2026-05 Jan 2027"
     )
-    assert weekly.FORMAT_VERSION == "icpac-weekly-v2"
+    assert weekly.FORMAT_VERSION == "icpac-weekly-v3"
 
 
 def test_rainfall_bullets_use_the_reference_wording_and_the_forecast_grid(inputs):
@@ -114,15 +128,33 @@ def test_rainfall_bullets_use_the_reference_wording_and_the_forecast_grid(inputs
     assert somalia["map_country"] == "Somalia"
 
 
-def test_products_this_forecast_lacks_keep_their_place_and_infer_nothing(inputs):
-    sections = {s["key"]: s for s in weekly.sections(inputs)}
-    for key in ("anomaly", "exceptional", "temperature", "temperature_anomaly", "heat_stress"):
-        section = sections[key]
-        assert section["missing_dependency"] and not section.get("map_layer")
-        assert all("in progress" in text for text in section["text"])
-    assert sections["anomaly"]["leads"] == ["More than usual rainfall", "Less than usual rainfall"]
-    assert sections["temperature"]["leads"][0] == "Elevated temperatures"
-    assert sections["decision_support"]["leads"] == ["Decision-Support Note:"]
+def test_the_bulletin_carries_what_the_service_has(inputs):
+    found = weekly.sections(inputs)
+    assert [s["key"] for s in found] == [
+        "headline",
+        "decision_support",
+        "rainfall",
+        "countries",
+        "somalia",
+        "about",
+    ]
+    sections = {s["key"]: s for s in found}
+    # Products without inputs (anomaly, temperature, heat stress) are left out, not faked.
+    assert not any(s.get("missing_dependency") for s in found)
+    assert len(sections["headline"]["text"]) == 1
+    note = sections["decision_support"]["text"][0]
+    assert note.startswith("Decision-Support Note: ") and "Anomaly" not in note
+    assert sections["countries"]["rows"] == [
+        {"country": "Somalia", "mean_mm": 150.5, "median_mm": 80.0, "max_mm": 250.0},
+        {"country": "Kenya", "mean_mm": 20.0, "median_mm": 20.0, "max_mm": 20.0},
+    ]
+    assert sections["countries"]["text"][0] == (
+        "Somalia: mean 150.5 mm, median 80.0 mm, highest 250.0 mm."
+    )
+    about = " ".join(sections["about"]["text"])
+    assert "15 October 2026 to 21 October 2026 (days 8 to 14)" in about
+    assert "ECMWF ensemble of 8 October 2026, 00 UTC" in about
+    assert sections["about"]["leads"][0] == "Test only:"  # synthetic input says so
 
 
 @pytest.mark.parametrize(
@@ -173,9 +205,16 @@ def test_word_draft_keeps_the_template_and_its_bold_leads(inputs, monkeypatch):
         zipfile.ZipFile(DEFAULT_TEMPLATE) as reference,
         zipfile.ZipFile(io.BytesIO(result)) as output,
     ):
-        assert output.namelist() == reference.namelist()
-        for part in reference.namelist():
-            if part not in IMAGE_SLOTS and part not in {"word/document.xml", "word/header1.xml"}:
+        dropped = {
+            "media/image9.png", "media/imagea.png", "media/imageb.png", "media/imagec.png",
+            "media/imagee.png", "media/image2.gif",
+        }  # fmt: skip
+        assert output.namelist() == [n for n in reference.namelist() if n not in dropped]
+        rels = output.read("word/_rels/document.xml.rels").decode()
+        assert "image9.png" not in rels and "image8.png" in rels and "imaged.png" in rels
+        rewritten = {"word/document.xml", "word/header1.xml", "word/_rels/document.xml.rels"}
+        for part in output.namelist():
+            if part not in IMAGE_SLOTS and part not in rewritten:
                 assert output.read(part) == reference.read(part), part
         document = output.read("word/document.xml")
         runs = paragraphs(document)
@@ -184,24 +223,28 @@ def test_word_draft_keeps_the_template_and_its_bold_leads(inputs, monkeypatch):
         heavy = text.index("Heavy rainfall (above 200 mm) expected over northern parts of Somalia.")
         assert runs[heavy][0] == ("Heavy rainfall (above 200 mm)", True)
         assert runs[heavy][1] == (" expected over northern parts of Somalia.", False)
-        exceptional = next(p for p in runs if "".join(t for t, _ in p).startswith("Rainfall exc"))
-        assert [t for t, bold in exceptional if bold] == [
-            "Rainfall exceeding the 95",
-            "th",
-            " percentile",
-        ]
-        assert b"superscript" in document
         joined = " ".join(text)
+        # Only the products the service has; nothing of the reference's own week remains.
         for old in (
             "06-13 October 2026",
             "Warmer than average temperatures expected",
             "northern parts of Somalia and southeastern parts of Ethiopia",
             "Extreme Caution",
+            "Rainfall Anomalies",
+            "Exceptional Rainfall",
+            "Mean Temperature",
+            "Heat Stress",
+            "in progress",
         ):
             assert old not in joined
+        assert text.index("Total Rainfall") < text.index("Rainfall by Country")
+        assert text.index("Rainfall by Country") < text.index("Somalia ")
+        assert text.index("Somalia ") < text.index("About this Forecast")
+        assert "Somalia" in text and "150.5" in text  # the member states' table
+        assert document.count(b"<w:drawing>") == 2  # the regional and Somalia rainfall maps
         header = "".join(t for p in paragraphs(output.read("word/header1.xml")) for t, _ in p)
-        assert header.startswith("DRAFT - NOT APPROVED · Model reviewed_candidate (candidate)")
-        assert "SYNTHETIC TEST INPUT" in header
+        assert header.startswith("DRAFT - NOT APPROVED · ECMWF ensemble + MBC + AI/ML")
+        assert "SYNTHETIC TEST INPUT" in header and "reviewed_candidate" not in header
         for part in IMAGE_SLOTS:
             assert output.read(part) != reference.read(part)
             with (

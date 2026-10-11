@@ -57,14 +57,14 @@ def test_drafts_are_the_weekly_bulletin_of_the_latest_forecast(env, fast_maps, m
     page = client.get(f"/bulletins/{draft['id']}/export?inline=true")
     assert page.headers["content-disposition"] == "inline"
     text = page.text
-    # The page carries the draft's words with their bold leads and the document's maps;
-    # products still in progress are short notes, not empty maps.
+    # The page carries the draft's words with their bold leads, the document's maps and the
+    # member states' table; products the service does not have are not shown.
     assert "<h1>Weekly Forecast for 12-19 October 2026</h1>" in text
     assert "<strong>Decision-Support Note:</strong>" in text
     assert "<li><strong>Heavy rainfall (above 200 mm)</strong>" in text
     assert text.count('<figure><img alt="') == 2  # the regional and the Somalia rainfall maps
-    assert text.count('<span class="tag">In progress</span>') == 6
-    assert "Requires approved climatological 95th-percentile thresholds." in text
+    assert '<span class="tag">In progress</span>' not in text
+    assert "<h2>Rainfall by Country</h2>" in text and "<h2>About this forecast</h2>" in text
     assert "DRAFT - NOT APPROVED" in text and "SYNTHETIC" not in text
     assert 'class="chip draft"' in text and "IGAD Climate Prediction and Applications" in text
     attachment = client.get(f"/bulletins/{draft['id']}/export").headers["content-disposition"]

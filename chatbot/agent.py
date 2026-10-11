@@ -827,10 +827,55 @@ def record_outcome(model: str, ok: bool, reason: str | None = None) -> None:
     )
 
 
+# What a provider's refusal says, in words for the person asking (Gemini's and OpenAI's
+# error messages; checked in order).
+REFUSALS = (
+    (("api_key_invalid", "api key not valid", "invalid api key", "incorrect api key"),
+     "the AI service says the key is not valid: enter the key again"),
+    (("unregistered callers", "missing api key", "no api key", "api key not found"),
+     "no key reached the AI service: the key is missing on the server"),
+    (("service_disabled", "has not been used in project", "it is disabled"),
+     "the Gemini API is switched off for the key's project: enable it in Google Cloud"),
+    (("api_key_service_blocked", "api_key_http_referrer_blocked", "api_key_ip_address_blocked",
+      "are blocked", "referer"),
+     "the key is restricted and does not allow this server or the Gemini API"),
+    (("leaked",), "Google blocked the key because it was exposed: create a new key"),
+    (("location is not supported", "user location"),
+     "the AI service is not offered in the server's region"),
+    (("billing", "free tier is not available"),
+     "the AI model needs billing on the key's project"),
+    (("quota", "resource_exhausted", "rate limit"),
+     "the AI service's usage limit was reached; try again in a minute"),
+)  # fmt: skip
+
+
+def explain_refusal(status: int, text: str) -> str:
+    """Why a provider refused a request, in plain words."""
+    lowered = text.lower()
+    for markers, reason in REFUSALS:
+        if any(marker in lowered for marker in markers):
+            return reason
+    if status == 429:
+        return "the AI service's usage limit was reached; try again in a minute"
+    if status == 401:
+        return "the AI service says the key is not valid: enter the key again"
+    if status == 403:
+        return "the AI service refused the key (no permission for this model or API)"
+    if status == 404:
+        return "the AI model is not available to this key"
+    if status >= 500:
+        return "the AI service had an error"
+    return "the AI service turned the request down"
+
+
 def _model_refused(response: httpx.Response) -> bool:
     """Whether the provider refused the model itself (unknown, retired, not for this key)."""
-    if response.status_code in (403, 404):
+    if response.status_code == 404:
         return True
+    if response.status_code == 403:
+        # A key problem is not solved by another model; a model closed to the key may be.
+        reason = explain_refusal(403, response.text)
+        return reason.startswith("the AI service refused the key (no permission")
     text = response.text.lower()
     return (
         response.status_code == 400

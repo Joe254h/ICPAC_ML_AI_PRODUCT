@@ -1,12 +1,14 @@
 """The ICPAC weekly bulletin (templates/icpac_weekly_reference.docx): wording and maps.
 
-Every weekly forecast follows the reference: the same sections, bullets and bold leads
-("Heavy rainfall (above 200 mm) expected over ..."), with the areas worked out from the
-current forecast grid. The rainfall classes are the reference's (heavy above 200 mm,
-moderate 50-200 mm, light below 50 mm in the week); where they fall is described per
-country from the share and position of its cells in each class. Products this forecast
-does not have (rainfall anomaly, exceptional rainfall, temperature, heat stress) keep
-their place and bold lead and say they are still in progress; nothing is inferred for them.
+The bulletin carries what the service produces, in the reference's layout and wording:
+the headline, the decision-support note, the regional Total Rainfall map and bullets
+("Heavy rainfall (above 200 mm) expected over ..."), a table of each member state's
+rainfall, the Somalia map and bullets, and a short note on the forecast's data and method.
+The rainfall classes are the reference's (heavy above 200 mm, moderate 50-200 mm, light
+below 50 mm in the week); where they fall is described per country from the share and
+position of its cells in each class. The reference's other products (rainfall anomaly,
+exceptional rainfall, temperature, heat stress) need inputs the service does not have;
+they are left out until it does, and nothing is inferred for them.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from __future__ import annotations
 import io
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
@@ -29,7 +31,7 @@ from climate_engine.cartography import weekly_maps
 if TYPE_CHECKING:
     from climate_engine.products.bulletin import BulletinInputs
 
-FORMAT_VERSION = "icpac-weekly-v2"
+FORMAT_VERSION = "icpac-weekly-v3"  # v3: only the products the service has
 MAP_STYLE = "weekly-v3"  # the map endpoint's style name; a new name busts browser caches
 REGION = "the region"
 # The reference's classes for the week's total rainfall (mm): name, lower, upper bound.
@@ -51,36 +53,14 @@ SOMALIA_LEADS = {
 MOST, PARTS = 0.6, 0.25  # share of a country's cells: "most parts", "<direction> parts"
 MIN_SHARE, MIN_CELLS = 0.01, 12  # smaller patches are not described
 DECISION_NOTE = (
-    "Users are advised to make decisions based on all the rainfall products. The Total "
-    "Rainfall, Rainfall Anomaly, and Exceptional Rainfall Forecast products are designed to "
-    "be interpreted together, as each conveys different but complementary information about "
-    "expected rainfall conditions. Considering all three products together enables a more "
-    "comprehensive assessment of expected rainfall amounts, departures from normal "
-    "conditions, and the potential for extreme events, thereby improving confidence in "
-    "decision-making and supporting more effective preparedness and response across "
-    "agriculture, pastoralism, disaster risk management, water resources, and other "
-    "climate-sensitive sectors"
+    "Users are advised to make decisions based on the rainfall forecast together with the "
+    "latest observed rainfall and local knowledge. The Total Rainfall forecast gives the amount "
+    "of rain expected over the week, eight to fourteen days ahead, so that preparedness and "
+    "response can be planned early across agriculture, pastoralism, disaster risk management, "
+    "water resources and other climate-sensitive sectors. Rainfall varies within each area: "
+    "the maps and figures describe the expected pattern, not amounts at a single place."
 )
-UNAVAILABLE = "in progress"
-MISSING = {
-    "anomaly": "an approved Week-2 rainfall climatology for the forecast window",
-    "exceptional": "approved climatological 95th-percentile thresholds",
-    "temperature": "a validated weekly mean-temperature forecast",
-    "temperature_anomaly": "a validated temperature forecast and its climatology",
-    "somalia_temperature": "a validated weekly mean-temperature forecast",
-    "heat_stress": "validated temperature and humidity forecasts and an approved heat-stress "
-    "method",
-}
-MAP_TITLES = {
-    "rainfall": "Total Rainfall (mm) for {period}",
-    "anomaly": "Rainfall Anomalies for {period}",
-    "exceptional": "Exceptional Rainfall for {period}",
-    "temperature": "Mean Temperature (°C) for {period}",
-    "temperature_anomaly": "Temperature Anomalies for {period}",
-    "somalia": "Total Rainfall (mm) for {period}",
-    "somalia_temperature": "Mean Temperature (°C) for {period}",
-    "heat_stress": "Heat Stress Index : {start}",
-}
+MAP_TITLES = {"rainfall": "Total Rainfall (mm) for {period}"}
 LAYER_NAMES = {"hybrid": "", "mbc": " · MBC", "raw": " · raw ECMWF"}
 
 
@@ -119,15 +99,14 @@ def map_period(inputs: BulletinInputs) -> str:
 def scope_label(inputs: BulletinInputs) -> str:
     """The draft label in the page header (and under each map)."""
     facts = inputs.interpretation
-    model = facts["model"]
-    status = model.get("status") or "unregistered"
+    status = facts["model"].get("status") or "unregistered"
     if facts.get("primary_layer", "hybrid") == "mbc":
         # MBC alone: the statistical correction of the ECMWF ensemble, no AI/ML layer.
-        parts = ["DRAFT - NOT APPROVED", "ECMWF ensemble + MBC", "AI/ML hybrid in progress"]
+        parts = ["DRAFT - NOT APPROVED", "ECMWF ensemble + MBC"]
     else:
-        parts = ["DRAFT - NOT APPROVED", f"Model {model['model_id']} ({status})"]
+        parts = ["DRAFT - NOT APPROVED", "ECMWF ensemble + MBC + AI/ML"]
         if status != "production":
-            parts.append("not the production model")
+            parts.append("candidate model, not the production model")
     parts.append("forecaster review required")
     if facts["input"]["synthetic"]:
         parts.append("SYNTHETIC TEST INPUT - NOT A FORECAST OF REAL WEATHER")
@@ -317,11 +296,62 @@ def _paragraphs(items: list[tuple[str, str]]) -> dict[str, list[str]]:
     return {"text": [lead + rest for lead, rest in items], "leads": [lead for lead, _ in items]}
 
 
-def _unavailable(key: str, leads: list[str]) -> list[tuple[str, str]]:
-    first = f": {UNAVAILABLE}, it requires {MISSING[key]}."
-    return [
-        (lead, first if index == 0 else f": {UNAVAILABLE}.") for index, lead in enumerate(leads)
+def _day(value: str | datetime) -> str:
+    day = datetime.fromisoformat(value) if isinstance(value, str) else value
+    return f"{day.day} {day:%B %Y}"
+
+
+def country_rows(inputs: BulletinInputs) -> list[dict[str, Any]]:
+    """Each member state's Week-2 rainfall (issued layer), wettest first."""
+    rows = []
+    for row in inputs.interpretation.get("countries", []):
+        mean = row.get("forecast_mean_mm")
+        if mean is None:
+            continue
+        rows.append(
+            {
+                "country": row["country"],
+                "mean_mm": round(float(mean), 1),
+                "median_mm": round(float(row.get("forecast_median_mm") or 0.0), 1),
+                "max_mm": round(float(row.get("forecast_max_mm") or 0.0), 1),
+            }
+        )
+    return sorted(rows, key=lambda r: (-r["mean_mm"], r["country"]))
+
+
+def about_lines(inputs: BulletinInputs) -> list[tuple[str, str]]:
+    """Where the forecast comes from, for the bulletin's last section."""
+    facts = inputs.interpretation
+    start, end = _window(inputs)
+    last_day = end - timedelta(days=1)  # the window ends at 00 UTC of the next day
+    run = _day(facts["initialization"]) if facts.get("initialization") else ""
+    method = facts.get("method", {})
+    lines = [
+        (
+            "Forecast:",
+            f" total rainfall from {_day(start)} to {_day(last_day)} (days 8 to 14), from the "
+            "ECMWF ensemble" + (f" of {run}, 00 UTC" if run else "") + ".",
+        ),
+        (
+            "Method:",
+            " the ensemble-mean rainfall corrected for ECMWF's known biases, cell by cell, "
+            "with ICPAC's multiplicative bias correction (MBC), on a 0.05 degree (about 5 km) "
+            "grid."
+            if method.get("label") == "MBC"
+            else f" {method.get('description') or method.get('label', 'the issued forecast')}.",
+        ),
+        (
+            "Verification:",
+            " each week is compared with CHIRPS observed rainfall once the week has passed.",
+        ),
+        (
+            "Issued by:",
+            " the IGAD Climate Prediction and Applications Centre (ICPAC), www.icpac.net.",
+        ),
     ]
+    if facts.get("input", {}).get("synthetic"):
+        lines.insert(0, ("Test only:", " synthetic input, not a forecast of real weather."))
+    return lines
 
 
 def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
@@ -337,27 +367,13 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
         (b for b in regional if " not expected" not in b[1]),
         ("Rainfall", " is not expected over the region."),
     )
-    unavailable_products = (
-        "",
-        "Rainfall anomaly, exceptional rainfall, temperature and heat-stress products are still "
-        f"{UNAVAILABLE}.",
-    )
+    rows = country_rows(inputs)
     result: list[dict[str, Any]] = [
-        {"key": "headline", "title": "Headline", **_paragraphs([headline, unavailable_products])},
+        {"key": "headline", "title": "Headline", **_paragraphs([headline])},
         {
             "key": "decision_support",
             "title": "Decision-Support Note",
-            **_paragraphs(
-                [
-                    (
-                        "Decision-Support Note:",
-                        " "
-                        + DECISION_NOTE
-                        + ". This forecast currently provides the Total Rainfall product; "
-                        f"the other products are still {UNAVAILABLE}.",
-                    )
-                ]
-            ),
+            **_paragraphs([("Decision-Support Note:", " " + DECISION_NOTE)]),
         },
         {
             "key": "rainfall",
@@ -365,47 +381,25 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
             **_paragraphs(regional),
             "map_layer": primary(inputs),
         },
-        {
-            "key": "anomaly",
-            "title": "Rainfall Anomalies",
-            **_paragraphs(
-                _unavailable("anomaly", ["More than usual rainfall", "Less than usual rainfall"])
-            ),
-            "missing_dependency": MISSING["anomaly"],
-        },
-        {
-            "key": "exceptional",
-            "title": "Exceptional Rainfall",
-            **_paragraphs(_unavailable("exceptional", ["Rainfall exceeding the 95th percentile"])),
-            "missing_dependency": MISSING["exceptional"],
-        },
-        {
-            "key": "temperature",
-            "title": "Mean Temperature",
-            **_paragraphs(
-                _unavailable(
-                    "temperature",
-                    [
-                        "Elevated temperatures",
-                        "Moderate to high temperatures (20-32°C)",
-                        "Mild temperature conditions (less than 20°C)",
-                    ],
-                )
-            ),
-            "missing_dependency": MISSING["temperature"],
-        },
-        {
-            "key": "temperature_anomaly",
-            "title": "Temperature Anomaly",
-            **_paragraphs(
-                _unavailable(
-                    "temperature_anomaly",
-                    ["Warmer than usual temperatures", "Cooler than usual temperatures"],
-                )
-            ),
-            "missing_dependency": MISSING["temperature_anomaly"],
-        },
     ]
+    if rows:
+        result.append(
+            {
+                "key": "countries",
+                "title": "Rainfall by Country",
+                **_paragraphs(
+                    [
+                        (
+                            f"{r['country']}:",
+                            f" mean {r['mean_mm']:.1f} mm, median {r['median_mm']:.1f} mm, "
+                            f"highest {r['max_mm']:.1f} mm.",
+                        )
+                        for r in rows
+                    ]
+                ),
+                "rows": rows,
+            }
+        )
     if somalia:
         result.append(
             {
@@ -416,64 +410,32 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
                 "map_country": "Somalia",
             }
         )
-    else:
-        result.append(
-            {
-                "key": "somalia",
-                "title": "Somalia",
-                **_paragraphs([(lead, f": {UNAVAILABLE}.") for lead in SOMALIA_LEADS.values()]),
-                "missing_dependency": "Somalia grid cells in this forecast",
-            }
-        )
-    result += [
-        {
-            "key": "somalia_temperature",
-            "title": "Somalia Temperature",
-            **_paragraphs(
-                _unavailable("somalia_temperature", ["Moderate temperatures (20-32 °C)"])
-            ),
-            "missing_dependency": MISSING["somalia_temperature"],
-        },
-        {
-            "key": "heat_stress",
-            "title": "Heat Stress",
-            **_paragraphs(
-                [("", f"Heat stress outlook {UNAVAILABLE}: it requires {MISSING['heat_stress']}.")]
-            ),
-            "missing_dependency": MISSING["heat_stress"],
-        },
-    ]
+    result.append(
+        {"key": "about", "title": "About this Forecast", **_paragraphs(about_lines(inputs))}
+    )
     return result
 
 
 # ---------------------------------------------------------------- maps
 
 
-def map_title(inputs: BulletinInputs, key: str, layer: str | None = None) -> str:
-    start, _ = _window(inputs)
-    title = MAP_TITLES[key].format(period=map_period(inputs), start=f"{start:%Y-%m-%d}")
-    layer = layer or primary(inputs)
-    return title + ("" if layer == primary(inputs) else LAYER_NAMES.get(layer, ""))
+METHOD_NOTES = {"MBC": "ECMWF ensemble + MBC", "RAW": "ECMWF ensemble, raw"}
 
 
 def map_label(
     model_id: str, status: str | None, synthetic: bool, forecast_id: str, method: str | None = None
 ) -> str:
-    """The one-line label under a map: draft, input, model status, method and forecast."""
-    status = status or "unregistered"
-    parts = ["DRAFT"]
+    """The one-line note under a map: what it shows, in words. The review state and the
+    forecast's record belong to the bulletin and the service, not to the picture."""
+    parts = []
     if synthetic:
         parts.append("SYNTHETIC TEST INPUT - NOT REAL WEATHER")
-    if method == "MBC":
-        # The statistical correction of the ECMWF ensemble; no AI/ML model is involved.
-        parts.append("ECMWF ensemble + MBC")
-    else:
-        parts.append(
-            f"{model_id} ({status}" + (", not production)" if status != "production" else ")")
+    note = METHOD_NOTES.get((method or "").upper())
+    if note is None:
+        note = "ECMWF ensemble + MBC + AI/ML" + (
+            "" if status == "production" else " (candidate model)"
         )
-        if method:
-            parts.append(method)
-    parts.append(forecast_id)
+    parts.append(note)
     return " · ".join(parts)
 
 
@@ -507,8 +469,13 @@ def rainfall_map(
 
 
 def rainfall_png(
-    inputs: BulletinInputs, layer: str | None = None, country: str | None = None
+    inputs: BulletinInputs,
+    layer: str | None = None,
+    country: str | None = None,
+    note: str | None = None,
 ) -> bytes:
+    """A rainfall layer as a reference-style map; ``note`` replaces the line under it (the
+    bulletin's maps have none, as in the reference)."""
     layer = layer or primary(inputs)
     if layer not in LAYER_NAMES:
         raise ValueError("Weekly rainfall maps support hybrid, mbc and raw")
@@ -524,19 +491,9 @@ def rainfall_png(
         facts["valid_start"],
         facts["valid_end"],
         layer,
-        map_note(inputs, method),
+        map_note(inputs, method) if note is None else note,
         country,
         primary=is_primary,
-    )
-
-
-def missing_image(inputs: BulletinInputs, key: str, country: str | None = None) -> bytes:
-    """The reference map frame with the product's title and why it is still in progress."""
-    return weekly_maps.render(
-        map_title(inputs, key),
-        country=country,
-        message=f"In progress\nRequires {MISSING[key]}",
-        note=map_note(inputs),
     )
 
 

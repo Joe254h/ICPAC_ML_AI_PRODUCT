@@ -197,7 +197,9 @@ def test_forecast_endpoints(env, fast_maps):
     bulletin = client.get(f"/forecasts/{fid}/bulletin").json()
     assert bulletin["generator"]["status"] == "ready"
     assert bulletin["generator"]["review"] == "DRAFT - human review required before release"
-    assert any(s["key"] == "exceptional" and s["missing_dependency"] for s in bulletin["sections"])
+    keys = [s["key"] for s in bulletin["sections"]]
+    assert keys[:3] == ["headline", "decision_support", "rainfall"] and keys[-1] == "about"
+    assert not any(s.get("missing_dependency") for s in bulletin["sections"])
     assert client.get(f"/forecasts/{fid}/map?layer=hybrid&style=weekly-v1").status_code == 200
     assert (
         client.get(f"/forecasts/{fid}/map?layer=hybrid&style=weekly-v1&country=Somalia").status_code
@@ -322,8 +324,9 @@ def test_without_the_atmos37_inputs_a_run_holds_raw_and_mbc(env, monkeypatch):
     assert next(s for s in bulletin["sections"] if s["key"] == "rainfall")["map_layer"] == "mbc"
     draft = client.post("/bulletins/generate", json={"forecast_id": fid, "actor": "Joe N"})
     assert draft.status_code == 200, draft.text
-    assert "ECMWF ensemble + MBC" in draft.json()["facts"]["label"]
-    assert "AI/ML hybrid in progress" in draft.json()["facts"]["label"]
+    assert draft.json()["facts"]["label"] == (
+        "DRAFT - NOT APPROVED · ECMWF ensemble + MBC · forecaster review required"
+    )
     health = client.get("/health").json()["components"]
     assert health["MBC + AI/ML forecast"].startswith("In progress")
 

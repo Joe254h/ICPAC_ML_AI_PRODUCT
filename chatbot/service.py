@@ -59,21 +59,10 @@ def plain_reason(exc: Exception) -> str:
     """Why the language model did not answer, in words for the person asking."""
     if isinstance(exc, agent.Ungrounded):
         return "the assistant quoted a figure that is not in the forecast"
-    status = None
     if isinstance(exc, httpx.HTTPStatusError):
-        status = exc.response.status_code
-    elif isinstance(exc, anthropic.APIStatusError):
-        status = exc.status_code
-    if status == 429:
-        return "the AI service's usage limit was reached; try again in a minute"
-    if status in (401, 403):
-        return "the AI service refused the key or the model"
-    if status == 404:
-        return "the AI model is not available to this key"
-    if status is not None and status >= 500:
-        return "the AI service had an error"
-    if status is not None:
-        return "the AI service turned the request down"
+        return agent.explain_refusal(exc.response.status_code, exc.response.text)
+    if isinstance(exc, anthropic.APIStatusError):
+        return agent.explain_refusal(exc.status_code, str(exc.message or ""))
     if isinstance(exc, (httpx.TimeoutException, anthropic.APITimeoutError)):
         return "the AI service took too long"
     if isinstance(exc, (httpx.TransportError, anthropic.APIConnectionError)):

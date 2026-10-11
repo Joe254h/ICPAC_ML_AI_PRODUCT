@@ -140,7 +140,7 @@ class BulletinService:
         sections = [
             {
                 k: section[k]
-                for k in ("key", "title", "text", "leads", "missing_dependency")
+                for k in ("key", "title", "text", "leads", "rows", "missing_dependency")
                 if k in section
             }
             for section in weekly.sections(inputs)

@@ -82,12 +82,11 @@ def test_chat_bulletin_and_map_use_the_same_package_as_forecast(env, fast_maps):
     assert bulletin["links"][0]["url"] == f"/bulletin?id={fid}"
     assert bulletin["links"][1]["url"] == f"/api/forecasts/{fid}/bulletin/export"
     sections = bulletin["tool_trace"][0]["result"]["sections"]
-    assert [s["title"] for s in sections][:5] == [
+    assert [s["title"] for s in sections][:4] == [
         "Headline",
         "Decision-Support Note",
         "Total Rainfall",
-        "Rainfall Anomalies",
-        "Exceptional Rainfall",
+        "Rainfall by Country",
     ]
     mapped = ask(env, "Show its rainfall map", bulletin["session_id"])
     assert "country=Somalia" in mapped["images"][0]["url"]

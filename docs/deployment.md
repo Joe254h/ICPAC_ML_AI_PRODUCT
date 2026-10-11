@@ -72,16 +72,21 @@ slots and figure payloads while retaining the other package parts. The known
 reference SHA256 is checked before export; an alternative `BULLETIN_TEMPLATE_PATH`
 needs its own validated mapping. The backend image includes the reference.
 
-Every weekly forecast follows the reference: the same title ("Weekly Forecast for 05-12
-October 2026", the week named by its boundary dates as in the reference's 06-13), the
-same sections, bullets and bold leads. The rainfall bullets use the reference's classes
-(heavy above 200 mm, moderate 50-200 mm, light below 50 mm) and name where each falls
-("most parts of", "northern parts of", "isolated areas in") from the share and position
-of each country's grid cells. Rainfall anomaly, exceptional rainfall, temperature and
-heat-stress bullets keep their place and lead but say they are not available: rainfall
-totals cannot supply them. The page header carries the draft, model-status and
-synthetic-input label; the body keeps the reference's layout. The Weekly product page
-previews the same sections and offers **Download Word draft**.
+Every weekly bulletin follows the reference's layout, fonts and wording, with what the
+service produces: the title ("Weekly Forecast for 05-12 October 2026", the week named by
+its boundary dates as in the reference's 06-13), the headline, the decision-support note,
+the regional Total Rainfall map and bullets, a table of each member state's mean, median
+and highest rainfall, the Somalia map and bullets, and "About this Forecast" (the ECMWF
+run, the method, verification and the issuer). The rainfall bullets use the reference's
+classes (heavy above 200 mm, moderate 50-200 mm, light below 50 mm) and name where each
+falls ("most parts of", "northern parts of", "isolated areas in") from the share and
+position of each country's grid cells. The reference's rainfall anomaly, exceptional
+rainfall, temperature and heat-stress products need inputs the service does not have:
+they are left out (nothing is inferred for them) and come back when those inputs exist.
+The page header carries the review state (draft, or approved/published by whom and when);
+the maps carry no draft marks or identifiers. The Weekly bulletin page previews the same
+sections and offers the Word document; drafts made before this change keep their own
+frozen document.
 
 Country outlines (`cartography/icpac11_adm0.geojson`, built by
 `scripts/build_icpac_boundaries.py`) are the HPC package's outlines with Sudan as ICPAC's

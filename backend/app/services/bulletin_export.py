@@ -1,9 +1,9 @@
 """The weekly bulletin as a web page, styled like icpac.net.
 
 The page carries exactly the frozen draft: the words of every section (from the draft's
-frozen facts, the same words as its Word document) and the maps of its Word document. A
-product still in progress is shown as a short note naming what it needs, never as an empty
-map. The page is self-contained (images embedded), prints on A4 and reads on a phone.
+frozen facts, the same words as its Word document), the maps of its Word document and the
+member states' table. Drafts made before the bulletin dropped the products it does not have
+show those as short notes naming what they need, never as empty maps. The page is self-contained (images embedded), prints on A4 and reads on a phone.
 """
 
 import base64
@@ -17,15 +17,7 @@ from climate_engine.products.branding import data_uri, white_seal_png
 from climate_engine.products.bulletin import IMAGE_SLOTS
 
 MEDIA = {"png": "image/png", "gif": "image/gif", "jpeg": "image/jpeg", "jpg": "image/jpeg"}
-BULLETED = {
-    "rainfall",
-    "anomaly",
-    "exceptional",
-    "temperature",
-    "temperature_anomaly",
-    "somalia",
-    "somalia_temperature",
-}
+BULLETED = {"rainfall", "somalia"}
 STATUS = {
     "draft": ("Draft", "draft"),
     "under_review": ("Under review", "review"),
@@ -34,6 +26,12 @@ STATUS = {
     "rejected": ("Rejected", "rejected"),
 }
 CAPTIONS = {"rainfall": "Total rainfall (mm)", "somalia": "Somalia: total rainfall (mm)"}
+DECISIONS = {
+    "submit": "Submitted",
+    "approve": "Approved",
+    "reject": "Rejected",
+    "publish": "Published",
+}
 
 STYLE = """
 :root{--green:#1f6b3a;--green-dark:#0f3d20;--green-tint:#2e7d4f;--amber:#f2a900;
@@ -83,6 +81,12 @@ strong{color:var(--ink)}
 .pending .tag{display:inline-block;font:700 11px Arial,Helvetica,sans-serif;text-transform:uppercase;
 letter-spacing:.8px;color:#7a4b00;background:#fff3cc;border-radius:999px;padding:3px 10px;margin:0 0 8px}
 .pending p{font-size:14px;margin:0;color:var(--text)}
+.countries table{width:100%;border-collapse:collapse;font-size:15px}
+.countries th,.countries td{padding:8px 12px;border-bottom:1px solid var(--line);text-align:right}
+.countries th:first-child,.countries td:first-child{text-align:left}
+.countries thead th{background:#eef5f0;color:var(--ink)}
+.countries .hint{font-size:13px;color:var(--muted);margin:10px 0 0}
+.about p{margin:0 0 8px;font-size:15px}
 .record{font-size:14px}.record h2{font-size:20px}
 .record table{width:100%;border-collapse:collapse}
 .record th,.record td{text-align:left;padding:6px 10px 6px 0;border-bottom:1px solid var(--line);
@@ -141,6 +145,21 @@ def _figure(key: str, maps: dict[str, tuple[str, bytes]], period: str) -> str:
     )
 
 
+def _countries(section: dict[str, Any]) -> str:
+    rows = "".join(
+        f"<tr><td><strong>{html.escape(r['country'])}</strong></td><td>{r['mean_mm']:.1f}</td>"
+        f"<td>{r['median_mm']:.1f}</td><td>{r['max_mm']:.1f}</td></tr>"
+        for r in section.get("rows", [])
+    )
+    return (
+        '<section class="card countries"><p class="label">Member states</p>'
+        f"<h2>{html.escape(section['title'])}</h2><table><thead><tr><th>Country</th>"
+        "<th>Mean (mm)</th><th>Median (mm)</th><th>Highest (mm)</th></tr></thead>"
+        f'<tbody>{rows}</tbody></table><p class="hint">Means and medians over each country\'s '
+        "0.05 degree grid cells; the highest value is its wettest cell.</p></section>"
+    )
+
+
 def _pending(section: dict[str, Any]) -> str:
     title = {"somalia_temperature": "Somalia: temperature"}.get(section["key"], section["title"])
     return (
@@ -188,6 +207,14 @@ class WeeklyHTMLExporter:
                 f"<h2>{escape(section['title'])}</h2><ul>{items}</ul></div>"
                 f"{_figure(key, maps, period)}</div></section>"
             )
+            if key == "rainfall" and (countries := sections.get("countries")):
+                body.append(_countries(countries))
+        if about := sections.get("about"):
+            body.append(
+                '<section class="card about"><h2>About this forecast</h2>'
+                + "".join(f"<p>{p}</p>" for p in _paragraphs(about))
+                + "</section>"
+            )
         pending = [s for s in facts["sections"] if s.get("missing_dependency")]
         if pending:
             body.append(
@@ -201,7 +228,8 @@ class WeeklyHTMLExporter:
         reviews = (
             "".join(
                 f"<tr><td>{escape(r['timestamp'][:16].replace('T', ' '))}</td>"
-                f"<td>{escape(r['action'])}</td><td>{escape(r['actor'])}</td>"
+                f"<td>{escape(DECISIONS.get(r['action'], r['action']))}</td>"
+                f"<td>{escape(r['actor'])}</td>"
                 f"<td>{escape(r['comment'])}</td></tr>"
                 for r in bulletin["reviews"]
             )

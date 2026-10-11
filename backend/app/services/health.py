@@ -8,7 +8,7 @@ import anthropic
 import httpx
 
 from backend.app.services import forecasts, operational
-from chatbot.agent import AnthropicModel
+from chatbot.agent import AnthropicModel, explain_refusal
 from chatbot.providers import MockLLMProvider, provider, provider_name
 from climate_engine.core import ROOT, config
 from climate_engine.provenance import code_version
@@ -124,10 +124,18 @@ def system_health(platform) -> dict:
             url = os.getenv("LLM_BASE_URL", cfg["base_url"]).rstrip("/") + "/models"
             key = os.getenv("LLM_API_KEY")
             response = httpx.get(
-                url, headers={"Authorization": f"Bearer {key}"} if key else {}, timeout=2
+                url, headers={"Authorization": f"Bearer {key}"} if key else {}, timeout=3
             )
-            response.raise_for_status()
-            components["Copilot language model"] = "Healthy · endpoint reachable"
+            if response.is_error and response.status_code < 500:
+                # The service answered but refused: say why (a bad key, a closed API, ...).
+                components["Copilot language model"] = (
+                    "Unavailable · "
+                    + explain_refusal(response.status_code, response.text)
+                    + ": the Copilot gives checked fixed answers"
+                )
+            else:
+                response.raise_for_status()
+                components["Copilot language model"] = "Healthy · endpoint reachable"
     except (anthropic.APIError, httpx.HTTPError, ValueError):
         components["Copilot language model"] = (
             "Unavailable · not reachable: the Copilot gives checked fixed answers"

@@ -396,3 +396,46 @@ def test_figures_are_checked_to_the_precision_written():
     assert agent.unsupported("About 8.3 mm and 12 mm.", known) == ["8.3 mm", "12 mm"]
     assert agent.unsupported("A rise of 15% is expected.", known) == ["15%"]
     assert agent.facts("bias -0.2 mm; classes 50-200 mm") == [-0.2, 50.0, 200.0]
+
+
+@pytest.mark.parametrize(
+    "status, body, reason",
+    [
+        (400, '{"error": {"message": "API key not valid. Please pass a valid API key."}}',
+         "the AI service says the key is not valid: enter the key again"),
+        (403, '{"error": {"message": "Generative Language API has not been used in project 1 '
+         'before or it is disabled.", "status": "PERMISSION_DENIED"}}',
+         "the Gemini API is switched off for the key's project: enable it in Google Cloud"),
+        (403, '{"error": {"message": "Method doesn\'t allow unregistered callers"}}',
+         "no key reached the AI service: the key is missing on the server"),
+        (403, '{"error": {"message": "Your API key was reported as leaked."}}',
+         "Google blocked the key because it was exposed: create a new key"),
+        (400, '{"error": {"message": "User location is not supported for the API use."}}',
+         "the AI service is not offered in the server's region"),
+        (403, "{}", "the AI service refused the key (no permission for this model or API)"),
+    ],
+)  # fmt: skip
+def test_a_providers_refusal_is_explained_in_words(status, body, reason):
+    assert agent.explain_refusal(status, body) == reason
+
+
+def test_a_key_problem_is_not_retried_with_other_models(env, fast_maps, monkeypatch):
+    run(env)
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_TOOLS", "true")
+    monkeypatch.setenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
+    monkeypatch.setenv("LLM_MODEL", "gemini-3.8-flash")
+    monkeypatch.setattr(agent, "WORKING_MODEL", {})
+    asked: list[str] = []
+
+    def post(url: str, headers: dict, timeout: float, json: dict) -> httpx.Response:
+        asked.append(json["model"])
+        body = {"error": {"message": "API key not valid. Please pass a valid API key."}}
+        return httpx.Response(400, json=body, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(agent.httpx, "post", post)
+    answer = Copilot(env.platform).answer(ChatRequest(message="Hello"))
+    assert asked == ["gemini-3.8-flash"]
+    assert (
+        answer["fallback_reason"] == "the AI service says the key is not valid: enter the key again"
+    )
