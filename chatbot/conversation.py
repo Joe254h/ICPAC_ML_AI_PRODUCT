@@ -385,7 +385,7 @@ class OperationalConversation:
                     tool = "get_bulletin_context"
                     bulletin = self.forecasts.bulletin(fid)
                     sentences["bulletin"] = (
-                        "The weekly draft follows the ICPAC weekly bulletin: the headline, the decision-support note, the regional total rainfall map and statements, each member state's rainfall, and the Somalia map and statements, all for this forecast's valid period."
+                        "The weekly draft follows the ICPAC weekly bulletin: the headline, the decision-support note, the regional total rainfall map and statements, each member state's rainfall, and a country focus (the member state whose outlook stands out most, with why), all for this forecast's valid period."
                     )
                     sentences["missing"] = (
                         "It carries the rainfall totals the service produces; rainfall anomaly, exceptional rainfall, temperature and heat-stress products are added once their inputs are supplied. The draft requires forecaster review."

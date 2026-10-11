@@ -14,6 +14,10 @@ ecmwf_opendata:
   stream: enfo
   # Perturbed members only, as in training (the control member is excluded).
   type: pf
+  # The members kept: 1 to 10, the ensemble size the model was trained on (the ECMWF S2S
+  # reforecasts have 11 members, a control and 10 perturbed; training read the perturbed
+  # files). The real-time ensemble has 50 perturbed members; set [1, 50] to use them all.
+  members: [1, 10]
   parameter: tp
   # The 00 UTC run of each initialization date.
   run_hour: 0
@@ -65,7 +69,7 @@ sources:
     name: ECMWF ensemble (ENS)
     role: forecast input
     status: active
-    description: "Week-2 (days 8-14) ensemble rainfall: 50 perturbed members, 00 UTC run, 0.25 degree"
+    description: "Week-2 (days 8-14) ensemble rainfall: 10 perturbed members, as in training, 00 UTC run, 0.25 degree"
     provider: ECMWF Open Data
     url: https://www.ecmwf.int/en/forecasts/datasets/open-data
   - id: chirps

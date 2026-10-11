@@ -30,7 +30,7 @@ export const LAYER_TEXT: Record<Variant, { title: string; method: string }> = {
   raw: {
     title: "Raw ECMWF",
     method:
-      "The ECMWF ensemble mean of Week-2 total rainfall: 50 perturbed members, accumulated between forecast hours 168 and 336, averaged to the 1.5° training grid and interpolated to the 0.05° ICPAC grid.",
+      "The ECMWF ensemble mean of Week-2 total rainfall: 10 perturbed members, as in the reforecasts the model was trained on, accumulated between forecast hours 168 and 336, averaged to the 1.5° training grid and interpolated to the 0.05° ICPAC grid.",
   },
   mbc: {
     title: "MBC",

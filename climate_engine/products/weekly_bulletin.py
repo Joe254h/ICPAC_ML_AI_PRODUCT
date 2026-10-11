@@ -3,7 +3,8 @@
 The bulletin carries what the service produces, in the reference's layout and wording:
 the headline, the decision-support note, the regional Total Rainfall map and bullets
 ("Heavy rainfall (above 200 mm) expected over ..."), a table of each member state's
-rainfall, the Somalia map and bullets, and a short note on the forecast's data and method.
+rainfall, the country focus (the member state whose outlook stands out most, with why) with
+its map and bullets, and a short note on the forecast's data and method.
 The rainfall classes are the reference's (heavy above 200 mm, moderate 50-200 mm, light
 below 50 mm in the week); where they fall is described per country from the share and
 position of its cells in each class. The reference's other products (rainfall anomaly,
@@ -45,10 +46,15 @@ LEADS = {
     "moderate": "Moderate rainfall (50-200 mm)",
     "light": "Light rainfall (less than 50 mm)",
 }
-SOMALIA_LEADS = {
+COUNTRY_LEADS = {  # the reference's country-section leads
     "heavy": "Heavy rainfall of above 200mm",
     "moderate": "Moderate rainfall",
     "light": "Light rainfall",
+}
+CLASS_WORDS = {
+    "heavy": "heavy rainfall (above 200 mm)",
+    "moderate": "moderate rainfall (50-200 mm)",
+    "light": "light rainfall (1-50 mm)",
 }
 MOST, PARTS = 0.6, 0.25  # share of a country's cells: "most parts", "<direction> parts"
 MIN_SHARE, MIN_CELLS = 0.01, 12  # smaller patches are not described
@@ -275,6 +281,58 @@ def place_phrase(areas: list[Area], single_country: bool = False) -> str:
     return join(pieces)
 
 
+@dataclass(frozen=True)
+class Focus:
+    country: str
+    rainfall_class: str
+    share: float  # of the country's cells in that class
+    region_share: float  # of all the region's cells
+    why: str
+
+
+def _percent(share: float) -> str:
+    return f"{share * 100:.0f}%" if share >= 0.01 else "under 1%"
+
+
+def country_focus(grid: Grid, masks: dict[str, np.ndarray]) -> Focus | None:
+    """The member state whose outlook stands out most this week.
+
+    The heaviest rainfall class present over a meaningful area decides (heavy, then
+    moderate, then light); among the countries with that class, the one where it covers
+    the largest share of the country is the focus. The reason is written out.
+    """
+    finite = np.isfinite(grid.values)
+    region = np.zeros(grid.values.shape, dtype=bool)
+    for mask in masks.values():
+        region |= mask & finite
+    region_total = max(int(region.sum()), 1)
+    for name, low, high in CLASSES:
+        inside = finite & (grid.values >= low) & (grid.values < high)
+        shares = {}
+        for country, mask in masks.items():
+            cells = mask & finite
+            total, count = int(cells.sum()), int((cells & inside).sum())
+            if total and count >= MIN_CELLS and count / total >= MIN_SHARE:
+                shares[country] = count / total
+        if not shares:
+            continue
+        country = max(sorted(shares), key=lambda c: shares[c])
+        region_share = int((region & inside).sum()) / region_total
+        others = len(shares) - 1
+        why = (
+            f"{country} is this week's country focus: {_percent(shares[country])} of its area "
+            f"is expected to receive {CLASS_WORDS[name]}, "
+            + (
+                f"the largest share of the {others + 1} member states where it occurs"
+                if others
+                else "the only member state where it occurs over a wide area"
+            )
+            + f" (across the region: {_percent(region_share)})."
+        )
+        return Focus(country, name, shares[country], region_share, why)
+    return None
+
+
 def rainfall_bullets(
     grid: Grid, masks: dict[str, np.ndarray], leads: dict[str, str], where: str = REGION
 ) -> list[tuple[str, str]]:
@@ -358,9 +416,11 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
     grid = read_layer(inputs)
     masks = country_masks(grid)
     regional = rainfall_bullets(grid, masks, LEADS)
-    somalia_masks = {k: v for k, v in masks.items() if k == "Somalia"}
-    somalia = (
-        rainfall_bullets(grid, somalia_masks, SOMALIA_LEADS, "Somalia") if somalia_masks else []
+    focus = country_focus(grid, masks)
+    focus_bullets = (
+        rainfall_bullets(grid, {focus.country: masks[focus.country]}, COUNTRY_LEADS, focus.country)
+        if focus
+        else []
     )
     # The headline repeats the most significant rainfall statement of the week.
     headline = next(
@@ -400,14 +460,16 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
                 "rows": rows,
             }
         )
-    if somalia:
+    if focus:
         result.append(
             {
-                "key": "somalia",
-                "title": "Somalia",
-                **_paragraphs(somalia),
+                "key": "focus",
+                "title": f"Country Focus: {focus.country}",
+                "country": focus.country,
+                "why": focus.why,
+                **_paragraphs(focus_bullets),
                 "map_layer": primary(inputs),
-                "map_country": "Somalia",
+                "map_country": focus.country,
             }
         )
     result.append(

@@ -526,3 +526,20 @@ def test_verification_metrics_have_known_answers():
     )
     assert seasons["DJF"]["cases"] == 2 and seasons["DJF"]["bias"] == pytest.approx(1 / 3)
     assert seasons["JJA"]["mae"] == 0.0
+
+
+def test_a_real_time_ensemble_is_cut_to_the_training_members():
+    """The S2S reforecasts the model learnt from have 10 perturbed members (11 with the
+    control); a 50-member real-time input uses members 1-10, as configured."""
+    import numpy as np
+    import xarray as xr
+
+    from climate_engine.operational.ecmwf import ensemble_members
+    from climate_engine.operational.settings import settings
+
+    ds = xr.Dataset(coords={"number": np.arange(0, 51)})
+    cfg = settings()
+    assert cfg["ecmwf"]["perturbed_members"] == [1, 10]
+    assert list(ensemble_members(ds, cfg)) == list(range(1, 11))
+    few = xr.Dataset(coords={"number": np.arange(1, 4)})
+    assert list(ensemble_members(few, cfg)) == [1, 2, 3]

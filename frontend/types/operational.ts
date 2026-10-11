@@ -227,6 +227,9 @@ export type BulletinStatus = {
     leads?: string[];
     map?: string;
     missing_dependency?: string;
+    /** The country focus: which member state and why it was chosen. */
+    country?: string;
+    why?: string;
     /** Member states' rainfall (the "countries" section). */
     rows?: {
       country: string;

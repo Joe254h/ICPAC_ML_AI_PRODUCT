@@ -49,6 +49,8 @@ export type ChatSession = {
   message_count: number;
   messages?: ChatMessage[];
   context?: ChatContext;
+  /** Archived: out of the conversation list, kept until deleted. */
+  archived?: boolean;
 };
 export type ChatAnswer = ChatMessage & {
   session_id: string;

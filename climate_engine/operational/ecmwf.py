@@ -84,6 +84,11 @@ def ensemble_members(ds: xr.Dataset | xr.DataArray, cfg: dict) -> np.ndarray:
     members = np.asarray(ds[dim].values)
     if not cfg["ecmwf"].get("include_control_member", False):
         members = members[members != cfg["ecmwf"].get("control_member_number", 0)]
+    # The training ensemble size: a larger real-time ensemble is cut to the same members.
+    if limit := cfg["ecmwf"].get("perturbed_members"):
+        first, last = limit
+        kept = members[(members >= first) & (members <= last)]
+        members = kept if kept.size >= 2 else members
     if members.size < 2:
         raise ValueError("At least two perturbed members are needed for ensemble spread")
     return members

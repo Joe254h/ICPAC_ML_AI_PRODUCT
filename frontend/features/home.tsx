@@ -63,16 +63,12 @@ function useBulletin(detail?: ForecastDetail) {
 // ------------------------------------------------------------------ hero
 
 /** Room for the outlook panel: the region sits to its right on wide screens. */
+/** The key figures overlap the bottom of the hero on wide screens; the panel and the
+ * legend keep their own space clear (``data-map-reserve``). */
 function heroPadding() {
   const width = typeof window === "undefined" ? 1440 : window.innerWidth;
-  if (width < 900) return { top: 215, bottom: 140, left: 16, right: 16 };
-  const panel = Math.max(0, (width - 1200) / 2) + 24 + 440 + 40;
-  return {
-    top: 40,
-    bottom: 120,
-    left: Math.min(panel, width * 0.5),
-    right: 70,
-  };
+  const bottom = width < 900 ? 16 : 70;
+  return { top: 16, bottom, left: 16, right: 16 };
 }
 
 function OutlookHero({
@@ -95,7 +91,7 @@ function OutlookHero({
     return (
       <section className="outlook-hero still">
         <div className="wrap outlook-inner">
-          <div className="outlook-panel">
+          <div className="outlook-panel" data-map-reserve="left top">
             <p className="outlook-eyebrow">
               Week-2 rainfall outlook · days 8–14
             </p>
@@ -154,7 +150,7 @@ function OutlookHero({
         className="outlook-map"
       >
         <div className="wrap outlook-inner">
-          <div className="outlook-panel">
+          <div className="outlook-panel" data-map-reserve="left top">
             <p className="outlook-eyebrow">
               Week-2 rainfall outlook · days 8–14
             </p>
@@ -193,7 +189,7 @@ function OutlookHero({
             </div>
           </div>
         </div>
-        <div className="outlook-legend">
+        <div className="outlook-legend" data-map-reserve="right bottom">
           <LegendBar
             title="Week-2 total rainfall"
             unit="mm"
@@ -436,7 +432,7 @@ function ObservedRainfall() {
                 return row ? `Mean ${num(row.mean_mm)} mm this dekad` : null;
               }}
             >
-              <div className="map-legend-corner">
+              <div className="map-legend-corner" data-map-reserve="bottom left">
                 <LegendBar
                   title="Dekad total"
                   unit="mm"

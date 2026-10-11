@@ -87,6 +87,8 @@ letter-spacing:.8px;color:#7a4b00;background:#fff3cc;border-radius:999px;padding
 .countries thead th{background:#eef5f0;color:var(--ink)}
 .countries .hint{font-size:13px;color:var(--muted);margin:10px 0 0}
 .about p{margin:0 0 8px;font-size:15px}
+.why{margin:0 0 12px;padding:10px 14px;border-left:4px solid var(--amber);background:#fffaf0;
+font-size:15px}
 .record{font-size:14px}.record h2{font-size:20px}
 .record table{width:100%;border-collapse:collapse}
 .record th,.record td{text-align:left;padding:6px 10px 6px 0;border-bottom:1px solid var(--line);
@@ -115,6 +117,8 @@ def images(document: bytes) -> dict[str, tuple[str, bytes]]:
             if part in names:
                 extension = name.rsplit(".", 1)[-1].lower()
                 found[key] = (MEDIA.get(extension, "image/png"), package.read(part))
+    if "focus" in found:  # the same picture held Somalia's map in earlier drafts
+        found["somalia"] = found["focus"]
     return found
 
 
@@ -133,12 +137,15 @@ def _paragraphs(section: dict[str, Any]) -> list[str]:
     ]
 
 
-def _figure(key: str, maps: dict[str, tuple[str, bytes]], period: str) -> str:
+def _figure(
+    key: str, maps: dict[str, tuple[str, bytes]], period: str, country: str | None = None
+) -> str:
     if key not in maps:
         return ""
     media, data = maps[key]
     source = base64.b64encode(data).decode()
-    caption = f"{CAPTIONS.get(key, 'Map')} for {period}"
+    name = f"{country}: total rainfall (mm)" if country else CAPTIONS.get(key, "Map")
+    caption = f"{name} for {period}"
     return (
         f'<figure><img alt="{html.escape(caption)}" src="data:{media};base64,{source}">'
         f"<figcaption>{html.escape(caption)}</figcaption></figure>"
@@ -197,15 +204,21 @@ class WeeklyHTMLExporter:
             )
         if note := sections.get("decision_support"):
             body.append(f'<aside class="note">{"".join(_paragraphs(note))}</aside>')
-        for key, label in (("rainfall", "Regional outlook"), ("somalia", "Country focus")):
+        # Drafts before the country focus carried Somalia under the key "somalia".
+        for key, label in (
+            ("rainfall", "Regional outlook"),
+            ("focus", "Country focus"),
+            ("somalia", "Country focus"),
+        ):
             section = sections.get(key)
             if not section or section.get("missing_dependency"):
                 continue
             items = "".join(f"<li>{p}</li>" for p in _paragraphs(section))
+            why = f'<p class="why">{escape(section["why"])}</p>' if section.get("why") else ""
             body.append(
                 f'<section class="card"><div class="product"><div><p class="label">{label}</p>'
-                f"<h2>{escape(section['title'])}</h2><ul>{items}</ul></div>"
-                f"{_figure(key, maps, period)}</div></section>"
+                f"<h2>{escape(section['title'])}</h2>{why}<ul>{items}</ul></div>"
+                f"{_figure(key, maps, period, section.get('country'))}</div></section>"
             )
             if key == "rainfall" and (countries := sections.get("countries")):
                 body.append(_countries(countries))

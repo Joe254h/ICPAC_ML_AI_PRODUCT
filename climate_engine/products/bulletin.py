@@ -27,13 +27,13 @@ TEXT_SLOTS = {
     "23E25723": ("rainfall", 0),
     "5B525F15": ("rainfall", 1),
     "3F234D1D": ("rainfall", 2),
-    "15553166": ("somalia", 0),
-    "45B630FC": ("somalia", 1),
-    "4C49DE8B": ("somalia", 2),
+    "15553166": ("focus", 0),
+    "45B630FC": ("focus", 1),
+    "4C49DE8B": ("focus", 2),
 }
 IMAGE_SLOTS = {
     "media/image8.png": "rainfall",
-    "media/imaged.png": "somalia",
+    "media/imaged.png": "focus",
 }
 # The reference's products the service does not have yet (the second headline line, rainfall
 # anomaly, exceptional rainfall, mean temperature, temperature anomaly, Somalia temperature
@@ -54,11 +54,48 @@ OMITTED = (
         "2C078E63",
     ]
 )  # fmt: skip
-SOMALIA = ["6F1BC42D", "1DED082D", "171EEC30", "69E87FCE", "15553166", "45B630FC", "4C49DE8B"]
+# The reference's Somalia section, which carries the country focus: heading, spacing, maps,
+# "Rainfall" and the three bullets.
+FOCUS = ["6F1BC42D", "1DED082D", "171EEC30", "69E87FCE", "15553166", "45B630FC", "4C49DE8B"]
+FOCUS_HEADING = "6F1BC42D"
 RAINFALL_MAP = "73AD7BDD"  # the paragraph holding the regional map; the table follows it
-SOMALIA_MAPS = "171EEC30"  # Somalia's rainfall and temperature maps, side by side
-SOMALIA_LAST = "4C49DE8B"  # Somalia's last rainfall bullet; the forecast note follows it
-SOMALIA_MAP_EMU = 4114800  # 4.5 inches: the rainfall map alone, centred
+FOCUS_MAPS = "171EEC30"  # the reference's rainfall and temperature maps, side by side
+FOCUS_LAST = "4C49DE8B"  # the focus's last rainfall bullet; the forecast note follows it
+FOCUS_MAP_MAX_EMU = (5486400, 4572000)  # 6 x 5 inches at most, in the map's own shape
+
+
+def trimmed(png: bytes, margin: int = 24) -> bytes:
+    """The picture without the empty white border its page layout leaves (a country map
+    fills only part of the reference page)."""
+    from PIL import Image, ImageChops
+
+    with Image.open(io.BytesIO(png)) as image:
+        rgb = image.convert("RGB")
+        box = ImageChops.difference(rgb, Image.new("RGB", rgb.size, "white")).getbbox()
+        if box is None:
+            return png
+        left, top, right, bottom = box
+        box = (
+            max(left - margin, 0),
+            max(top - margin, 0),
+            min(right + margin, rgb.width),
+            min(bottom + margin, rgb.height),
+        )
+        output = io.BytesIO()
+        rgb.crop(box).save(output, format="PNG")
+        return output.getvalue()
+
+
+def picture_size(png: bytes, box: tuple[int, int] = FOCUS_MAP_MAX_EMU) -> tuple[int, int]:
+    """The largest size (EMU) with the picture's own aspect ratio that fits ``box``."""
+    from PIL import Image
+
+    with Image.open(io.BytesIO(png)) as image:
+        width, height = image.size
+    scale = min(box[0] / width, box[1] / height)
+    return round(width * scale), round(height * scale)
+
+
 ARIAL = '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial" w:cs="Arial" />'
 
 
@@ -172,8 +209,8 @@ def omit_paragraphs(document: str, paragraph_ids: list[str]) -> str:
     return document
 
 
-def keep_first_picture(document: str, paragraph_id: str, size_emu: int) -> str:
-    """Keep a paragraph's first picture, as a ``size_emu`` square, centred."""
+def keep_first_picture(document: str, paragraph_id: str, size_emu: tuple[int, int]) -> str:
+    """Keep a paragraph's first picture, ``size_emu`` (width, height) in EMU, centred."""
 
     def edit(match: re.Match) -> str:
         paragraph = match[0]
@@ -182,7 +219,7 @@ def keep_first_picture(document: str, paragraph_id: str, size_emu: int) -> str:
             paragraph = paragraph.replace(run, "")
         paragraph = re.sub(
             r'(<wp:extent|<a:ext) cx="\d+" cy="\d+"',
-            rf'\1 cx="{size_emu}" cy="{size_emu}"',
+            rf'\1 cx="{size_emu[0]}" cy="{size_emu[1]}"',
             paragraph,
         )
         return paragraph.replace("</w:pPr>", '<w:jc w:val="center" /></w:pPr>', 1)
@@ -412,9 +449,17 @@ class WordTemplateGenerator(BulletinGenerator):
         document = omit_paragraphs(document, OMITTED)
         # Headings stay with what follows them; Somalia's heading, map and bullets together.
         document = keep_with_next(document, ["64DF6415", "23E25723", "5B525F15"])
-        if "somalia" in content:
-            document = keep_first_picture(document, SOMALIA_MAPS, SOMALIA_MAP_EMU)
-            document = keep_with_next(document, SOMALIA[:-1])
+        focus = content.get("focus")
+        focus_png = None
+        if focus:
+            focus_png = trimmed(
+                weekly.rainfall_png(inputs, focus["map_layer"], focus["country"], note="")
+            )
+            document = keep_first_picture(document, FOCUS_MAPS, picture_size(focus_png))
+            document = keep_with_next(document, FOCUS[:-1])
+            document = fill_paragraph(document, FOCUS_HEADING, [(focus["title"], "bold")])
+            why = paragraph_xml([(focus["why"], False)], after=120, keep_next=True)
+            document = insert_after(document, FOCUS_HEADING, why)
         for paragraph_id, (key, index) in TEXT_SLOTS.items():
             if key == "title":
                 segments = [(title, "bold")]
@@ -427,23 +472,24 @@ class WordTemplateGenerator(BulletinGenerator):
             document = fill_paragraph(document, paragraph_id, segments)
         if "countries" in content:
             document = insert_after(document, RAINFALL_MAP, countries_xml(content["countries"]))
-        about = about_xml(content["about"])
-        if "somalia" in content:
-            document = insert_after(document, SOMALIA_LAST, about)
-        else:
-            document = insert_after(document, SOMALIA_LAST, about)
-            document = omit_paragraphs(document, SOMALIA)
+        document = insert_after(document, FOCUS_LAST, about_xml(content["about"]))
+        if not focus:
+            document = omit_paragraphs(document, FOCUS)
         parts["word/document.xml"] = document.encode("utf-8")
         parts = drop_unused_media(parts, document)
         header = parts["word/header1.xml"].decode("utf-8-sig")
         parts["word/header1.xml"] = fill_header(header, weekly.scope_label(inputs)).encode("utf-8")
         for name, key in IMAGE_SLOTS.items():
-            if name in parts and key in content:
-                section = content[key]
-                generated = weekly.rainfall_png(
-                    inputs, section["map_layer"], section.get("map_country"), note=""
-                )
-                parts[name] = weekly.fit_reference_figure(parts[name], generated, "PNG")
+            if name not in parts or key not in content:
+                continue
+            if key == "focus" and focus_png is not None:
+                parts[name] = focus_png  # shown in its own shape (the picture is sized to it)
+                continue
+            section = content[key]
+            generated = weekly.rainfall_png(
+                inputs, section["map_layer"], section.get("map_country"), note=""
+            )
+            parts[name] = weekly.fit_reference_figure(parts[name], generated, "PNG")
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w") as target:
             for info in infos:

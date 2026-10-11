@@ -26,6 +26,10 @@ ecmwf:
   # only (HPC files *_pf_*), so the control member is excluded from the features.
   control_member_number: 0
   include_control_member: false
+  # Perturbed members used (ECMWF numbering): 1-10, the S2S reforecasts' perturbed members
+  # the model was trained on (11 members with the control). A 50-member real-time input is
+  # cut to these; null keeps every member of the input.
+  perturbed_members: [1, 10]
   rainfall:
     variable: tp
     # ECMWF tp is accumulated from initialization ("cumulative"); "daily" accepts

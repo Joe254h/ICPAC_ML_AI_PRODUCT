@@ -466,6 +466,14 @@ li.open > .dropdown.wide {
   background: rgba(255, 255, 255, 0.22);
   color: #fff;
 }
+.btn-danger {
+  background: var(--red);
+  color: #fff;
+}
+.btn-danger:hover:not(:disabled) {
+  background: #8f1c13;
+  color: #fff;
+}
 .btn-sm {
   min-height: 36px;
   padding: 0 16px;
@@ -1417,24 +1425,129 @@ table.data .strong {
   align-content: start;
   gap: 2px;
 }
-.history-list button {
+.history-item {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border-radius: 6px;
+}
+.history-item:hover,
+.history-item.menu-open {
+  background: var(--ground);
+}
+.history-open {
+  flex: 1;
+  min-width: 0;
   display: grid;
   gap: 2px;
-  width: 100%;
   text-align: left;
   border: 0;
   border-left: 3px solid transparent;
   background: none;
   border-radius: 6px;
-  padding: 9px 10px 9px 11px;
+  padding: 9px 4px 9px 11px;
   cursor: pointer;
 }
-.history-list button:hover:not(:disabled) {
-  background: var(--ground);
-}
-.history-list button[aria-current="true"] {
+.history-open[aria-current="true"] {
   background: var(--green-50);
   border-left-color: var(--green-600);
+}
+/* the options button: shown on hover, focus, for the open conversation and on touch screens */
+.history-more {
+  flex: none;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.history-item:hover .history-more,
+.history-item.menu-open .history-more,
+.history-more:focus-visible,
+.history-open[aria-current="true"] + .history-more {
+  opacity: 1;
+}
+@media (hover: none) {
+  .history-more {
+    opacity: 1;
+  }
+}
+.history-more:hover:not(:disabled),
+.history-item.menu-open .history-more {
+  background: #fff;
+  color: var(--ink);
+}
+.history-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% - 4px);
+  right: 4px;
+  min-width: 160px;
+  display: grid;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+}
+.history-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: none;
+  border-radius: 7px;
+  padding: 9px 10px;
+  font: 500 14px var(--font-body);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.history-menu button:hover,
+.history-menu button:focus-visible {
+  background: var(--ground);
+}
+.history-menu .danger {
+  color: var(--red);
+}
+.history-menu .danger:hover,
+.history-menu .danger:focus-visible {
+  background: var(--red-50);
+}
+.history-shelf {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: none;
+  padding: 12px 18px;
+  font: 600 13.5px var(--font-body);
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+}
+.history-shelf:hover {
+  background: var(--ground);
+  color: var(--ink);
+}
+.confirm-modal {
+  max-width: 440px;
+}
+.confirm-modal p {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .history-title {
   overflow: hidden;
@@ -1935,12 +2048,25 @@ table.data .strong {
   .map-shell {
     height: 520px;
   }
+  /* a compact key across the bottom: classes in columns, so the map keeps its height */
   .legend-box {
     min-width: 0;
     left: 14px;
     right: 14px;
-    bottom: 14px;
+    bottom: 34px;
     font-size: 13px;
+    padding: 10px 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    column-gap: 10px;
+  }
+  .legend-box .title,
+  .legend-box .sub {
+    grid-column: 1 / -1;
+  }
+  /* the key spans the bottom here, where the badge stood */
+  .map-badge {
+    display: none;
   }
   .layer-rail .labels span {
     font-size: 15px;
@@ -1949,6 +2075,59 @@ table.data .strong {
 @media (max-width: 600px) {
   .wrap {
     padding: 0 16px;
+  }
+  /* phone maps: the layer switch in one row with the chosen layer's name, a three-column
+     key, no badge, so the map keeps most of its height */
+  .map-shell {
+    height: 560px;
+  }
+  .layer-rail .rail {
+    flex-direction: row;
+    gap: 6px;
+    padding: 5px;
+  }
+  .layer-rail .labels {
+    padding-top: 7px;
+  }
+  .layer-rail .labels span:not(.on) {
+    display: none;
+  }
+  .layer-rail .labels span.on {
+    font-size: 15px;
+    height: 30px;
+    margin: 0;
+  }
+  .legend-box {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 8px;
+    padding: 8px 10px;
+  }
+  .legend-box .title {
+    font-size: 15px;
+    margin-bottom: 2px;
+  }
+  .legend-box .sub {
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+  .legend-box .row {
+    margin: 2px 0;
+    gap: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .legend-box .swatch {
+    flex: none;
+    width: 12px;
+    height: 12px;
+  }
+  /* the data credit wraps onto two lines here */
+  .map-legend-corner {
+    bottom: 58px;
+  }
+  /* phones zoom with two fingers; the buttons would sit on the layer switch */
+  .map-shell .maplibregl-ctrl-top-right {
+    display: none;
   }
   .brandbar {
     padding-top: 14px;
@@ -2331,6 +2510,27 @@ table.data .strong {
   bottom: 96px;
   z-index: 4;
 }
+/* on wide screens the key stands upright at the right edge, wettest on top, so the map
+   keeps its width */
+@media (min-width: 901px) {
+  .outlook-legend .legend-bar {
+    width: 150px;
+  }
+  .outlook-legend .legend-bar-row {
+    flex-direction: column-reverse;
+    gap: 3px;
+  }
+  .outlook-legend .legend-bar-class {
+    flex-direction: row;
+    min-width: 0;
+    gap: 10px;
+  }
+  .outlook-legend .legend-bar-class span {
+    flex: none;
+    width: 24px;
+    height: 14px;
+  }
+}
 /* keep the map credit clear of the key figures that overlap the hero */
 .outlook-hero .maplibregl-ctrl-bottom-right {
   bottom: 58px;
@@ -2380,7 +2580,7 @@ table.data .strong {
 .map-legend-corner {
   position: absolute;
   left: 12px;
-  bottom: 12px;
+  bottom: 40px; /* above the data credit */
   z-index: 4;
 }
 .map-legend-corner .legend-bar-class {
@@ -3037,4 +3237,15 @@ table.data .strong {
   .not-found-links {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* the bulletin's country focus: why this country */
+.focus-why {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-left: 4px solid var(--amber);
+  background: var(--amber-50);
+  border-radius: 0 8px 8px 0;
+  font-size: 15.5px;
+  color: var(--ink);
 }

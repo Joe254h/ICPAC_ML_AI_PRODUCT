@@ -193,3 +193,31 @@ def test_greetings_and_explanations_work_without_forecast_and_history_is_retaine
         ChatRequest(message="Thanks", session_id=record["id"], context_mode="operational")
     )
     assert len(platform.repo.get("chat_session", record["id"])["messages"]) == 106
+
+
+def test_conversations_are_archived_restored_and_deleted(env):
+    first = ask(env, "What is RMSE?")["session_id"]
+    second = ask(env, "What is MBC?")["session_id"]
+    listed = env.client.get("/chat/sessions").json()
+    assert [s["id"] for s in listed] == [second, first]
+    assert not any(s["archived"] for s in listed)
+
+    archived = env.client.post(f"/chat/sessions/{first}/archive")
+    assert archived.status_code == 200 and archived.json()["archived_at"]
+    assert [s["id"] for s in env.client.get("/chat/sessions").json()] == [second]
+    shelf = env.client.get("/chat/sessions", params={"archived": True}).json()
+    assert [(s["id"], s["archived"]) for s in shelf] == [(first, True)]
+    # An archived conversation can still be read, and asking in it brings it back.
+    assert env.client.get(f"/chat/sessions/{first}").json()["messages"]
+    ask(env, "And CHIRPS?", first)
+    assert {s["id"] for s in env.client.get("/chat/sessions").json()} == {first, second}
+
+    env.client.post(f"/chat/sessions/{second}/archive")
+    restored = env.client.post(f"/chat/sessions/{second}/archive", params={"archived": False})
+    assert restored.json()["archived_at"] is None
+    assert env.client.get("/chat/sessions", params={"archived": True}).json() == []
+
+    assert env.client.delete(f"/chat/sessions/{first}").status_code == 204
+    assert env.client.get(f"/chat/sessions/{first}").status_code == 404
+    assert env.client.delete(f"/chat/sessions/{first}").status_code == 404
+    assert [s["id"] for s in env.client.get("/chat/sessions").json()] == [second]

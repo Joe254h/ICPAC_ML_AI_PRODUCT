@@ -3,6 +3,7 @@ import re
 from fastapi import BackgroundTasks, Depends, FastAPI, Query
 from fastapi.responses import Response
 
+from backend.app.db import now
 from backend.app.schemas import (
     BulletinRequest,
     ChatRequest,
@@ -56,7 +57,10 @@ def install(app: FastAPI, dependency):
         return " ".join(str(asked or "").split())[:80]
 
     @app.get("/chat/sessions")
-    def sessions(background: BackgroundTasks, platform=Depends(dependency)) -> list[dict]:
+    def sessions(
+        background: BackgroundTasks, archived: bool = False, platform=Depends(dependency)
+    ) -> list[dict]:
+        """Conversations, newest first: the open ones, or with ``archived`` the archived."""
         # The Copilot page lists sessions when it opens: wake a model that scaled to zero.
         background.add_task(warm_up)
         return [
@@ -67,17 +71,32 @@ def install(app: FastAPI, dependency):
                 "updated_at": s.get("updated_at", s["created_at"]),
                 "message_count": len(s["messages"]),
                 "context": s.get("context"),
+                "archived": bool(s.get("archived_at")),
             }
             for s in sorted(
                 platform.repo.list("chat_session"),
                 key=lambda s: s.get("updated_at", s["created_at"]),
                 reverse=True,
             )
+            if bool(s.get("archived_at")) == archived
         ]
 
     @app.get("/chat/sessions/{id}")
     def session(id: str, platform=Depends(dependency)) -> dict:
         return platform.repo.get("chat_session", id)
+
+    @app.post("/chat/sessions/{id}/archive")
+    def archive_session(id: str, archived: bool = True, platform=Depends(dependency)) -> dict:
+        """Archive a conversation (out of the list, kept), or bring it back."""
+        record = platform.repo.get("chat_session", id)
+        record["archived_at"] = now() if archived else None
+        return platform.repo.save("chat_session", record, id)
+
+    @app.delete("/chat/sessions/{id}", status_code=204)
+    def delete_session(id: str, platform=Depends(dependency)) -> Response:
+        """Delete a conversation and its messages for good."""
+        platform.repo.delete("chat_session", id)
+        return Response(status_code=204)
 
     @app.get("/references/{id}")
     def reference(id: str) -> dict:

@@ -69,6 +69,14 @@ class Repository:
                 raise KeyError(record_id)
             return json.loads(record.payload)
 
+    def delete(self, kind: str, record_id: str) -> None:
+        with Session(self.engine) as session:
+            record = session.get(Record, record_id)
+            if record is None or record.kind != kind:
+                raise KeyError(record_id)
+            session.delete(record)
+            session.commit()
+
     def audit(self, action: str, actor: str, entity: str, details: dict | None = None) -> dict:
         return self.save(
             "audit",

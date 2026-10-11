@@ -45,10 +45,12 @@ test("a bulletin goes from draft to review, approval and publication", async ({
   await expect(
     page.getByRole("heading", { name: "Total Rainfall" }),
   ).toBeVisible();
-  // The bulletin carries what the service has: rainfall, the member states, Somalia.
+  // The bulletin carries what the service has: rainfall, the member states and the
+  // country with the most distinctive outlook, with the reason it was chosen.
   await expect(
     page.getByRole("heading", { name: "Rainfall by Country" }),
   ).toBeVisible();
+  await expect(page.getByText(/is this week's country focus/)).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "About this forecast" }),
   ).toBeVisible();

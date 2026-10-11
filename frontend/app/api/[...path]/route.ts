@@ -16,6 +16,12 @@ export async function POST(
 ) {
   return proxy(request, (await params).path);
 }
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> },
+) {
+  return proxy(request, (await params).path);
+}
 async function proxy(request: NextRequest, segments: string[]) {
   const target = new URL(
     segments.map(encodeURIComponent).join("/") + request.nextUrl.search,
@@ -44,7 +50,12 @@ async function proxy(request: NextRequest, segments: string[]) {
       const value = upstream.headers.get(name);
       if (value) headers.set(name, value);
     }
-    return new Response(upstream.body, { status: upstream.status, headers });
+    // A 204 (a conversation deleted) has no body, and a Response must not be given one.
+    const empty = [204, 205, 304].includes(upstream.status);
+    return new Response(empty ? null : upstream.body, {
+      status: upstream.status,
+      headers,
+    });
   } catch {
     return Response.json(
       { detail: "Climate API unavailable. Check backend service and API_URL." },

@@ -7,7 +7,8 @@ the ECMWF ensemble from ECMWF Open Data, issues the forecast on the authoritativ
 review (approved and published on the website or from emailed links) and verifies finished
 forecasts against CHIRPS. It shows three forecast layers:
 
-* **Raw ECMWF**: the ensemble mean of the Week-2 total (50 perturbed members);
+* **Raw ECMWF**: the ensemble mean of the Week-2 total (perturbed members 1–10, the
+  ensemble size the model was trained on);
 * **MBC**: the locked multiplicative bias correction, `max(0, raw × R[month, cell])`,
   the forecast issued today;
 * **MBC + AI/ML**: the hybrid residual-corrected forecast,

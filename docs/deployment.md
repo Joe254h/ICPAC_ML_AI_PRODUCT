@@ -76,8 +76,13 @@ Every weekly bulletin follows the reference's layout, fonts and wording, with wh
 service produces: the title ("Weekly Forecast for 05-12 October 2026", the week named by
 its boundary dates as in the reference's 06-13), the headline, the decision-support note,
 the regional Total Rainfall map and bullets, a table of each member state's mean, median
-and highest rainfall, the Somalia map and bullets, and "About this Forecast" (the ECMWF
-run, the method, verification and the issuer). The rainfall bullets use the reference's
+and highest rainfall, the country focus, and "About this Forecast" (the ECMWF run, the
+method, verification and the issuer). The country focus is the member state with the
+most distinctive outlook: of the heaviest rainfall class expected over a meaningful area
+(at least 12 grid cells and 1% of a country), the country where it covers the largest
+share. The bulletin says why ("Eritrea is this week's country focus: 4% of its area is
+expected to receive moderate rainfall (50-200 mm), the largest share of the 2 member
+states where it occurs") and adds that country's map and bullets. The rainfall bullets use the reference's
 classes (heavy above 200 mm, moderate 50-200 mm, light below 50 mm) and name where each
 falls ("most parts of", "northern parts of", "isolated areas in") from the share and
 position of each country's grid cells. The reference's rainfall anomaly, exceptional

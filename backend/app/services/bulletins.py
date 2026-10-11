@@ -63,6 +63,8 @@ def weekly_text(facts: dict) -> str:
     blocks = [facts["title"]]
     for section in facts["sections"]:
         blocks.append(section["title"])
+        if section.get("why"):  # the country focus says why it was chosen
+            blocks.append(section["why"])
         blocks += [text for text in section["text"] if text]
     return "\n\n".join(blocks)
 
@@ -140,7 +142,16 @@ class BulletinService:
         sections = [
             {
                 k: section[k]
-                for k in ("key", "title", "text", "leads", "rows", "missing_dependency")
+                for k in (
+                    "key",
+                    "title",
+                    "text",
+                    "leads",
+                    "rows",
+                    "country",
+                    "why",
+                    "missing_dependency",
+                )
                 if k in section
             }
             for section in weekly.sections(inputs)

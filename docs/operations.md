@@ -54,7 +54,9 @@ The list shown in the interface comes from `config/data_sources.yaml`.
 ### ECMWF Open Data
 
 * Real-time ensemble, `ifs`, `0p25`, stream `enfo`, 00 UTC run; licence CC BY 4.0.
-* Only total precipitation (`tp`) of the **50 perturbed members** at steps **168 h and
+* Only total precipitation (`tp`) of **perturbed members 1–10** (`members` in the config:
+  the ensemble size of the S2S reforecasts the model was trained on, 11 members of which
+  training read the 10 perturbed ones) at steps **168 h and
   336 h** is downloaded, read by byte ranges from each file's index. The control member
   is excluded, as in training.
 * Every GRIB message is checked (parameter, date, run, member, step, units) and the global

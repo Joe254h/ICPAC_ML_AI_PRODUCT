@@ -59,6 +59,7 @@ function Product({ section, eyebrow }: { section: Section; eyebrow: string }) {
         <div>
           <p className="eyebrow">{eyebrow}</p>
           <h2 style={{ fontSize: 26, marginBottom: 16 }}>{section.title}</h2>
+          {section.why && <p className="focus-why">{section.why}</p>}
           <Bullets section={section} />
         </div>
         {section.map && (
@@ -175,8 +176,8 @@ function Body({ detail }: { detail: ForecastDetail }) {
           </div>
         </Card>
       )}
-      {get("somalia") && !get("somalia")?.missing_dependency && (
-        <Product section={get("somalia") as Section} eyebrow="Country focus" />
+      {get("focus") && (
+        <Product section={get("focus") as Section} eyebrow="Country focus" />
       )}
       {get("about") && (
         <Card title="About this forecast">

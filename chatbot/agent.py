@@ -483,6 +483,7 @@ class ToolBox:
             "sections": [
                 {
                     "title": s["title"],
+                    **({"why": s["why"]} if s.get("why") else {}),
                     "text": s.get("text", []),
                     **(
                         {"status": f"in progress: needs {s['missing_dependency']}"}

@@ -169,6 +169,7 @@ class Copilot:
         ]
         session["updated_at"] = now()
         session.setdefault("title", body.message[:80])
+        session.pop("archived_at", None)  # a conversation taken up again is back in the list
         record = self.platform.repo.save("chat_session", session, body.session_id)
         self.platform.repo.audit(
             "copilot_answer",

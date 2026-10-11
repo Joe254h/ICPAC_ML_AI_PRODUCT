@@ -69,7 +69,7 @@ export default function ForecastMap({
       height={height}
       credit={FORECAST_CREDIT}
     >
-      <div className="layer-rail">
+      <div className="layer-rail" data-map-reserve="left top">
         <div className="rail" role="group" aria-label="Forecast layer">
           {LAYERS.map(({ key, label, icon: Icon }) => (
             <button
@@ -97,7 +97,7 @@ export default function ForecastMap({
           ))}
         </div>
       </div>
-      <div className="legend-box">
+      <div className="legend-box" data-map-reserve="right bottom">
         <div className="title">Week-2 Total Rainfall</div>
         <div className="sub">
           Valid {validDays(detail.valid_start, detail.valid_end)}
@@ -109,7 +109,7 @@ export default function ForecastMap({
           </div>
         ))}
       </div>
-      <div className="map-badge">
+      <div className="map-badge" data-map-reserve="left bottom">
         ICPAC
         <b>Week-2</b>
         Forecast

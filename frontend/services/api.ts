@@ -28,6 +28,8 @@ export async function request<T>(
       response.status,
     );
   }
+  // 204 (a conversation deleted): nothing to read.
+  if (response.status === 204) return undefined as T;
   return response.json();
 }
 
