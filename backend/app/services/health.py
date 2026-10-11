@@ -19,6 +19,13 @@ def _day(value: str) -> str:
     return f"{day.day} {day:%b %Y}"
 
 
+def model_label(model: str) -> str:
+    """A model's name in words: gemini-3.8-flash -> Gemini 3.8 Flash."""
+    return " ".join(
+        part if part[:1].isdigit() else part.capitalize() for part in model.split("-")
+    ).replace("Gpt", "GPT")
+
+
 def system_health(platform) -> dict:
     components = {"API": "Healthy", "Database": "Healthy"}
     models = [m for m in platform.repo.list("model") if operational.is_operational(m)]
@@ -124,6 +131,17 @@ def system_health(platform) -> dict:
     except (anthropic.APIError, httpx.HTTPError, ValueError):
         components["Copilot language model"] = (
             "Unavailable · not reachable: the Copilot gives checked fixed answers"
+        )
+    # What happened to the last question decides more than the endpoint answering.
+    from chatbot.agent import LAST_OUTCOME
+
+    if LAST_OUTCOME and components["Copilot language model"].startswith("Healthy"):
+        name = model_label(LAST_OUTCOME["model"])
+        components["Copilot language model"] = (
+            f"Healthy · {name} answered at {LAST_OUTCOME['at']}"
+            if LAST_OUTCOME["ok"]
+            else f"Warning · last question at {LAST_OUTCOME['at']} not answered by {name}: "
+            f"{LAST_OUTCOME['reason']}"
         )
     free = shutil.disk_usage(ROOT).free
     components["Storage"] = (

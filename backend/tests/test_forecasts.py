@@ -184,7 +184,7 @@ def test_forecast_endpoints(env, fast_maps):
     assert detail["model"]["status"] == "candidate" and detail["model"]["feature_count"] == 37
     assert detail["provenance"]["forecast_id"] == fid
     # Map URLs name the current style, so a new style never reuses a cached image.
-    assert detail["maps"]["hybrid"] == f"/forecasts/{fid}/map?layer=hybrid&style=weekly-v2"
+    assert detail["maps"]["hybrid"] == f"/forecasts/{fid}/map?layer=hybrid&style=weekly-v3"
     assert detail["maps"]["residual"] == f"/forecasts/{fid}/map?layer=residual"
     for layer in packages.MAP_LAYERS:
         response = client.get(f"/forecasts/{fid}/map?layer={layer}")

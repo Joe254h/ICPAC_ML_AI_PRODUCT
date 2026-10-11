@@ -30,7 +30,10 @@ artifacts/
     └── authoritative_icpac11_mask.npz 800 x 700 grid, 205,999 ICPAC-11 cells
 
 cartography/                            (repository root)
-├── east_africa_11_adm0.geojson        cartographic boundaries (not the scientific mask)
+├── east_africa_11_adm0.geojson        cartographic boundaries as delivered (not the mask)
+├── icpac11_adm0.geojson               the outlines the maps draw: Sudan with the Halaib
+│                                      triangle, without Bir Tawil, as ICPAC maps it
+│                                      (scripts/build_icpac_boundaries.py)
 ├── IGAD-CPAC-01.jpg                   logo used on maps
 └── 121b_final_atmospheric_maps_icpac_standard.py   map driver from the HPC
 

@@ -805,21 +805,77 @@ def function_tool(tool: dict[str, Any]) -> dict[str, Any]:
     return {"type": "function", "function": function}
 
 
+GEMINI_HOST = "generativelanguage.googleapis.com"
+#: Tried in turn when Google refuses the configured model: Gemini 2.5 is served only to
+#: projects that used it before, and Flash models are replaced every few months.
+GEMINI_MODELS = ("gemini-3.8-flash", "gemini-flash-latest", "gemini-3.5-flash-lite")
+#: The model that last answered, per endpoint and configured model, for this process.
+WORKING_MODEL: dict[tuple[str, str], str] = {}
+#: The last outcome of a Copilot request, for the System page.
+LAST_OUTCOME: dict[str, Any] = {}
+
+
+def record_outcome(model: str, ok: bool, reason: str | None = None) -> None:
+    LAST_OUTCOME.clear()
+    LAST_OUTCOME.update(
+        {
+            "model": model,
+            "ok": ok,
+            "reason": reason,
+            "at": time.strftime("%H:%M UTC", time.gmtime()),
+        }
+    )
+
+
+def _model_refused(response: httpx.Response) -> bool:
+    """Whether the provider refused the model itself (unknown, retired, not for this key)."""
+    if response.status_code in (403, 404):
+        return True
+    text = response.text.lower()
+    return (
+        response.status_code == 400
+        and "model" in text
+        and any(
+            word in text for word in ("not found", "not supported", "not available", "deprecated")
+        )
+    )
+
+
 class OpenAIToolsModel:
     """Any OpenAI-compatible chat completions API with tool calling (Gemini, Groq, Azure
     OpenAI, OpenAI, Ollama, vLLM, ...).
 
     Within one answer, the model's tool calls go back exactly as it returned them, so
     provider additions such as Gemini's thought signatures are kept. A rate-limited or busy
-    provider is asked once more after a short wait.
+    provider is asked once more after a short wait. When the provider refuses the model
+    (unknown, retired or not open to this key), the next of LLM_FALLBACK_MODELS is tried
+    (for Gemini, by default the current Flash models) and remembered.
     """
 
     def __init__(self) -> None:
         cfg = config("runtime")["llm"]
         self.base = os.getenv("LLM_BASE_URL", cfg["base_url"]).rstrip("/")
         self.key = os.getenv("LLM_API_KEY")
-        self.model = os.getenv("LLM_MODEL", cfg["model"])
+        self.configured = os.getenv("LLM_MODEL", cfg["model"])
+        self.model = WORKING_MODEL.get((self.base, self.configured), self.configured)
         self.label = "the language model"
+
+    def candidates(self) -> list[str]:
+        listed = os.getenv("LLM_FALLBACK_MODELS")
+        if listed is None:
+            fallbacks: tuple[str, ...] | list[str] = (
+                GEMINI_MODELS if GEMINI_HOST in self.base else ()
+            )
+        else:
+            fallbacks = [m.strip() for m in listed.split(",") if m.strip()]
+        return list(dict.fromkeys([self.model, self.configured, *fallbacks]))
+
+    def temperature(self, model: str) -> float | None:
+        """LLM_TEMPERATURE, else 0.2; Gemini keeps its default (1.0), which Google asks for
+        with its thinking models."""
+        if value := os.getenv("LLM_TEMPERATURE"):
+            return float(value)
+        return None if "gemini" in model else 0.2
 
     def respond(self, system: str, transcript: list[dict], tools: list[dict]) -> Reply:
         messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
@@ -850,8 +906,7 @@ class OpenAIToolsModel:
                     )
         body: dict[str, Any] = {
             "model": self.model,
-            "temperature": 0.2,
-            # Thinking models (Gemini 2.5, Qwen 3) count their reasoning in this limit.
+            # Thinking models (Gemini, Qwen 3) count their reasoning in this limit.
             "max_tokens": int(os.getenv("LLM_MAX_TOKENS") or 4096),
             "messages": messages,
             "tools": [function_tool(t) for t in tools],
@@ -859,7 +914,7 @@ class OpenAIToolsModel:
         }
         if effort := os.getenv("LLM_REASONING_EFFORT"):
             body["reasoning_effort"] = effort
-        response = self._post(body)
+        response = self._post_to_a_model(body)
         choice = response.json()["choices"][0]
         message = choice["message"]
         raw_calls = message.get("tool_calls") or []
@@ -881,6 +936,27 @@ class OpenAIToolsModel:
             raise ValueError("The language model's answer was cut off")
         return Reply(text.strip(), calls, raw_calls)
 
+    def _post_to_a_model(self, body: dict[str, Any]) -> httpx.Response:
+        """The first model that the provider accepts answers; it is kept for later turns."""
+        models = self.candidates()
+        for index, model in enumerate(models):
+            body["model"] = model
+            body.pop("temperature", None)
+            if (temperature := self.temperature(model)) is not None:
+                body["temperature"] = temperature
+            try:
+                response = self._post(body)
+            except httpx.HTTPStatusError as exc:
+                if _model_refused(exc.response) and index + 1 < len(models):
+                    continue
+                raise
+            if model != self.model:
+                log.warning("Copilot model %s refused; %s answered", self.model, model)
+                self.model = model
+                WORKING_MODEL[(self.base, self.configured)] = model
+            return response
+        raise AssertionError("unreachable")
+
     def _post(self, body: dict[str, Any]) -> httpx.Response:
         headers = {"Authorization": f"Bearer {self.key}"} if self.key else {}
         for attempt in (1, 2):
@@ -895,7 +971,7 @@ class OpenAIToolsModel:
                 # The provider's own reason (bad request, quota, key) goes to the server log.
                 log.warning(
                     "Copilot model %s answered %s: %s",
-                    self.model,
+                    body["model"],
                     response.status_code,
                     response.text[:600],
                 )

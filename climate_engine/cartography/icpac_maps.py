@@ -13,13 +13,15 @@ backend/tests/test_cartography.py:
 * latitude/longitude axes with aspect 1/cos(central latitude), the references'
   y/x pixel-per-degree ratio of 1.0042;
 * map frame 1420 px high for a single map and 886.5 px in a panel (at 220 dpi);
-* ticks every 5 degrees, labels "Longitude (°E)" and "Latitude (°)", faint grid lines
-  drawn over the field;
-* the field clipped to the union of the official country polygons (white outside), 0.8 pt
-  black country boundaries drawn from the GeoJSON, never derived from the raster mask;
-* cells outside the authoritative domain stay white: the references show values in 313
-  cells inside the boundaries that the 205,999-cell domain excludes (Bir Tawil and slivers
-  along the Sudan-South Sudan border), so they were drawn on an earlier domain;
+* ticks every 5 degrees, faint grid lines drawn over the field; tick labels as ICPAC
+  writes them (25°E, 5°N, 0°, 10°S) where the references wrote plain numbers under
+  "Longitude (°E)" and "Latitude (°)";
+* the field clipped to the union of the country polygons (white outside), 0.8 pt black
+  country boundaries drawn from the GeoJSON, never derived from the raster mask. The
+  polygons are the delivered ones with Sudan as ICPAC maps it and as the domain has it:
+  the Halaib triangle included, Bir Tawil left out (the references drew Sudan along 22 N);
+* cells outside the authoritative domain stay white (slivers along the Sudan-South Sudan
+  border that the references coloured were drawn on an earlier domain);
 * a colourbar as tall as the frame with matplotlib's 20:1 aspect, separated from the
   frame by 4.75% of the frame width for a single map and 6.31% in a panel;
 * bold 15 pt title "LABEL | Quantity" 10 pt above the frame; 11 pt axis labels; 10 pt ticks;
@@ -54,7 +56,12 @@ from matplotlib.transforms import Bbox
 from climate_engine.core import ROOT
 from climate_engine.operational.grid import DomainGrid, load_grid
 
-BOUNDARIES = ROOT / "cartography" / "east_africa_11_adm0.geojson"
+# The HPC outlines with Sudan as ICPAC maps it (Halaib in, Bir Tawil out); see
+# scripts/build_icpac_boundaries.py. The HPC file itself is kept as delivered.
+BOUNDARIES = ROOT / "cartography" / "icpac11_adm0.geojson"
+# The delivered outlines set the reference figures' frame (bounds plus 1 degree); the frame
+# stays there, and Halaib (to 23.14 N) fits inside its 23.19 N edge.
+REFERENCE_BOUNDARIES = ROOT / "cartography" / "east_africa_11_adm0.geojson"
 LOGO = ROOT / "cartography" / "IGAD-CPAC-01.jpg"
 DOMAIN_MASK = ROOT / "artifacts" / "domain" / "authoritative_icpac11_mask.npz"
 
@@ -90,7 +97,9 @@ class Style:
     provisional: bool = False  # not confirmed by a reference map or the HPC driver
     levels: tuple[float, ...] | None = None
     palette: tuple[str, ...] | None = None
-    geographic_ticks: bool = False
+    # Ticks labelled as ICPAC's maps label them (25°E, 10°S, 0°), without axis titles; the
+    # HPC references wrote plain numbers under "Longitude (°E)" and "Latitude (°)".
+    geographic_ticks: bool = True
 
 
 STYLES: dict[str, Style] = {
@@ -123,7 +132,6 @@ STYLES: dict[str, Style] = {
         500.0,
         levels=(0.0, 1.0, 10.0, 30.0, 50.0, 100.0, 200.0, 500.0),
         palette=("#d9d9d9", "#ffa500", "#ffff00", "#caff70", "#00ff00", "#66cd00", "#228b22"),
-        geographic_ticks=True,
     ),
     "residual": Style(
         "BrBG", "CatBoost residual: CHIRPS − MBC (mm/week)", "diverging", provisional=True
@@ -221,7 +229,7 @@ def frozen_extent(countries: tuple[Country, ...]) -> tuple[float, float, float, 
 
 def __getattr__(name: str) -> Any:
     if name == "FROZEN_EXTENT":
-        return frozen_extent(load_boundaries(BOUNDARIES))
+        return frozen_extent(load_boundaries(REFERENCE_BOUNDARIES))
     raise AttributeError(name)
 
 
@@ -281,7 +289,11 @@ class Canvas:
             self.countries = tuple(c for c in self.countries if c.name == country)
             if not self.countries:
                 raise ValueError(f"Unknown map country: {country}")
-        self.extent = frozen_extent(self.countries)
+        self.extent = (
+            frozen_extent(load_boundaries(REFERENCE_BOUNDARIES))
+            if boundaries == BOUNDARIES
+            else frozen_extent(self.countries)
+        )
         self.logo_box = LOGO_BOX
         self.tick_spacing = TICK_SPACING_DEG
         if country is not None:

@@ -18,6 +18,8 @@ export type ChatMessage = {
   created_at?: string;
   provider?: string;
   fallback?: string | null;
+  /** Why the assistant did not answer, in words. */
+  fallback_reason?: string | null;
   sources?: Source[];
   tool_trace?: ToolTrace[];
   context?: ChatContext;

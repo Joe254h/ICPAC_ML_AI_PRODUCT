@@ -6,11 +6,11 @@ import {
   ArrowDown,
   ArrowUp,
   FileText,
-  History,
   LoaderCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   SquarePen,
-  X,
 } from "lucide-react";
 import { Button, Notice, PageBanner } from "@/components/ui";
 import { cx } from "@/components/ui";
@@ -34,6 +34,7 @@ const SUGGESTIONS = [
   "How does El Niño affect the October–December rains?",
 ];
 const STORAGE = "icpac-copilot-session";
+const SIDEBAR = "icpac-copilot-sidebar";
 const REGION = "GHA";
 
 function Sources({ sources }: { sources: Source[] }) {
@@ -108,8 +109,10 @@ function Message({ message }: { message: ChatMessage }) {
         )}
         {message.fallback && (
           <p className="chat-fallback">
-            Standard answer from the forecast data; the assistant could not
-            respond just now.
+            Standard answer from the forecast data:{" "}
+            {message.fallback_reason ??
+              "the assistant could not respond just now"}
+            .
           </p>
         )}
         {!user && <AnswerBasis message={message} />}
@@ -134,7 +137,10 @@ export default function Copilot() {
   const [restoreFailed, setRestoreFailed] = useState(false);
   const [error, setError] = useState("");
   const [awayFromBottom, setAwayFromBottom] = useState(false);
+  // The conversation list: a sidebar that can be hidden (remembered) on wide screens, a
+  // drawer on narrow ones.
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyHidden, setHistoryHidden] = useState(false);
   const stream = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const stickToBottom = useRef(true);
@@ -146,6 +152,33 @@ export default function Copilot() {
     setContext(data.context ?? null);
     setCountry(data.context?.country ?? REGION);
     setVariant(data.context?.variant ?? "");
+  };
+
+  useEffect(() => {
+    try {
+      setHistoryHidden(localStorage.getItem(SIDEBAR) === "hidden");
+    } catch {
+      // private window: the sidebar starts shown
+    }
+  }, []);
+
+  const narrow = () => window.matchMedia("(max-width: 900px)").matches;
+  const remember = (value: "shown" | "hidden") => {
+    try {
+      localStorage.setItem(SIDEBAR, value);
+    } catch {
+      // private window: not remembered
+    }
+  };
+  const showHistory = () => {
+    if (narrow()) return setHistoryOpen(true);
+    setHistoryHidden(false);
+    remember("shown");
+  };
+  const hideHistory = () => {
+    if (narrow()) return setHistoryOpen(false);
+    setHistoryHidden(true);
+    remember("hidden");
   };
 
   useEffect(() => {
@@ -305,28 +338,42 @@ export default function Copilot() {
           crumbs={[{ label: "Copilot" }]}
           subtitle="Questions about this week's forecast, observed rainfall and verification, and about weather and climate."
         />
-        <div className={cx("copilot", historyOpen && "history-open")}>
-          <aside className="copilot-history" aria-label="Conversations">
+        <div
+          className={cx(
+            "copilot",
+            historyOpen && "history-open",
+            historyHidden && "history-hidden",
+          )}
+        >
+          <aside
+            id="copilot-history"
+            className="copilot-history"
+            aria-label="Conversations"
+          >
             <div className="history-head">
-              <h2>Conversations</h2>
               <button
                 type="button"
                 className="history-new"
-                aria-label="New conversation"
                 disabled={locked}
-                onClick={startNew}
+                onClick={() => {
+                  setHistoryOpen(false);
+                  startNew();
+                }}
               >
-                <SquarePen size={16} aria-hidden /> New
+                <SquarePen size={16} aria-hidden /> New conversation
               </button>
               <button
                 type="button"
                 className="history-close"
-                aria-label="Close conversations"
-                onClick={() => setHistoryOpen(false)}
+                aria-label="Hide conversations"
+                title="Hide conversations"
+                aria-controls="copilot-history"
+                onClick={hideHistory}
               >
-                <X size={18} />
+                <PanelLeftClose size={19} />
               </button>
             </div>
+            <h2 className="history-heading">Conversations</h2>
             {!sessions.length ? (
               <p className="history-empty">Your conversations are kept here.</p>
             ) : (
@@ -359,9 +406,12 @@ export default function Copilot() {
                 type="button"
                 className="context-icon history-toggle"
                 aria-label="Show conversations"
-                onClick={() => setHistoryOpen(true)}
+                title="Show conversations"
+                aria-controls="copilot-history"
+                aria-expanded={!historyHidden}
+                onClick={showHistory}
               >
-                <History size={18} />
+                <PanelLeftOpen size={19} />
               </button>
               <div className="context-forecast">
                 <span>Forecast</span>
@@ -417,6 +467,7 @@ export default function Copilot() {
                 type="button"
                 className="context-icon context-new"
                 aria-label="New conversation"
+                title="New conversation"
                 disabled={locked}
                 onClick={startNew}
               >

@@ -252,6 +252,68 @@ def test_the_openai_compatible_path_uses_tool_calls(env, fast_maps, monkeypatch)
     assert answer["evidence"] == ["This week's forecast"]
 
 
+def test_a_refused_gemini_model_gives_way_to_a_current_one(env, fast_maps, monkeypatch):
+    """Google serves Gemini 2.5 only to projects that used it before: a new key gets 404."""
+    run(env)
+    gemini = "https://generativelanguage.googleapis.com/v1beta/openai"
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_TOOLS", "true")
+    monkeypatch.setenv("LLM_BASE_URL", gemini)
+    monkeypatch.setenv("LLM_MODEL", "gemini-2.5-flash")
+    monkeypatch.delenv("LLM_FALLBACK_MODELS", raising=False)
+    monkeypatch.delenv("LLM_TEMPERATURE", raising=False)
+    monkeypatch.setattr(agent, "WORKING_MODEL", {})
+    asked: list[str] = []
+
+    def post(url: str, headers: dict, timeout: float, json: dict) -> httpx.Response:
+        request = httpx.Request("POST", url)
+        asked.append(json["model"])
+        assert "temperature" not in json  # Gemini keeps its own default
+        if json["model"] == "gemini-2.5-flash":
+            return httpx.Response(404, json={"error": {"message": "not found"}}, request=request)
+        message = {"content": "Hello! Ask me about this week's rainfall or the bulletin."}
+        return httpx.Response(200, json={"choices": [{"message": message}]}, request=request)
+
+    monkeypatch.setattr(agent.httpx, "post", post)
+    answer = Copilot(env.platform).answer(ChatRequest(message="Hello"))
+    assert answer["fallback"] is None and answer["text"].startswith("Hello!")
+    assert asked == ["gemini-2.5-flash", "gemini-3.8-flash"]
+    # The model that answered is kept: the next question goes straight to it.
+    Copilot(env.platform).answer(ChatRequest(message="Thanks"))
+    assert asked[-1] == "gemini-3.8-flash" and len(asked) == 3
+    assert agent.LAST_OUTCOME["ok"] and agent.LAST_OUTCOME["model"] == "gemini-3.8-flash"
+    from backend.app.services import health
+
+    monkeypatch.setattr(
+        health.httpx,
+        "get",
+        lambda url, headers, timeout: httpx.Response(
+            200, json={"data": []}, request=httpx.Request("GET", url)
+        ),
+    )
+    status = env.client.get("/health").json()["components"]["Copilot language model"]
+    assert status.startswith("Healthy · Gemini 3.8 Flash answered at")
+
+
+def test_a_failed_answer_says_why_in_words(env, fast_maps, monkeypatch):
+    run(env)
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_TOOLS", "true")
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example/v1")
+    monkeypatch.setattr(agent.time, "sleep", lambda s: None)
+
+    def post(url: str, headers: dict, timeout: float, json: dict) -> httpx.Response:
+        return httpx.Response(429, json={}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(agent.httpx, "post", post)
+    answer = Copilot(env.platform).answer(ChatRequest(message="Forecast for Kenya"))
+    assert answer["fallback_reason"] == (
+        "the AI service's usage limit was reached; try again in a minute"
+    )
+    assert "Kenya" in answer["text"]
+    assert agent.LAST_OUTCOME["ok"] is False
+
+
 def test_an_unreachable_or_unconfigured_model_falls_back(env, fast_maps, monkeypatch):
     run(env)
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")

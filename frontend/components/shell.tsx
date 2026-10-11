@@ -47,17 +47,22 @@ const ORGANISATION = [
   ["Contact us", "https://www.icpac.net/contact-us/"],
 ] as const;
 
+type MenuState = { menu: Menu | null; pinned: boolean };
+
+/** A header menu: hovering shows its pages, a click keeps them open (a second click, Escape
+ * or a click elsewhere closes them). */
 function MenuEntry({
   menu,
   active,
-  open,
-  setOpen,
+  state,
+  setState,
 }: {
   menu: Menu;
   active?: Route;
-  open: boolean;
-  setOpen: (menu: Menu | null) => void;
+  state: MenuState;
+  setState: (state: MenuState) => void;
 }) {
+  const open = state.menu === menu;
   const routes = menuRoutes(menu);
   const current = active?.menu === menu;
   if (routes.length === 1)
@@ -75,17 +80,28 @@ function MenuEntry({
   return (
     <li
       className={cx(open && "open")}
-      onMouseEnter={() => setOpen(menu)}
-      onMouseLeave={() => setOpen(null)}
+      onMouseEnter={() => {
+        if (!state.pinned || !open) setState({ menu, pinned: false });
+      }}
+      onMouseLeave={() => {
+        if (!state.pinned) setState({ menu: null, pinned: false });
+      }}
     >
       <button
         type="button"
         className="item"
         aria-expanded={open}
+        aria-haspopup="true"
         aria-current={current ? "page" : undefined}
-        onClick={() => setOpen(open ? null : menu)}
+        onClick={() =>
+          setState(
+            open && state.pinned
+              ? { menu: null, pinned: false }
+              : { menu, pinned: true },
+          )
+        }
       >
-        {menu} <ChevronDown size={16} aria-hidden />
+        {menu} <ChevronDown size={16} aria-hidden className="chevron" />
       </button>
       <div className={cx("dropdown", menu === "Countries" && "wide")}>
         {routes.map((route) => (
@@ -93,7 +109,7 @@ function MenuEntry({
             key={route.path}
             href={href(route)}
             aria-current={active?.path === route.path ? "page" : undefined}
-            onClick={() => setOpen(null)}
+            onClick={() => setState({ menu: null, pinned: false })}
           >
             {route.title}
             {route.soon && <span className="soon">Coming later</span>}
@@ -251,7 +267,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const config = useApi<Config>("/config");
   const current = useApi<CurrentModel>("/models/current");
   const health = useApi<Health>("/health");
-  const [open, setOpen] = useState<Menu | null>(null);
+  const [menuState, setMenuState] = useState<MenuState>({
+    menu: null,
+    pinned: false,
+  });
   const [mobile, setMobile] = useState(false);
   const [search, setSearch] = useState(false);
   const [slot, setSlot] = useState<HTMLElement | null>(null);
@@ -268,7 +287,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
-    setOpen(null);
+    setMenuState({ menu: null, pinned: false });
     setMobile(false);
   }, [pathname]);
   useEffect(() => {
@@ -280,10 +299,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         e.preventDefault();
         setSearch(true);
       }
-      if (e.key === "Escape") setOpen(null);
+      if (e.key === "Escape") setMenuState({ menu: null, pinned: false });
     };
     const outside = (e: MouseEvent) => {
-      if (nav.current && !nav.current.contains(e.target as Node)) setOpen(null);
+      if (nav.current && !nav.current.contains(e.target as Node))
+        setMenuState({ menu: null, pinned: false });
     };
     window.addEventListener("keydown", keys);
     window.addEventListener("click", outside);
@@ -344,8 +364,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 key={menu}
                 menu={menu}
                 active={active}
-                open={open === menu}
-                setOpen={setOpen}
+                state={menuState}
+                setState={setMenuState}
               />
             ))}
           </ul>

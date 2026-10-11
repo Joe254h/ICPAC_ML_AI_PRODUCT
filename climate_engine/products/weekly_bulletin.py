@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from climate_engine.products.bulletin import BulletinInputs
 
 FORMAT_VERSION = "icpac-weekly-v2"
-MAP_STYLE = "weekly-v2"  # the map endpoint's style name; a new name busts browser caches
+MAP_STYLE = "weekly-v3"  # the map endpoint's style name; a new name busts browser caches
 REGION = "the region"
 # The reference's classes for the week's total rainfall (mm): name, lower, upper bound.
 CLASSES = (

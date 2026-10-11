@@ -48,7 +48,14 @@ outbound HTTPS to ECMWF Open Data and the CHIRPS server ([operations](operations
 3. Environment variable `API_URL` = the backend URL (Cloud Run or Azure Container Apps, no
    trailing slash). The browser only talks to `/api/*` on the Vercel domain; the route
    handler forwards to `API_URL`, so the API needs no public CORS configuration.
-4. Commit and push the deployment configuration, then deploy the new commit. A redeploy
+4. Optional, for the interactive maps' background: `NEXT_PUBLIC_CARTO_KEY` = a free CARTO
+   basemaps key (https://carto.com/basemaps/apikey/, no account needed). CARTO stopped
+   serving its raster tiles without a key on 25 September 2026 (they show "API KEY
+   REQUIRED"); with the key the maps use them, without it CARTO's vector style, which is
+   still served without one, and OpenStreetMap's tiles if that fails too. The value is
+   built into the page, so redeploy after setting it. Keep the CARTO and OpenStreetMap
+   credit on the maps (it is shown in the map corner).
+5. Commit and push the deployment configuration, then deploy the new commit. A redeploy
    of an older failed commit will still use its old files. Production deploys follow
    the protected branch; preview deploys follow pull requests.
 
@@ -75,6 +82,13 @@ heat-stress bullets keep their place and lead but say they are not available: ra
 totals cannot supply them. The page header carries the draft, model-status and
 synthetic-input label; the body keeps the reference's layout. The Weekly product page
 previews the same sections and offers **Download Word draft**.
+
+Country outlines (`cartography/icpac11_adm0.geojson`, built by
+`scripts/build_icpac_boundaries.py`) are the HPC package's outlines with Sudan as ICPAC's
+own maps draw it and as the forecast domain has it: the Halaib triangle included (to about
+23.1°N between 34 and 37°E) and Bir Tawil left out. The delivered file, which ends Sudan
+along 22°N, is kept unchanged; with it the maps clipped the forecast in Halaib away. Map
+axes are labelled as ICPAC labels them (25°E, 5°N, 0°, 10°S).
 
 The maps reproduce the reference maps (`climate_engine/cartography/weekly_maps.py`):
 Mercator frame and extent, filled contours in the reference's classes and colours, a

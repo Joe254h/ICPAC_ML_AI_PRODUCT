@@ -55,6 +55,38 @@ def selection(body: ChatRequest) -> str | None:
     return "; ".join(parts) or None
 
 
+def plain_reason(exc: Exception) -> str:
+    """Why the language model did not answer, in words for the person asking."""
+    if isinstance(exc, agent.Ungrounded):
+        return "the assistant quoted a figure that is not in the forecast"
+    status = None
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+    elif isinstance(exc, anthropic.APIStatusError):
+        status = exc.status_code
+    if status == 429:
+        return "the AI service's usage limit was reached; try again in a minute"
+    if status in (401, 403):
+        return "the AI service refused the key or the model"
+    if status == 404:
+        return "the AI model is not available to this key"
+    if status is not None and status >= 500:
+        return "the AI service had an error"
+    if status is not None:
+        return "the AI service turned the request down"
+    if isinstance(exc, (httpx.TimeoutException, anthropic.APITimeoutError)):
+        return "the AI service took too long"
+    if isinstance(exc, (httpx.TransportError, anthropic.APIConnectionError)):
+        return "the AI service could not be reached"
+    if isinstance(exc, ValueError) and "not configured" in str(exc):
+        return "no AI service is set up"
+    return "the assistant could not finish its answer"
+
+
+def model_name(model) -> str:
+    return str(getattr(model, "model", "") or "the language model")
+
+
 class Copilot:
     def __init__(self, platform):
         self.platform = platform
@@ -67,10 +99,12 @@ class Copilot:
             else {"messages": [], "created_at": now(), "title": body.message[:80]}
         )
         fallback = None
+        reason = None
         try:
             model = agent.chat_model()
         except ValueError as exc:  # e.g. the Anthropic key is missing
             model, fallback = None, f"The language model is not configured ({exc})."
+            reason = "no AI service is set up"
         if model is not None:
             previous = {} if body.reset_context else dict(session.get("context") or {})
             if body.forecast_id:
@@ -86,12 +120,15 @@ class Copilot:
                 )
                 response = {**result, "created_at": now(), "grounding": GROUNDING}
                 session["context"] = response["context"]
+                agent.record_outcome(model_name(model), True)
                 return self._save(body, session, response)
-            except agent.Ungrounded:
+            except agent.Ungrounded as exc:
                 fallback = (
                     "The language model quoted a figure that is not in the forecast, so the "
                     "checked answer is shown instead."
                 )
+                reason = plain_reason(exc)
+                agent.record_outcome(model_name(model), False, reason)
             except (
                 anthropic.APIError,
                 httpx.HTTPError,
@@ -104,9 +141,13 @@ class Copilot:
                     "The language model could not answer just now, so the checked answer is "
                     f"shown instead ({type(exc).__name__})."
                 )
-        return self._fixed(body, session, fallback)
+                reason = plain_reason(exc)
+                agent.record_outcome(model_name(model), False, reason)
+        return self._fixed(body, session, fallback, reason)
 
-    def _fixed(self, body: ChatRequest, session: dict, fallback: str | None) -> dict:
+    def _fixed(
+        self, body: ChatRequest, session: dict, fallback: str | None, reason: str | None = None
+    ) -> dict:
         history = session["messages"]
         evidence = OperationalConversation(self.platform).compose(body, session)
         tools = {t["tool"] for t in evidence["tool_trace"]}
@@ -120,6 +161,8 @@ class Copilot:
             **rendered,
             **evidence,
             "fallback": fallback or rendered["fallback"],
+            # Why the assistant did not answer, in words the page can show.
+            "fallback_reason": reason,
             "kind": "forecast" if tools - {"get_glossary"} else "general",
             "evidence": list(dict.fromkeys(FIXED_EVIDENCE.get(t, "Forecast data") for t in tools)),
             "sources": references,

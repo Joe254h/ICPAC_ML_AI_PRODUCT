@@ -90,9 +90,12 @@ def test_single_map_geometry_matches_the_reference(renders, name):
     [reference], [ours] = measure(reference_path), measure(renders[name])
     ref_size = load(reference_path).shape[:2]
     our_size = load(renders[name]).shape[:2]
-    assert all(close(a, b, 0.01 * a) for a, b in zip(ref_size, our_size, strict=True))
+    # Tick labels as ICPAC writes them (25°E, 10°S) replace the axis titles, so the image is
+    # smaller and the frame sits further left; the frame itself is the reference's.
+    assert our_size[0] < ref_size[0] and our_size[1] < ref_size[1]
     r, o = reference.frame, ours.frame
-    for attr in ("left", "top", "width", "height"):
+    assert close(r.top, o.top, 3) and o.left < r.left
+    for attr in ("width", "height"):
         assert close(getattr(r, attr), getattr(o, attr), 3), attr
     assert all(close(a, b, 0.05) for a, b in zip(reference.extent, ours.extent, strict=True))
     for frame in (reference, ours):  # latitude axis stretched by 1/cos(central latitude)
@@ -123,24 +126,31 @@ def test_panel_geometry_matches_the_reference(renders):
         assert close(o.colourbar.height, o.frame.height, 1)
         assert r.logo is not None and o.logo is not None
         assert close(r.logo.left, o.logo.left, 0.01) and close(r.logo.top, o.logo.top, 0.01)
-    pitch = ours[1].frame.left - ours[0].frame.left, ours[2].frame.top - ours[0].frame.top
-    ref_pitch = (
-        reference[1].frame.left - reference[0].frame.left,
-        reference[2].frame.top - reference[0].frame.top,
-    )
-    assert all(close(a, b, 0.05 * b) for a, b in zip(pitch, ref_pitch, strict=True))
+    # Without the reference's axis titles the panels sit closer, still clear of each other:
+    # room for the colourbar's labels on the right and the tick labels and title below.
+    assert ours[0].colourbar is not None
+    assert 150 < ours[1].frame.left - ours[0].colourbar.right
+    assert 80 < ours[2].frame.top - ours[0].frame.bottom
+
+
+def outside_halaib(points: np.ndarray) -> np.ndarray:
+    """Boundary points (lon, lat) away from the Halaib triangle and Bir Tawil."""
+    near = (points[:, 0] > 32.8) & (points[:, 0] < 37.4) & (points[:, 1] > 21.4)
+    return points[~near]
 
 
 @pytest.mark.parametrize("name", ["rmse", "correlation", "panel"])
 def test_boundaries_overlay_the_reference_boundaries(renders, name):
     reference_path = REFERENCES / (SINGLE[name][0] if name in SINGLE else PANEL)
     for ref_frame, our_frame in zip(measure(reference_path), measure(renders[name]), strict=True):
-        ref_points = boundary_points(reference_path, ref_frame)
-        our_points = boundary_points(renders[name], our_frame)
+        # The references drew Sudan along 22 N; our Sudan follows ICPAC's maps there.
+        ref_points = outside_halaib(boundary_points(reference_path, ref_frame))
+        our_points = outside_halaib(boundary_points(renders[name], our_frame))
         ours_to_ref = cKDTree(ref_points).query(our_points)[0]
         ref_to_ours = cKDTree(our_points).query(ref_points)[0]
-        for distances in (ours_to_ref, ref_to_ours):  # degrees; one pixel is 0.025-0.04
-            assert np.median(distances) < 0.015 and np.percentile(distances, 95) < 0.05
+        pixel = 1 / min(our_frame.px_per_deg)  # degrees: 0.025 single, 0.04 in a panel
+        for distances in (ours_to_ref, ref_to_ours):  # within a pixel, as measured on both
+            assert np.median(distances) < 0.75 * pixel and np.percentile(distances, 95) < 0.05
         assert close(len(our_points), len(ref_points), 0.10 * len(ref_points)), "line width"
 
 
@@ -184,10 +194,15 @@ def test_field_is_clipped_to_the_official_boundaries(grid):
     assert outside.sum() > 50_000 and covered.sum() > 50_000
     assert white[outside].mean() > 0.999, "field drawn outside the boundaries"
     assert (~white[covered]).mean() > 0.999, "domain cells missing inside the boundaries"
-    # The 667 domain cells north of the Sudan boundary (up to 23.125 N) are clipped away.
-    north = outside & (lat_px.reshape(cols.shape) > 22.3) & (lat_px.reshape(cols.shape) < 23.1)
-    north &= (lon_px.reshape(cols.shape) > 34.2) & (lon_px.reshape(cols.shape) < 36.5)
-    assert north.sum() > 300 and white[north].all()
+    # Sudan as ICPAC maps it: the domain cells of the Halaib triangle (to 23.1 N) are drawn,
+    # Bir Tawil (north of 21.8 N, 33.3-34.0 E, outside the domain) is not part of Sudan.
+    latitude, longitude = lat_px.reshape(cols.shape), lon_px.reshape(cols.shape)
+    halaib = covered & (latitude > 22.3) & (latitude < 23.0) & (longitude > 34.8)
+    halaib &= longitude < 36.3
+    assert halaib.sum() > 150 and not white[halaib].any()
+    bir_tawil = (latitude > 21.85) & (latitude < 21.97) & (longitude > 33.4) & (longitude < 33.9)
+    assert bir_tawil.sum() > 20 and not inside[bir_tawil].any()
+    assert white[bir_tawil & outside].all()  # away from its boundary line
 
 
 def test_somalia_and_all_eleven_countries_are_drawn(renders, grid):
@@ -195,10 +210,13 @@ def test_somalia_and_all_eleven_countries_are_drawn(renders, grid):
     names = {country.name for country in countries}
     assert names == set(load_grid(maps.DOMAIN_MASK).country_names) and len(countries) == 11
     west, east, south, north = maps.FROZEN_EXTENT
-    for country in countries:  # every country at least 1 degree inside the frame
+    for country in maps.load_boundaries(maps.REFERENCE_BOUNDARIES):  # the frame: bounds + 1
         x0, y0, x1, y1 = country.bounds
         margins = (x0 - west, east - x1, y0 - south, north - y1)
         assert min(margins) >= 1.0 - 1e-6, country.name
+    for country in countries:  # ICPAC's Sudan (with Halaib) still inside the frame
+        x0, y0, x1, y1 = country.bounds
+        assert min(x0 - west, east - x1, y0 - south, north - y1) > 0.03, country.name
     somalia = next(c for c in countries if c.name == "Somalia")
     assert somalia.bounds[2] > 51.3 and somalia.bounds[3] > 11.9  # Ras Hafun and Cape Guardafui
     [frame] = measure(renders["rmse"])
@@ -229,9 +247,27 @@ def test_titles_labels_and_ticks_follow_the_standard(grid):
     assert ax.get_title() == "HYBRID | Week-2 Rainfall RMSE"
     assert ax.title.get_fontsize() == 15 and ax.title.get_fontweight() == "bold"
     assert ax.title.get_fontname() == "DejaVu Sans"
-    assert ax.get_xlabel() == "Longitude (°E)" and ax.get_ylabel() == "Latitude (°)"
+    assert ax.get_xlabel() == "" and ax.get_ylabel() == ""
     assert list(ax.get_xticks()) == [25, 30, 35, 40, 45, 50]
     assert list(ax.get_yticks()) == [-10, -5, 0, 5, 10, 15, 20]
+    fig.canvas.draw()
+    assert [t.get_text() for t in ax.get_xticklabels()] == [
+        "25°E",
+        "30°E",
+        "35°E",
+        "40°E",
+        "45°E",
+        "50°E",
+    ]
+    assert [t.get_text() for t in ax.get_yticklabels()] == [
+        "10°S",
+        "5°S",
+        "0°",
+        "5°N",
+        "10°N",
+        "15°N",
+        "20°N",
+    ]
     assert cax.get_ylabel() == "RMSE (mm/week)"
     assert cax.get_ylim()[0] == 0.0  # RMSE scale starts at zero
 
@@ -310,7 +346,7 @@ def test_hpc_driver_interface(tmp_path, monkeypatch):
     fig = maps.render(spec, maps.Canvas(use_valid_mask=False))
     texts = [t.get_text() for t in fig.texts]
     assert spec.title in texts and maps.HDR in texts
-    assert maps.FROZEN_EXTENT == maps.frozen_extent(maps.load_boundaries())
+    assert maps.FROZEN_EXTENT == maps.frozen_extent(maps.load_boundaries(maps.REFERENCE_BOUNDARIES))
 
 
 @pytest.mark.parametrize(

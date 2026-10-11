@@ -6,7 +6,11 @@
  * over the map.
  */
 import maplibregl from "maplibre-gl";
-import type { ImageSource, MapLayerMouseEvent } from "maplibre-gl";
+import type {
+  ImageSource,
+  MapLayerMouseEvent,
+  StyleSpecification,
+} from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 
 export type Bounds = [number, number, number, number];
@@ -14,15 +18,26 @@ export type Bounds = [number, number, number, number];
 const ATTRIBUTION =
   '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>';
 
-function basemap(theme: "light" | "dark") {
+/** CARTO's basemap key (free, https://carto.com/basemaps/apikey/): CARTO serves its raster
+ * tiles only with a key since 25 September 2026. Set at build time on Vercel. */
+const CARTO_KEY = process.env.NEXT_PUBLIC_CARTO_KEY ?? "";
+
+/** The light or dark basemap: CARTO's raster tiles with the key, else CARTO's vector style
+ * (served without a key for now). */
+function basemap(theme: "light" | "dark"): string | StyleSpecification {
+  if (!CARTO_KEY)
+    return `https://basemaps.cartocdn.com/gl/${
+      theme === "dark" ? "dark-matter" : "voyager"
+    }-gl-style/style.json`;
   const style = theme === "dark" ? "dark_all" : "rastertiles/voyager";
   return {
-    version: 8 as const,
+    version: 8,
     sources: {
       carto: {
-        type: "raster" as const,
+        type: "raster",
         tiles: ["a", "b", "c", "d"].map(
-          (s) => `https://${s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}.png`,
+          (s) =>
+            `https://${s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}.png?key=${encodeURIComponent(CARTO_KEY)}`,
         ),
         tileSize: 256,
         attribution: ATTRIBUTION,
@@ -31,13 +46,31 @@ function basemap(theme: "light" | "dark") {
     layers: [
       {
         id: "background",
-        type: "background" as const,
+        type: "background",
         paint: {
           "background-color": theme === "dark" ? "#0e1a24" : "#aad3f7",
         },
       },
-      { id: "carto", type: "raster" as const, source: "carto" },
+      { id: "carto", type: "raster", source: "carto" },
     ],
+  };
+}
+
+/** OpenStreetMap's own tiles, if CARTO's style cannot be loaded at all. */
+function fallbackBasemap(): StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      osm: {
+        type: "raster",
+        tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution:
+          '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      },
+    },
+    layers: [{ id: "osm", type: "raster", source: "osm" }],
   };
 }
 
@@ -126,42 +159,56 @@ export default function RainMap({
       offset: 12,
       className: "rain-popup",
     });
+    let fellBack = false;
     instance.on("load", () => {
+      // Under the basemap's labels when it has them (CARTO's vector style).
+      const labels = instance
+        .getStyle()
+        .layers.find((layer) => layer.type === "symbol")?.id;
       instance.addSource("field", {
         type: "image",
         url: "/api" + first.current,
         coordinates: corners(bounds),
       });
-      instance.addLayer({
-        id: "field",
-        type: "raster",
-        source: "field",
-        paint: {
-          "raster-opacity": theme === "dark" ? 0.92 : 0.88,
-          "raster-resampling": "nearest",
-          "raster-fade-duration": 250,
+      instance.addLayer(
+        {
+          id: "field",
+          type: "raster",
+          source: "field",
+          paint: {
+            "raster-opacity": theme === "dark" ? 0.92 : 0.88,
+            "raster-resampling": "nearest",
+            "raster-fade-duration": 250,
+          },
         },
-      });
+        labels,
+      );
       instance.addSource("countries", {
         type: "geojson",
         data: "/icpac-countries.geojson",
       });
-      instance.addLayer({
-        id: "country-hit",
-        type: "fill",
-        source: "countries",
-        paint: { "fill-color": "#000", "fill-opacity": 0 },
-      });
-      instance.addLayer({
-        id: "country-line",
-        type: "line",
-        source: "countries",
-        paint: {
-          "line-color": theme === "dark" ? "#f4f1e8" : "#2b2f33",
-          "line-width": theme === "dark" ? 0.9 : 1.1,
-          "line-opacity": theme === "dark" ? 0.75 : 1,
+      instance.addLayer(
+        {
+          id: "country-hit",
+          type: "fill",
+          source: "countries",
+          paint: { "fill-color": "#000", "fill-opacity": 0 },
         },
-      });
+        labels,
+      );
+      instance.addLayer(
+        {
+          id: "country-line",
+          type: "line",
+          source: "countries",
+          paint: {
+            "line-color": theme === "dark" ? "#f4f1e8" : "#2b2f33",
+            "line-width": theme === "dark" ? 0.9 : 1.1,
+            "line-opacity": theme === "dark" ? 0.75 : 1,
+          },
+        },
+        labels,
+      );
       instance.on("mousemove", "country-hit", (event: MapLayerMouseEvent) => {
         const name = event.features?.[0]?.properties?.name as
           | string
@@ -184,6 +231,11 @@ export default function RainMap({
     });
     instance.on("error", (event) => {
       if (String(event.error?.message ?? "").includes("field")) setFailed(true);
+      // The basemap style itself did not load: use OpenStreetMap's tiles instead.
+      else if (!fellBack && !instance.isStyleLoaded() && !instance.loaded()) {
+        fellBack = true;
+        instance.setStyle(fallbackBasemap());
+      }
     });
     return () => {
       popup.remove();

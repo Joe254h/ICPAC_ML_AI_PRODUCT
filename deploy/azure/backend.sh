@@ -35,7 +35,9 @@
 #   GEMINI_API_KEY  Optional, free: the Copilot answers with Google Gemini (free tier of the
 #                 Gemini API, key from https://aistudio.google.com/apikey) the same way, through
 #                 Gemini's OpenAI-compatible endpoint. GEMINI_MODEL picks the model (default
-#                 gemini-2.5-flash). ANTHROPIC_API_KEY wins when both are set.
+#                 gemini-3.8-flash; Google serves Gemini 2.5 only to projects that used it
+#                 before, so an earlier gemini-2.x setting is upgraded on the next run).
+#                 ANTHROPIC_API_KEY wins when both are set.
 #   LLM_OVERRIDES Set by llm.sh: the Copilot settings for the self-hosted model. Without it
 #                 (and without ANTHROPIC_API_KEY or GEMINI_API_KEY), the Copilot settings on
 #                 the app are kept.
@@ -75,7 +77,7 @@ print(json.dumps({
 }))')
 elif [ -n "${GEMINI_API_KEY:-}" ]; then
   # Gemini replaces every earlier Copilot setting (see docs/chatbot.md).
-  LLM_OVERRIDES=$(KEY="$GEMINI_API_KEY" MODEL="${GEMINI_MODEL:-gemini-2.5-flash}" python3 -c '
+  LLM_OVERRIDES=$(KEY="$GEMINI_API_KEY" MODEL="${GEMINI_MODEL:-gemini-3.8-flash}" python3 -c '
 import json, os
 e = os.environ
 print(json.dumps({
@@ -256,6 +258,9 @@ for setting in [] if overrides else json.loads(e["CURRENT_ENV"] or "[]") or []:
         if reference not in {s["name"] for s in secrets}:
             secrets.append({"name": reference, "value": stored[reference]})
     elif value:
+        if setting["name"] == "LLM_MODEL" and value.startswith("gemini-2"):
+            print(f"Copilot model {value} is closed to new Gemini projects: using gemini-3.8-flash")
+            value = "gemini-3.8-flash"
         env.append({"name": setting["name"], "value": value})
     else:
         # Azure refuses a variable without a value; for the app an empty one means unset.

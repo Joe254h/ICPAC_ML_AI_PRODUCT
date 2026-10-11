@@ -228,6 +228,10 @@ img {
   border-top: 1px solid rgba(255, 255, 255, 0.45);
   background: rgba(34, 112, 62, 0.55);
   backdrop-filter: saturate(1.1);
+  /* backdrop-filter makes the bar its own layer: lift it, dropdowns included, above the
+     page (the home page's map hero would otherwise cover the open menu) */
+  position: relative;
+  z-index: 45;
 }
 .mainnav ul {
   list-style: none;
@@ -261,6 +265,12 @@ img {
 .mainnav li.open > .item {
   color: #fff;
   border-bottom-color: var(--amber);
+}
+.mainnav .chevron {
+  transition: transform 0.15s;
+}
+.mainnav li.open .chevron {
+  transform: rotate(180deg);
 }
 .dropdown {
   position: absolute;
@@ -1317,8 +1327,21 @@ table.data .strong {
   position: relative;
   display: grid;
   grid-template-columns: 272px minmax(0, 1fr);
-  gap: 20px;
+  column-gap: 20px;
   align-items: stretch;
+  transition:
+    grid-template-columns 0.22s ease,
+    column-gap 0.22s ease;
+}
+/* the conversation list hidden (wide screens): the chat takes the width */
+.copilot.history-hidden {
+  grid-template-columns: 0px minmax(0, 1fr);
+  column-gap: 0;
+}
+.copilot.history-hidden .copilot-history {
+  visibility: hidden;
+  opacity: 0;
+  border-width: 0;
 }
 
 /* conversations */
@@ -1336,33 +1359,49 @@ table.data .strong {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 14px 14px 12px 18px;
-  border-bottom: 1px solid var(--line);
+  padding: 12px 10px 10px 12px;
 }
-.history-head h2 {
-  flex: 1;
-  margin: 0;
-  font: 700 15px var(--font-heading);
-  color: var(--ink);
+.history-heading {
+  margin: 6px 0 0;
+  padding: 0 20px 6px;
+  font: 700 11.5px var(--font-heading);
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 .history-new {
+  flex: 1;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   border: 1px solid var(--line-strong);
   background: #fff;
-  border-radius: 8px;
-  padding: 6px 10px;
-  font: 600 13.5px var(--font-body);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font: 600 14px var(--font-body);
   color: var(--green-800);
   cursor: pointer;
+  white-space: nowrap;
 }
 .history-new:hover:not(:disabled) {
   border-color: var(--green-600);
   background: var(--green-50);
 }
 .history-close {
-  display: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.history-close:hover {
+  background: var(--ground);
+  color: var(--ink);
 }
 .history-empty {
   margin: 0;
@@ -1488,6 +1527,10 @@ table.data .strong {
 .history-toggle,
 .context-new {
   display: none;
+}
+.copilot.history-hidden .history-toggle,
+.copilot.history-hidden .context-new {
+  display: inline-flex;
 }
 .chat-pinned {
   display: flex;
@@ -1700,8 +1743,15 @@ table.data .strong {
   .copilot-page {
     padding-top: 16px;
   }
-  .copilot {
+  .copilot,
+  .copilot.history-hidden {
     grid-template-columns: minmax(0, 1fr);
+    column-gap: 0;
+  }
+  .copilot.history-hidden .copilot-history {
+    visibility: visible;
+    opacity: 1;
+    border-width: 0 1px 0 0;
   }
   .copilot-history {
     position: fixed;
@@ -1718,14 +1768,6 @@ table.data .strong {
   }
   .copilot.history-open .copilot-history {
     transform: none;
-  }
-  .history-close {
-    display: inline-flex;
-    border: 0;
-    background: none;
-    color: var(--muted);
-    cursor: pointer;
-    padding: 4px;
   }
   .copilot.history-open .history-scrim {
     display: block;
@@ -1805,6 +1847,10 @@ table.data .strong {
 
 /* ------------------------------------------------------------------ responsive */
 /* the main menu: full size, then tighter, then a drawer behind the menu button */
+.mainnav li:first-child > .dropdown {
+  left: 0;
+  transform: none;
+}
 .mainnav li:nth-last-child(-n + 2) > .dropdown {
   left: auto;
   right: 0;
@@ -1854,6 +1900,7 @@ table.data .strong {
   }
   .dropdown,
   .dropdown.wide,
+  .mainnav li:first-child > .dropdown,
   .mainnav li:nth-last-child(-n + 2) > .dropdown {
     position: static;
     transform: none;

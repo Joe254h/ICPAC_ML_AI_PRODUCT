@@ -131,7 +131,7 @@ def install(app: FastAPI, dependency) -> None:
         layer: str = Query("hybrid", pattern=r"^[a-z]+$"),
         # Default: rainfall in the weekly bulletin style, the residual as packaged. Older
         # style names stay valid and give the current bulletin style.
-        style: str | None = Query(None, pattern=r"^(package|weekly-v1|weekly-v2)$"),
+        style: str | None = Query(None, pattern=r"^(package|weekly-v1|weekly-v2|weekly-v3)$"),
         country: str | None = Query(None, min_length=4, max_length=40),
         platform=Depends(dependency),
     ):

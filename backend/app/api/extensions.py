@@ -50,6 +50,11 @@ def install(app: FastAPI, dependency):
     def chat(body: ChatRequest, platform=Depends(dependency)) -> dict:
         return Copilot(platform).answer(body)
 
+    def first_question(session: dict) -> str:
+        """Older conversations have no title: name them by their first question."""
+        asked = next((m.get("text") for m in session["messages"] if m.get("role") == "user"), "")
+        return " ".join(str(asked or "").split())[:80]
+
     @app.get("/chat/sessions")
     def sessions(background: BackgroundTasks, platform=Depends(dependency)) -> list[dict]:
         # The Copilot page lists sessions when it opens: wake a model that scaled to zero.
@@ -57,7 +62,7 @@ def install(app: FastAPI, dependency):
         return [
             {
                 "id": s["id"],
-                "title": s.get("title", "Forecast conversation"),
+                "title": s.get("title") or first_question(s) or "Conversation",
                 "created_at": s["created_at"],
                 "updated_at": s.get("updated_at", s["created_at"]),
                 "message_count": len(s["messages"]),

@@ -44,6 +44,32 @@ test("the home page leads with this week's outlook", async ({ page }) => {
   await noHorizontalScroll(page);
 });
 
+test("a header menu opens on click and its pages are links", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.waitForLoadState("networkidle"); // the menu reacts once the page is live
+  const nav = page.getByRole("navigation", { name: "Main" });
+  const forecasts = nav.getByRole("button", { name: "Forecasts" });
+  await forecasts.click();
+  await expect(forecasts).toHaveAttribute("aria-expanded", "true");
+  // Moving the pointer away keeps a clicked menu open.
+  await page.mouse.move(5, 600);
+  const archive = nav.getByRole("link", { name: "Forecast archive" });
+  await expect(archive).toBeVisible();
+  await archive.click();
+  await expect(page).toHaveURL(/\/forecasts\/archive$/);
+  // A second click closes it; Escape does too.
+  const tools = nav.getByRole("button", { name: "Data & Tools" });
+  await tools.click();
+  await expect(nav.getByRole("link", { name: "TAMSAT" })).toBeVisible();
+  await tools.click();
+  await expect(nav.getByRole("link", { name: "TAMSAT" })).toBeHidden();
+  await tools.click();
+  await page.keyboard.press("Escape");
+  await expect(tools).toHaveAttribute("aria-expanded", "false");
+});
+
 test("rainfall monitoring shows the newest CHIRPS and TAMSAT dekads", async ({
   page,
 }) => {

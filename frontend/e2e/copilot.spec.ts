@@ -21,6 +21,17 @@ test("the Copilot answers from the issued forecast", async ({ page }) => {
   // The new conversation is saved and listed first, as the current one.
   await expect(saved.first()).toHaveAttribute("aria-current", "true");
   await expect(saved.first()).toContainText("Explain the forecast for Kenya.");
+  // The conversation list hides and comes back, as in ChatGPT, and the choice is kept.
+  const heading = page.getByRole("heading", { name: "Conversations" });
+  await page.getByRole("button", { name: "Hide conversations" }).click();
+  await expect(heading).toBeHidden();
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Show conversations" }),
+  ).toBeVisible();
+  await expect(heading).toBeHidden();
+  await page.getByRole("button", { name: "Show conversations" }).click();
+  await expect(heading).toBeVisible();
 });
 
 test("continuous chat sends on Enter, restores history and retries failures", async ({

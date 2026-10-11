@@ -445,7 +445,7 @@ class ForecastService:
         inputs = BulletinInputs.from_package(self.directory(forecast_id))
         cache = package_root().parent / "map-previews" / forecast_id
         cache.mkdir(parents=True, exist_ok=True)
-        path = cache / f"{weekly.FORMAT_VERSION}-{layer}-{country or 'region'}.png"
+        path = cache / f"icpac-{weekly.MAP_STYLE}-{layer}-{country or 'region'}.png"
         if not path.exists():
             from uuid import uuid4
 
