@@ -182,33 +182,39 @@ def decode(path: Path, initialization: date, area: dict | None = None) -> list[M
     expected_date = int(initialization.strftime("%Y%m%d"))
     run_hour = int(settings()["run_hour"])
     messages: list[Message] = []
-    with path.open("rb") as stream:
-        while (gid := codes.codes_grib_new_from_file(stream)) is not None:
-            try:
-                short_name = codes.codes_get(gid, "shortName")
-                if short_name != "tp":
-                    raise ValueError(f"Unexpected parameter {short_name!r} in the download")
-                if codes.codes_get(gid, "dataDate") != expected_date:
-                    raise ValueError(
-                        f"Message for {codes.codes_get(gid, 'dataDate')}, expected {expected_date}"
-                    )
-                if codes.codes_get(gid, "dataTime") != run_hour * 100:
-                    raise ValueError("Message from another run hour")
-                if codes.codes_get(gid, "units") != "m":
-                    raise ValueError(f"tp in {codes.codes_get(gid, 'units')!r}, expected m")
-                if codes.codes_get(gid, "dataType") != "pf":
-                    raise ValueError("Only perturbed members are used")
-                number = int(codes.codes_get(gid, "number"))
-                step = int(codes.codes_get(gid, "endStep"))
-                latitude, longitude = _grid_axes(codes, gid)
-                values = codes.codes_get_values(gid).astype(np.float64)
-                if codes.codes_get(gid, "bitmapPresent"):
-                    values[values == codes.codes_get(gid, "missingValue")] = np.nan
-                values = values.reshape(latitude.size, longitude.size)
-                cropped, lat, lon = _crop(values, latitude, longitude, area)
-                messages.append(Message(number, step, cropped, lat, lon))
-            finally:
-                codes.codes_release(gid)
+    stream = path.open("rb")
+    try:
+        with stream:
+            while (gid := codes.codes_grib_new_from_file(stream)) is not None:
+                try:
+                    short_name = codes.codes_get(gid, "shortName")
+                    if short_name != "tp":
+                        raise ValueError(f"Unexpected parameter {short_name!r} in the download")
+                    if codes.codes_get(gid, "dataDate") != expected_date:
+                        raise ValueError(
+                            f"Message for {codes.codes_get(gid, 'dataDate')}, expected {expected_date}"
+                        )
+                    if codes.codes_get(gid, "dataTime") != run_hour * 100:
+                        raise ValueError("Message from another run hour")
+                    if codes.codes_get(gid, "units") != "m":
+                        raise ValueError(f"tp in {codes.codes_get(gid, 'units')!r}, expected m")
+                    if codes.codes_get(gid, "dataType") != "pf":
+                        raise ValueError("Only perturbed members are used")
+                    number = int(codes.codes_get(gid, "number"))
+                    step = int(codes.codes_get(gid, "endStep"))
+                    latitude, longitude = _grid_axes(codes, gid)
+                    values = codes.codes_get_values(gid).astype(np.float64)
+                    if codes.codes_get(gid, "bitmapPresent"):
+                        values[values == codes.codes_get(gid, "missingValue")] = np.nan
+                    values = values.reshape(latitude.size, longitude.size)
+                    cropped, lat, lon = _crop(values, latitude, longitude, area)
+                    messages.append(Message(number, step, cropped, lat, lon))
+                finally:
+                    codes.codes_release(gid)
+    finally:
+        # Drop the file object before a caller cleans its temporary directory. CFFI
+        # can keep a duplicate native FILE handle alive while a traceback retains it.
+        del stream
     return messages
 
 
@@ -360,49 +366,55 @@ def decode_pressure(
     expected_date = int(initialization.strftime("%Y%m%d"))
     run_hour = int(settings()["run_hour"])
     fields: list[Field] = []
-    with path.open("rb") as stream:
-        while (gid := codes.codes_grib_new_from_file(stream)) is not None:
-            try:
-                short_name = codes.codes_get(gid, "shortName")
-                if short_name != name:
-                    raise ValueError(f"Unexpected parameter {short_name!r}, expected {name!r}")
-                if codes.codes_get(gid, "typeOfLevel") != "isobaricInhPa":
-                    raise ValueError(f"{name} is not on pressure levels")
-                level = int(codes.codes_get(gid, "level"))
-                if level not in levels:
-                    raise ValueError(f"{name} at {level} hPa was not requested")
-                if codes.codes_get(gid, "dataDate") != expected_date:
-                    raise ValueError(
-                        f"Message for {codes.codes_get(gid, 'dataDate')}, expected {expected_date}"
-                    )
-                if codes.codes_get(gid, "dataTime") != run_hour * 100:
-                    raise ValueError("Message from another run hour")
-                if codes.codes_get(gid, "dataType") != "pf":
-                    raise ValueError("Only perturbed members are used")
-                if int(codes.codes_get(gid, "endStep")) != step:
-                    raise ValueError(f"{name} message for another forecast hour")
-                if codes.codes_get(gid, "units") != units:
-                    raise ValueError(
-                        f"{name} in {codes.codes_get(gid, 'units')!r}, expected {units!r}"
-                    )
-                number = int(codes.codes_get(gid, "number"))
-                latitude, longitude = _grid_axes(codes, gid)
-                values = codes.codes_get_values(gid).astype(np.float64)
-                if codes.codes_get(gid, "bitmapPresent"):
-                    values[values == codes.codes_get(gid, "missingValue")] = np.nan
-                values = values.reshape(latitude.size, longitude.size)
-                cropped, lat, lon = _crop(values, latitude, longitude, area)
-                if not np.isfinite(cropped).all():
-                    raise ValueError(f"Missing values in {name}{level} member {number}")
-                if cropped.min() < low or cropped.max() > high:
-                    raise ValueError(
-                        f"{name}{level} member {number} at {step} h has values from "
-                        f"{cropped.min():.4g} to {cropped.max():.4g} {units}, outside the "
-                        f"plausible {low:g} to {high:g}"
-                    )
-                fields.append(Field(name, level, number, step, cropped, lat, lon))
-            finally:
-                codes.codes_release(gid)
+    stream = path.open("rb")
+    try:
+        with stream:
+            while (gid := codes.codes_grib_new_from_file(stream)) is not None:
+                try:
+                    short_name = codes.codes_get(gid, "shortName")
+                    if short_name != name:
+                        raise ValueError(f"Unexpected parameter {short_name!r}, expected {name!r}")
+                    if codes.codes_get(gid, "typeOfLevel") != "isobaricInhPa":
+                        raise ValueError(f"{name} is not on pressure levels")
+                    level = int(codes.codes_get(gid, "level"))
+                    if level not in levels:
+                        raise ValueError(f"{name} at {level} hPa was not requested")
+                    if codes.codes_get(gid, "dataDate") != expected_date:
+                        raise ValueError(
+                            f"Message for {codes.codes_get(gid, 'dataDate')}, expected {expected_date}"
+                        )
+                    if codes.codes_get(gid, "dataTime") != run_hour * 100:
+                        raise ValueError("Message from another run hour")
+                    if codes.codes_get(gid, "dataType") != "pf":
+                        raise ValueError("Only perturbed members are used")
+                    if int(codes.codes_get(gid, "endStep")) != step:
+                        raise ValueError(f"{name} message for another forecast hour")
+                    if codes.codes_get(gid, "units") != units:
+                        raise ValueError(
+                            f"{name} in {codes.codes_get(gid, 'units')!r}, expected {units!r}"
+                        )
+                    number = int(codes.codes_get(gid, "number"))
+                    latitude, longitude = _grid_axes(codes, gid)
+                    values = codes.codes_get_values(gid).astype(np.float64)
+                    if codes.codes_get(gid, "bitmapPresent"):
+                        values[values == codes.codes_get(gid, "missingValue")] = np.nan
+                    values = values.reshape(latitude.size, longitude.size)
+                    cropped, lat, lon = _crop(values, latitude, longitude, area)
+                    if not np.isfinite(cropped).all():
+                        raise ValueError(f"Missing values in {name}{level} member {number}")
+                    if cropped.min() < low or cropped.max() > high:
+                        raise ValueError(
+                            f"{name}{level} member {number} at {step} h has values from "
+                            f"{cropped.min():.4g} to {cropped.max():.4g} {units}, outside the "
+                            f"plausible {low:g} to {high:g}"
+                        )
+                    fields.append(Field(name, level, number, step, cropped, lat, lon))
+                finally:
+                    codes.codes_release(gid)
+    finally:
+        # Drop the file object before a caller cleans its temporary directory. CFFI
+        # can keep a duplicate native FILE handle alive while a traceback retains it.
+        del stream
     return fields
 
 

@@ -81,6 +81,26 @@ class Repository:
             },
         )
 
+    def save_with_audit(
+        self, kind: str, payload: dict, record_id: str, action: str, actor: str, details: dict
+    ) -> None:
+        """Commit the record and its audit together; retries cannot duplicate this event."""
+        audit_id = f"{action}:{record_id}"
+        audit = {
+            "id": audit_id,
+            "action": action,
+            "actor": actor,
+            "entity": record_id,
+            "details": details,
+            "timestamp": payload.get("verified_at") or now(),
+        }
+        with Session(self.engine) as session:
+            session.merge(
+                Record(id=record_id, kind=kind, payload=json.dumps({**payload, "id": record_id}))
+            )
+            session.merge(Record(id=audit_id, kind="audit", payload=json.dumps(audit)))
+            session.commit()
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()

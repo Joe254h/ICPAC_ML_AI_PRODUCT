@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { FileDown, FilePlus2, Globe2, Mail, RefreshCw } from "lucide-react";
 import ReviewDialog from "@/components/review-dialog";
+import BulletinAccess from "@/components/bulletin-access";
 import type { Review } from "@/components/review-dialog";
 import {
   Button,
@@ -405,6 +406,7 @@ export default function Bulletins({ id }: PageProps) {
             </Button>
           }
         />
+        <BulletinAccess />
         {error && <ErrorState message={error} />}
         {drafts.loading && <Skeleton height={420} />}
         {drafts.error && (

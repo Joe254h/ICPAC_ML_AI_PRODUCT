@@ -98,4 +98,17 @@ Allowed human transitions: draft → under_review → approved → published; un
 
 The Weekly forecast bulletin page uses the owner's retained Word reference and its section order, with a reading preview, regional/Somalia rainfall maps and a Word draft download. Bulletin drafts freeze that same bulletin for review. The template's page settings, header/footer, styles and picture positions are retained, and old forecast text/images are replaced. Missing scientific products remain explicit; the original document is a layout reference, not current weather evidence. Rendered pages were checked against the reference with LibreOffice; check pagination in Word before release.
 
-Reviewer names are self-reported in this localhost prototype. Authentication, role-based review, immutable audits and controlled distribution are production integrations.
+Manual bulletin writes require the configured operator credential; personal email decisions
+require their signed, expiring, single-use token. See [manual access setup](deployment.md#manual-bulletin-access).
+Operator review names remain self-reported. Per-person role-based login and authenticated
+access to the remaining model, operation and chat APIs are still production integrations.
+
+Copilot forecast dates distinguish `valid:YYYY-MM-DD` (any day inside the valid week,
+end date exclusive) from `run:YYYY-MM-DD` (ECMWF initialization). An ambiguous bare date
+requests clarification. The fixed-answer fallback keeps both countries and selected
+methods across comparison follow-ups, until the user changes them or resets context.
+
+The numerical check uses unit-bearing quantities returned by successful tools, excludes
+user-supplied figures, dates, identifiers and ranks, separates millimetres from percentages,
+and checks signed numbers and both ends of ranges. It checks numerical support, not every
+semantic association in free-form prose; forecaster review remains necessary.

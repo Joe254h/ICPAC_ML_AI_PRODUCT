@@ -22,9 +22,13 @@ async function proxy(request: NextRequest, segments: string[]) {
     (process.env.API_URL ?? "http://127.0.0.1:8000") + "/",
   );
   try {
+    const authorization = request.headers.get("authorization");
     const upstream = await fetch(target, {
       method: request.method,
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(authorization ? { Authorization: authorization } : {}),
+      },
       body: request.method === "GET" ? undefined : await request.text(),
       cache: "no-store",
       // Forecast runs and verification compute on the full 800 x 700 grid; other requests

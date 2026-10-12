@@ -341,7 +341,7 @@ class ForecastService:
                 raise ValueError(f"Package {forecast_id} has an unknown manifest version")
             return directory / name
         expected = manifest.get("files", {}).get(name)
-        path = directory / name
+        path = packages.file_path(directory, name, manifest)
         if expected is None or not path.is_file() or file_checksum(path) != expected:
             raise ValueError(
                 f"Package {forecast_id}: {name} does not match its manifest; the package "
@@ -517,6 +517,8 @@ class ForecastService:
 
     def verify(self, forecast_id: str, body: VerificationRequest) -> dict[str, Any]:
         record = self.repo.get(KIND, forecast_id)
+        if record.get("verification_status") == "available":
+            raise ValueError("This forecast is already verified; verification is recorded once")
         directory = self.directory(forecast_id)
         data_root = Path(os.getenv("DATA_ROOT", str(ROOT / "data" / "observations")))
         path = permitted_file(str(data_root / body.observation), "DATA_ROOT", "data/observations")
@@ -528,6 +530,7 @@ class ForecastService:
         observed = load_observed(path, grid, start, end)
         source = {"file": path.name, "sha256": file_checksum(path)}
         result = verify(run, observed, grid, settings(), source)
+        result.update(verified_by=body.actor, verified_at=now())
         field = xr.Dataset(
             {
                 "precipitation_week2": (
@@ -539,16 +542,34 @@ class ForecastService:
             coords={"latitude": grid.latitude, "longitude": grid.longitude},
             attrs={**source, "valid_start": start.isoformat(), "valid_end": end.isoformat()},
         )
-        packages.add_verification(directory, result, field)
+        if run.verification is None:
+            try:
+                packages.add_verification(directory, result, field)
+            except ValueError:
+                # Another worker may have committed the immutable revision meanwhile.
+                committed = packages.load_run(directory).verification
+                if committed is None:
+                    raise
+                run.verification = committed
+        if run.verification is not None:
+            if run.verification.get("observation", {}).get("sha256") != source["sha256"]:
+                raise ValueError("Verification is recorded once; retry with the same observation")
+            result = run.verification
         self._publish(directory)
         record.update(
             verification_status="available",
             season=result["season"],
-            verified_at=now(),
-            verified_by=body.actor,
+            verified_at=result.get("verified_at", now()),
+            verified_by=result.get("verified_by", body.actor),
         )
-        self.repo.save(KIND, record, forecast_id)
-        self.repo.audit("forecast_verified", body.actor, forecast_id, {"observation": path.name})
+        self.repo.save_with_audit(
+            KIND,
+            record,
+            forecast_id,
+            "forecast_verified",
+            record["verified_by"],
+            {"observation": path.name},
+        )
         return result
 
     def data_root(self) -> Path:
@@ -745,7 +766,7 @@ class ForecastService:
             run = packages.load_run(self.directory(record["forecast_id"]))
             check_domain(run, grid)
             method = packages.method_label(run.provenance)
-            with xr.open_dataset(self.directory(record["forecast_id"]) / OBSERVATION) as obs:
+            with xr.open_dataset(self._path(record["forecast_id"], OBSERVATION)) as obs:
                 observed = obs["precipitation_week2"].values.astype(np.float64)
             for name, collected in stats.items():
                 collected.add(run.dataset[name].values, observed)

@@ -398,6 +398,54 @@ def test_figures_are_checked_to_the_precision_written():
     assert agent.facts("bias -0.2 mm; classes 50-200 mm") == [-0.2, 50.0, 200.0]
 
 
+def test_grounding_excludes_dates_counts_and_wrong_units_and_checks_range_ends():
+    known = agent.quantities(
+        {
+            "valid_period": "15 October 2026 to 21 October 2026",
+            "rank": 15,
+            "identifier": "run-999999",
+            "mean_mm": 64.3,
+            "coverage_percent": 90,
+            "bias_mm": -0.2,
+        }
+    )
+    assert agent.unsupported("Rainfall 2026 mm, 15 mm and 999999-64.3 mm", known) == [
+        "2026 mm",
+        "15 mm",
+        "999999-64.3 mm",
+    ]
+    assert agent.unsupported("Rainfall -64.3 mm or 90 mm; coverage 64.3%", known) == [
+        "-64.3 mm",
+        "90 mm",
+        "64.3%",
+    ]
+    assert agent.unsupported("Bias -0.2 mm; rainfall 64.3 mm; coverage 90%", known) == []
+
+
+@pytest.mark.parametrize("invented", ["999999 mm", "2026 mm", "999999-64.3 mm"])
+def test_user_figures_and_date_numbers_cannot_become_forecast_evidence(
+    env, fast_maps, claude, invented
+):
+    run(env)
+    claude(country_then(lambda r: f"Kenya expects {invented}."))
+    answer = Copilot(env.platform).answer(
+        ChatRequest(message="Kenya rainfall? Someone told me 999999 mm; please check that claim.")
+    )
+    assert "not in the forecast" in answer["fallback"]
+    assert invented not in answer["text"]
+
+
+def test_tools_select_valid_days_and_run_dates_explicitly(env, fast_maps):
+    older = run(env)
+    newer = run(env, "2026-10-12")
+    tools = agent.ToolBox(env.platform, {})
+    assert tools._detail("valid:2026-10-12")["forecast_id"] == older["forecast_id"]
+    assert tools._detail("valid:2026-10-18")["forecast_id"] == older["forecast_id"]
+    assert tools._detail("run:2026-10-12")["forecast_id"] == newer["forecast_id"]
+    with pytest.raises(agent.ToolError, match="matches different forecasts"):
+        tools._detail("2026-10-12")
+
+
 @pytest.mark.parametrize(
     "status, body, reason",
     [

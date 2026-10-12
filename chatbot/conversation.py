@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from backend.app.schemas import ChatRequest
 from backend.app.services.forecasts import ForecastService
+from chatbot.forecast_selection import AmbiguousForecastDate, forecast_for_date
 from chatbot.retrieval import approved_glossary
 from climate_engine.inputs import sources
 from climate_engine.operational.grid import ICPAC_COUNTRIES
@@ -349,10 +350,33 @@ class OperationalConversation:
                     )
                 elif intent == "compare":
                     tool = "compare_forecast_values"
-                    compare_countries = named if len(named) > 1 else [country]
+                    compare_countries = named or (
+                        previous.get("comparison_countries", [country])
+                        if not body.country
+                        else [country]
+                    )
+                    requested_methods = [
+                        method
+                        for method, pattern in (
+                            ("raw", r"\braw\b"),
+                            ("mbc", r"\bmbc\b"),
+                            ("hybrid", r"\bhybrid\b|ai/ml"),
+                        )
+                        if re.search(pattern, question)
+                    ]
+                    methods = requested_methods or previous.get(
+                        "comparison_methods", ["raw", "mbc", "hybrid"]
+                    )
+                    methods = [m for m in methods if m in layers]
+                    context.update(
+                        comparison_countries=compare_countries, comparison_methods=methods
+                    )
+                    sentences["scope"] = (
+                        f"We're comparing {', '.join(compare_countries)} for {period}."
+                    )
                     for place in compare_countries:
                         item = next((r for r in rows if r["country"] == place), None)
-                        for method in [m for m in ("raw", "mbc", "hybrid") if m in layers]:
+                        for method in methods:
                             value = (
                                 facts["domain_mean_mm"][method]
                                 if place == "GHA"
@@ -423,6 +447,8 @@ class OperationalConversation:
                         "result": evidence,
                     }
                 )
+            except AmbiguousForecastDate as exc:
+                sentences = {"clarification": str(exc)}
             except (ValueError, KeyError, FileNotFoundError, ImportError, OSError) as exc:
                 sentences = {
                     "unavailable": f"The requested forecast data are unavailable{unavailable_reason(exc)}. No statistics have been inferred. You can still ask me to explain forecasting terms."
@@ -431,6 +457,13 @@ class OperationalConversation:
             context["intent"] = intent
             if not intent.startswith("definition:"):
                 context["forecast_intent"] = intent
+        if (
+            intent != "compare"
+            and not intent.startswith(("definition:", "glossary:"))
+            and intent not in {"greeting", "thanks", "help"}
+        ):
+            context.pop("comparison_countries", None)
+            context.pop("comparison_methods", None)
         return {
             "sentences": sentences,
             "tool_trace": trace,
@@ -444,14 +477,14 @@ class OperationalConversation:
         date = re.search(r"\b\d{4}-\d{2}-\d{2}\b", question)
         fid = body.forecast_id or previous.get("forecast_id")
         if date:
-            matches = [
-                r
-                for r in self.forecasts.runs()
-                if r["initialization"][:10] == date[0] or r["valid_start"][:10] == date[0]
-            ]
-            if not matches:
-                raise KeyError(f"no forecast package for {date[0]}")
-            return self.forecasts.get(matches[0]["forecast_id"])
+            kind = (
+                "run:"
+                if re.search(r"\b(?:run|initializ|initialis|issued)", question)
+                else "valid:"
+                if re.search(r"\bvalid|\bcover", question)
+                else ""
+            )
+            return self.forecasts.get(forecast_for_date(self.forecasts.runs(), kind + date[0]))
         if "last week" in question:
             current = self.forecasts.get(fid) if fid else self.forecasts.latest()
             older = [

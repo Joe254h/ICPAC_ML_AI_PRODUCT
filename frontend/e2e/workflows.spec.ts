@@ -42,6 +42,9 @@ test("a bulletin goes from draft to review, approval and publication", async ({
   page,
 }) => {
   await page.goto("/bulletin");
+  await page
+    .getByLabel("Bulletin operator access key")
+    .fill("test-bulletin-operator-key-00000000");
   await expect(
     page.getByRole("heading", { name: "Total Rainfall" }),
   ).toBeVisible();
@@ -78,6 +81,9 @@ test("a bulletin is approved and published from the emailed links", async ({
   page,
 }) => {
   await page.goto("/bulletin");
+  await page
+    .getByLabel("Bulletin operator access key")
+    .fill("test-bulletin-operator-key-00000000");
   await page.getByRole("button", { name: "Create draft for review" }).click();
   await page.waitForURL(/\/bulletins\?id=/, { timeout: 60_000 });
   await expect(

@@ -235,6 +235,28 @@ curl -X POST "$API_URL/forecasts/import" -H 'Content-Type: application/json' \
 
 ## Before operational use
 
+### Manual bulletin access
+
+Set `BULLETIN_OPERATOR_KEY` on the **backend** to a randomly generated secret of at least
+32 characters. For example, `python -c "import secrets; print(secrets.token_urlsafe(48))"`
+generates a suitable value. Store it as an Azure Container Apps secret and reference that
+secret from the environment variable of the same name, then deploy a new revision.
+Docker Compose reads it from the local `.env`. The Azure deployment script accepts it
+as an environment variable and preserves a previously configured value.
+
+Give the secret only to trusted bulletin operators. Enter it in **Bulletin operator
+access key** on the weekly bulletin or drafts page. It stays in the tab's memory and is
+cleared by a reload or closing the tab. The frontend forwards the caller's credential;
+it never injects a backend secret into an anonymous request. Manual draft generation,
+submission, approval, rejection, publication and email resend require the credential.
+Without a configured key these routes fail closed. Personal email decisions continue to
+require their signed, expiring, single-use token and do not need this key.
+
+This is shared operator access, not individual role-based login. Only give it to people
+authorized for every manual bulletin action. Review names are still self-reported;
+per-person roles and authentication for the remaining operation/model/chat endpoints
+remain required before a public multi-user operational deployment. Use HTTPS.
+
 Authentication and role-based approval (Supabase Auth or the existing identity provider),
 TLS, backups of the database and buckets, the seven Week-2 pressure steps, and the other
 dependencies in [operational_models.md](operational_models.md#missing-dependencies).

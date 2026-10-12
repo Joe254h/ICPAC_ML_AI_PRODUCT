@@ -3,6 +3,7 @@ import re
 from fastapi import BackgroundTasks, Depends, FastAPI, Query
 from fastapi.responses import Response
 
+from backend.app.api.access import require_bulletin_operator
 from backend.app.schemas import (
     BulletinRequest,
     ChatRequest,
@@ -94,7 +95,7 @@ def install(app: FastAPI, dependency):
             and not ((b.get("facts") or {}).get("input") or {}).get("synthetic")
         ]
 
-    @app.post("/bulletins/generate")
+    @app.post("/bulletins/generate", dependencies=[Depends(require_bulletin_operator)])
     def generate_bulletin(
         body: BulletinRequest, parent_id: str | None = None, platform=Depends(dependency)
     ) -> dict:
@@ -160,14 +161,14 @@ def install(app: FastAPI, dependency):
             content, media_type="text/html", headers={"Content-Disposition": disposition}
         )
 
-    @app.post("/bulletins/{id}/resend")
+    @app.post("/bulletins/{id}/resend", dependencies=[Depends(require_bulletin_operator)])
     def resend_bulletin_email(id: str, body: ResendRequest, platform=Depends(dependency)) -> dict:
         """Send the email of the bulletin's current step again (new links)."""
         bulletin = platform.repo.get("bulletin", id)
         platform.repo.audit("bulletin_email_resent", body.actor, id, {"status": bulletin["status"]})
         return bulletin_mail.notify(platform, bulletin)
 
-    @app.post("/bulletins/{id}/{action}")
+    @app.post("/bulletins/{id}/{action}", dependencies=[Depends(require_bulletin_operator)])
     def review_bulletin(
         id: str, action: str, body: ReviewRequest, platform=Depends(dependency)
     ) -> dict:

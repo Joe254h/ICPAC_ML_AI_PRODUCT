@@ -69,6 +69,8 @@ def test_a_bulletin_is_approved_and_published_from_the_emails(env, fast_maps, po
     attachment = next(first.iter_attachments())
     assert (attachment.get_filename() or "").endswith(".docx")
     token = link(first)
+    # Recipients need only the signed personal token, not the operator credential.
+    client.headers.pop("authorization", None)
 
     # Opening the link shows the bulletin and the decisions; nothing changes.
     shown = client.get("/bulletins/email-action", params={"token": token}).json()

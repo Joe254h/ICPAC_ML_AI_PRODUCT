@@ -2,6 +2,7 @@
 /** The weekly bulletin of the latest (or a chosen) forecast, as forecasters will issue it. */
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import BulletinAccess from "@/components/bulletin-access";
 import { FileDown, FilePlus2 } from "lucide-react";
 import {
   Button,
@@ -120,6 +121,7 @@ function Body({ detail }: { detail: ForecastDetail }) {
           </>
         }
       />
+      <BulletinAccess />
       {error && <ErrorState message={error} />}
       {status.loading && <Skeleton height={480} />}
       {status.error && (

@@ -20,7 +20,10 @@ Maps exist for the layers the forecast holds; the manifest lists them under ``la
 
 A package is written to a temporary directory and published by renaming it, so readers
 never see a partial package. Only verification.json changes afterwards (when observations
-arrive), together with observation.nc, and the manifest records the change.
+arrive), together with observation.nc. New verification files live in an immutable
+verification-revisions/<revision>/ directory; manifest.file_paths resolves the logical
+names. One atomic manifest replacement commits both files. Older packages without
+file_paths retain their original layout.
 """
 
 import csv
@@ -29,6 +32,7 @@ import json
 import os
 import shutil
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -402,6 +406,21 @@ def read_manifest(directory: Path) -> dict[str, Any]:
     return json.loads((Path(directory) / "manifest.json").read_text(encoding="utf-8"))
 
 
+def file_path(directory: Path, name: str, manifest: dict[str, Any] | None = None) -> Path:
+    """Resolve a logical package file against one manifest snapshot.
+
+    Verification revisions are immutable. Replacing the manifest atomically makes the
+    new observation and scores visible together; old manifests still reference old files.
+    """
+    directory = Path(directory)
+    data = read_manifest(directory) if manifest is None else manifest
+    relative = data.get("file_paths", {}).get(name, name)
+    path = (directory / relative).resolve()
+    if not path.is_relative_to(directory.resolve()):
+        raise ValueError("Package file path escapes its directory")
+    return path
+
+
 def check_package(directory: Path) -> list[str]:
     """Problems with a package: wrong version, missing files or changed content."""
     directory = Path(directory)
@@ -416,7 +435,11 @@ def check_package(directory: Path) -> list[str]:
     required = package_files(manifest_layers(data))
     problems += [f"{name} not listed in the manifest" for name in required if name not in files]
     for name, checksum in files.items():
-        path = directory / name
+        try:
+            path = file_path(directory, name, data)
+        except ValueError as exc:
+            problems.append(str(exc))
+            continue
         if not path.is_file():
             problems.append(f"{name} missing")
         elif file_checksum(path) != checksum:
@@ -431,10 +454,12 @@ def load_run(directory: Path) -> ForecastRun:
     if problems:
         raise ValueError(f"Package failed its checks: {problems}")
 
-    def read(name: str) -> Any:
-        return json.loads((directory / name).read_text(encoding="utf-8"))
+    snapshot = read_manifest(directory)
 
-    forecast_id = read_manifest(directory)["forecast_id"]
+    def read(name: str) -> Any:
+        return json.loads(file_path(directory, name, snapshot).read_text(encoding="utf-8"))
+
+    forecast_id = snapshot["forecast_id"]
     provenance = read("provenance.json")
     with xr.open_dataset(directory / "forecast.nc") as stored:
         dataset = stored.load()
@@ -471,19 +496,35 @@ def add_verification(
         data = read_manifest(directory)
         if data["verification_status"] == "available":
             raise ValueError("This forecast is already verified; verification is recorded once")
-        if observed is not None:
-            observed.to_netcdf(
-                directory / OBSERVATION_FILE,
-                engine="netcdf4",
-                format="NETCDF4",
-                encoding={name: {"zlib": True, "complevel": 4} for name in observed.data_vars},
-            )
-            data["files"][OBSERVATION_FILE] = file_checksum(directory / OBSERVATION_FILE)
-        _write_json(directory / "verification.json", verification)
-        data["files"]["verification.json"] = file_checksum(directory / "verification.json")
-        data["verification_status"] = verification["status"]
-        data["verification_added_at"] = datetime.now(timezone.utc).isoformat()
-        _write_json(directory / "manifest.json", data)
+        revision = directory / "verification-revisions" / uuid.uuid4().hex
+        revision.mkdir(parents=True)
+        pending_manifest = directory / f".manifest-{uuid.uuid4().hex}.json"
+        committed = False
+        try:
+            names = ["verification.json"]
+            if observed is not None:
+                observed.to_netcdf(
+                    revision / OBSERVATION_FILE,
+                    engine="netcdf4",
+                    format="NETCDF4",
+                    encoding={name: {"zlib": True, "complevel": 4} for name in observed.data_vars},
+                )
+                names.append(OBSERVATION_FILE)
+            _write_json(revision / "verification.json", verification)
+            for name in names:
+                data["files"][name] = file_checksum(revision / name)
+                data.setdefault("file_paths", {})[name] = (
+                    (revision / name).relative_to(directory).as_posix()
+                )
+            data["verification_status"] = verification["status"]
+            data["verification_added_at"] = datetime.now(timezone.utc).isoformat()
+            _write_json(pending_manifest, data)
+            pending_manifest.replace(directory / "manifest.json")
+            committed = True
+        finally:
+            pending_manifest.unlink(missing_ok=True)
+            if not committed:
+                shutil.rmtree(revision, ignore_errors=True)
     return data
 
 

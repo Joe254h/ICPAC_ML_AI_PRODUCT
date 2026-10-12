@@ -63,6 +63,8 @@ PROVENANCE_FIELDS = {
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
+    operator_key = "test-bulletin-operator-key-00000000"
+    monkeypatch.setenv("BULLETIN_OPERATOR_KEY", operator_key)
     root = tmp_path / "artifacts"
     for name, value in {
         "ARTIFACT_ROOT": root,
@@ -79,7 +81,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(forecasts, "settings", lambda: cfg)
     operational._models.clear()
     app = create_app(f"sqlite:///{tmp_path / 'db.sqlite'}")
-    with TestClient(app) as client:
+    with TestClient(app, headers={"Authorization": f"Bearer {operator_key}"}) as client:
         platform = app.state.platform
         descriptor = write_descriptor(tmp_path / "d.yaml", paths, root)
         record = ModelRegistry(platform).register_descriptor(str(descriptor), "Test Reviewer")
@@ -425,7 +427,7 @@ def test_verification_maps_pool_one_models_verified_forecasts(env, monkeypatch):
         )
         directory = forecasts.package_root() / fid
         assert "observation.nc" in packages.read_manifest(directory)["files"]
-        with xr.open_dataset(directory / "observation.nc") as obs:
+        with xr.open_dataset(packages.file_path(directory, "observation.nc")) as obs:
             observed[fid] = obs["precipitation_week2"].values.astype(float)
     status = client.get("/verification/maps").json()
     assert status["cases"] == 2 and status["excluded_protected_period"] == 1

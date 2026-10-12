@@ -86,8 +86,9 @@ def _schema(properties: dict[str, Any] | None = None, required: list[str] | None
 FORECAST_ARG = {
     "type": "string",
     "description": 'Which forecast: "current" (the one under discussion, the default), '
-    '"latest", "previous" (the one before the current), or a date (YYYY-MM-DD) that is its '
-    "ECMWF run date or the first day it is valid.",
+    '"latest", "previous" (the one before the current), "valid:YYYY-MM-DD" for a day '
+    'inside the valid week, or "run:YYYY-MM-DD" for its ECMWF initialization. '
+    "A bare date is accepted only when it identifies one forecast unambiguously.",
 }
 LAYER_ARG = {
     "type": "string",
@@ -268,15 +269,13 @@ class ToolBox:
             if index + 1 >= len(ids):
                 raise ToolError("There is no earlier forecast.")
             identifier = ids[index + 1]
-        elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", forecast):
-            match = [
-                r
-                for r in runs
-                if r["initialization"][:10] == forecast or r["valid_start"][:10] == forecast
-            ]
-            if not match:
-                raise ToolError(f"No forecast was run on, or starts on, {_day(forecast)}.")
-            identifier = match[0]["forecast_id"]
+        elif re.fullmatch(r"(?:(?:valid|run):)?\d{4}-\d{2}-\d{2}", forecast):
+            from chatbot.forecast_selection import forecast_for_date
+
+            try:
+                identifier = forecast_for_date(runs, forecast)
+            except (ValueError, KeyError) as exc:
+                raise ToolError(str(exc)) from exc
         else:
             raise ToolError("Name the forecast as current, latest, previous or a date.")
         detail = self.forecasts.get(identifier)
@@ -460,7 +459,9 @@ class ToolBox:
         for season, layers in seasonal["seasons"].items():
             seasons[season] = {
                 LAYER_NAMES.get(layer, layer): {
-                    key: _round(value, 3) if isinstance(value, float) else value
+                    key + "_mm"
+                    if key in {"rmse", "mae", "bias", "forecast_mean", "observed_mean"}
+                    else key: _round(value, 3) if isinstance(value, float) else value
                     for key, value in metrics.items()
                 }
                 for layer, metrics in layers.items()
@@ -621,38 +622,68 @@ def _round(value: Any, digits: int = 2) -> Any:
 
 # ---------------------------------------------------------------------- grounding
 
-QUANTITY = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*(?:mm\b|millimet|%|per ?cent)", re.I)
-# A hyphen right after a digit is a range ("50-200 mm"), not a minus sign.
-NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?")
+QUANTITY = re.compile(
+    r"(?<![\w.])(?P<first>[+-]?\d+(?:\.\d+)?)"
+    r"(?:\s*(?:[-–—]|to)\s*(?P<last>[+-]?\d+(?:\.\d+)?))?"
+    r"\s*(?P<unit>mm\b|millimet\w*|%|per\s?cent)",
+    re.I,
+)
 
 
-def facts(value: Any) -> list[float]:
-    """Every number in tool results, including those written inside text."""
-    found: list[float] = []
+def quantities(value: Any, unit: str | None = None) -> dict[str, list[float]]:
+    """Only explicitly unit-bearing quantities; dates, ranks and identifiers are not data.
+
+    Structured *_mm fields inherit millimetres through nested statistics. Text supports
+    unit-bearing ranges, including both ends. Percentages remain separate from rainfall.
+    """
+    found: dict[str, list[float]] = {"mm": [], "%": []}
     if isinstance(value, bool):
         return found
-    if isinstance(value, (int, float)):
-        found.append(float(value))
+    if isinstance(value, (int, float)) and unit:
+        import math
+
+        if math.isfinite(value):
+            found[unit].append(float(value))
     elif isinstance(value, str):
-        found += [float(n) for n in NUMBER.findall(value.replace(",", ""))]
-    elif isinstance(value, dict):
-        for item in value.values():
-            found += facts(item)
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            found += facts(item)
+        for match in QUANTITY.finditer(value.replace(",", "")):
+            key = "mm" if match["unit"].lower().startswith(("mm", "millimet")) else "%"
+            found[key].extend(float(match[g]) for g in ("first", "last") if match[g])
+    elif isinstance(value, (dict, list, tuple)):
+        items = value.items() if isinstance(value, dict) else (("", v) for v in value)
+        for key, item in items:
+            name = str(key).lower()
+            child_unit = (
+                "mm"
+                if name.endswith("_mm")
+                else "%"
+                if name.endswith(("_pct", "_percent"))
+                else unit
+            )
+            child = quantities(item, child_unit)
+            for key in found:
+                found[key].extend(child[key])
     return found
 
 
-def unsupported(text: str, known: list[float]) -> list[str]:
+def facts(value: Any) -> list[float]:
+    """Unit-bearing facts, flattened for callers that need an amount list."""
+    return [n for values in quantities(value).values() for n in values]
+
+
+def unsupported(text: str, known: dict[str, list[float]] | list[float]) -> list[str]:
     """Amounts (mm) and percentages in ``text`` that no tool returned, to the precision
     they are written with."""
     missing = []
     for match in QUANTITY.finditer(text.replace(",", "")):
-        written = match.group(1)
-        digits = len(written.split(".")[1]) if "." in written else 0
-        value = float(written)
-        if not any(round(fact, digits) == value or abs(fact - value) < 1e-9 for fact in known):
+        unit = "mm" if match["unit"].lower().startswith(("mm", "millimet")) else "%"
+        values = known.get(unit, []) if isinstance(known, dict) else known
+
+        def supported(written: str) -> bool:
+            digits = len(written.split(".")[1]) if "." in written else 0
+            value = float(written)
+            return any(round(fact, digits) == value or abs(fact - value) < 1e-9 for fact in values)
+
+        if any(not supported(match[g]) for g in ("first", "last") if match[g]):
             missing.append(match.group(0))
     return missing
 
@@ -1090,7 +1121,9 @@ def answer(
     transcript.append({"role": "user", "text": question})
     text = _converse(model, transcript, toolbox)
     if toolbox.used_data:
-        missing = unsupported(text, facts([t["result"] for t in toolbox.trace]) + facts(message))
+        missing = unsupported(
+            text, quantities([t["result"] for t in toolbox.trace if "error" not in t])
+        )
         if missing:
             # One chance to correct: say which figures no tool returned.
             transcript += [
@@ -1098,7 +1131,7 @@ def answer(
                 {"role": "user", "text": RECHECK.format(figures=", ".join(missing))},
             ]
             text = _converse(model, transcript, toolbox)
-            known = facts([t["result"] for t in toolbox.trace]) + facts(message)
+            known = quantities([t["result"] for t in toolbox.trace if "error" not in t])
             missing = unsupported(text, known)
             if missing:
                 raise Ungrounded(f"Unverified figures: {', '.join(missing)}")

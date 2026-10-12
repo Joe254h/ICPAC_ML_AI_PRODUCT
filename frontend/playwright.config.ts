@@ -46,6 +46,7 @@ export default defineConfig({
         CHIRPS_BASE_URL: mirror + "/chc",
         TAMSAT_BASE_URL: mirror + "/tamsat",
         LLM_PROVIDER: "mock",
+        BULLETIN_OPERATOR_KEY: "test-bulletin-operator-key-00000000",
         // Bulletin emails are written to this folder; the tests open their links.
         MAIL_OUTBOX_DIR: path.join(state, "service", "outbox"),
         BULLETIN_REVIEWERS: "reviewer@icpac.test",

@@ -48,7 +48,8 @@ test("a header menu opens on click and its pages are links", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.waitForLoadState("networkidle"); // the menu reacts once the page is live
+  // Forecast data appear after hydration; background basemap requests need not finish.
+  await expect(page.locator(".country-card")).toHaveCount(11);
   const nav = page.getByRole("navigation", { name: "Main" });
   const forecasts = nav.getByRole("button", { name: "Forecasts" });
   await forecasts.click();
@@ -128,7 +129,8 @@ test("no page shows code, identifiers or checksums", async ({ page }) => {
     "/copilot",
   ]) {
     await page.goto(path);
-    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(page.locator(".skeleton")).toHaveCount(0);
     const text = await page.locator("body").innerText();
     expect(text.match(code)?.[0] ?? "", path).toBe("");
   }

@@ -20,6 +20,7 @@ services:
       RUN_ROOT: /app/data/runs
       FORECAST_INPUT_ROOT: /app/data/forecasts
       LLM_API_KEY: ${LLM_API_KEY:-}
+      BULLETIN_OPERATOR_KEY: ${BULLETIN_OPERATOR_KEY:-}
     volumes:
       - climate-data:/app/data
       - ./artifacts:/app/artifacts:ro

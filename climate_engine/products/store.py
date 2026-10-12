@@ -12,6 +12,7 @@ fetch, so a reader never trusts a partial copy. Draft bulletins keep their froze
 ``bulletins/<id>/map.png`` in the same container.
 """
 
+import json
 import os
 import shutil
 import uuid
@@ -40,18 +41,20 @@ class PackageStore:
         self.container = container
 
     def upload(self, directory: Path) -> None:
-        """Copy a package (every non-hidden file) to the container, manifest last."""
-        directory = Path(directory)
-        files = sorted(
-            path
-            for path in directory.rglob("*")
-            if path.is_file()
-            and not any(part.startswith(".") for part in path.relative_to(directory).parts)
-        )
-        files.sort(key=lambda path: path.name == MANIFEST)
-        for path in files:
+        """Upload exactly one manifest snapshot and its files, manifest last."""
+        from climate_engine.products.package import check_package, file_path
+
+        directory = Path(directory).resolve()
+        manifest_bytes = (directory / MANIFEST).read_bytes()
+        manifest = json.loads(manifest_bytes)
+        problems = check_package(directory)
+        if problems:
+            raise ValueError(f"Package failed its checks: {problems}")
+        for logical in sorted(manifest["files"]):
+            path = file_path(directory, logical, manifest)
             name = f"{directory.name}/{path.relative_to(directory).as_posix()}"
             self.container.upload_blob(name, path.read_bytes(), overwrite=True)
+        self.container.upload_blob(f"{directory.name}/{MANIFEST}", manifest_bytes, overwrite=True)
 
     def put(self, name: str, data: bytes) -> None:
         """Store one object, e.g. a draft bulletin's frozen map (``bulletins/<id>/map.png``)."""
@@ -65,18 +68,27 @@ class PackageStore:
 
     def fetch(self, forecast_id: str, root: Path) -> bool:
         """Download a package into ``root/forecast_id``; False when the store lacks it."""
+        from climate_engine.products.package import check_package, file_path
+
         prefix = f"{forecast_id}/"
         names = [blob.name for blob in self.container.list_blobs(name_starts_with=prefix)]
         if f"{prefix}{MANIFEST}" not in names:
             return False
-        root = Path(root)
+        manifest_bytes = self.container.download_blob(f"{prefix}{MANIFEST}").readall()
+        manifest = json.loads(manifest_bytes)
+        root = Path(root).resolve()
         root.mkdir(parents=True, exist_ok=True)
         staging = root / f".{forecast_id}.fetch-{uuid.uuid4().hex[:8]}"
         try:
-            for name in names:
-                target = staging / name[len(prefix) :]
+            for logical in manifest["files"]:
+                target = file_path(staging, logical, manifest)
+                name = prefix + target.relative_to(staging.resolve()).as_posix()
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(self.container.download_blob(name).readall())
+            (staging / MANIFEST).write_bytes(manifest_bytes)
+            problems = check_package(staging)
+            if problems:
+                raise ValueError(f"Downloaded package failed its checks: {problems}")
             destination = root / forecast_id
             if destination.exists():  # fetched meanwhile by another request
                 shutil.rmtree(staging)

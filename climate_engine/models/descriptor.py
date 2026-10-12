@@ -178,9 +178,11 @@ class ModelDescriptor:
             "validation_period": d["validation_period"],
             "test_period": d["test_period"],
             "test_status": d["test_status"],
-            "artifact_paths": {k: str(self.artifact(k).relative_to(root)) for k in ARTIFACT_KINDS},
+            "artifact_paths": {
+                k: self.artifact(k).relative_to(root).as_posix() for k in ARTIFACT_KINDS
+            },
             "artifact_path": str(self.artifact("model")),
-            "mbc_artifact_path": str(self.artifact("mbc").relative_to(root)),
+            "mbc_artifact_path": self.artifact("mbc").relative_to(root).as_posix(),
             "artifact_checksums": checksums,
             "checksum": checksums["model"],
             "metrics": {k: v for k, v in metrics.items() if isinstance(v, int | float)},
@@ -190,7 +192,7 @@ class ModelDescriptor:
             "grid": list(grid.shape),
             "domain": {"cells": int(grid.domain_cells.size), "mask_sha256": grid.checksum},
             "descriptor": {
-                "path": str(self.path.relative_to(ROOT))
+                "path": self.path.relative_to(ROOT).as_posix()
                 if self.path.is_relative_to(ROOT)
                 else str(self.path),
                 "sha256": file_checksum(self.path),

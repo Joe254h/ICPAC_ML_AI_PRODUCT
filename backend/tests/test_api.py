@@ -8,8 +8,13 @@ from climate_engine.verification import metrics
 
 
 @pytest.fixture
-def client(tmp_path):
-    with TestClient(create_app("sqlite:///" + str(tmp_path / "test.db"))) as c:
+def client(tmp_path, monkeypatch):
+    key = "test-bulletin-operator-key-00000000"
+    monkeypatch.setenv("BULLETIN_OPERATOR_KEY", key)
+    with TestClient(
+        create_app("sqlite:///" + str(tmp_path / "test.db")),
+        headers={"Authorization": f"Bearer {key}"},
+    ) as c:
         yield c
 
 

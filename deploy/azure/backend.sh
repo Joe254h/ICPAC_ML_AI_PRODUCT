@@ -288,8 +288,12 @@ for name in (
 for name, reference in (
     ("SMTP_PASSWORD", "smtp-password"),
     ("EMAIL_ACTION_SECRET", "email-action-secret"),
+    ("BULLETIN_OPERATOR_KEY", "bulletin-operator-key"),
 ):
-    value = (e.get(name) or "").strip() or stored.get(reference)
+    deployed = current.get(name) or {}
+    value = (e.get(name) or "").strip() or stored.get(deployed.get("secretRef", reference)) or deployed.get("value")
+    if name == "BULLETIN_OPERATOR_KEY" and value and len(value) < 32:
+        raise SystemExit("BULLETIN_OPERATOR_KEY must contain at least 32 characters")
     if name == "EMAIL_ACTION_SECRET" and not value:
         value = tokens.token_urlsafe(48)  # links keep working across restarts
     if value:

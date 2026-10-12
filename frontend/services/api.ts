@@ -31,6 +31,24 @@ export async function request<T>(
   return response.json();
 }
 
+// Kept only in this tab's memory, never in browser storage or public environment variables.
+let bulletinOperatorKey = "";
+export function setBulletinOperatorKey(key: string) {
+  bulletinOperatorKey = key;
+}
+export function getBulletinOperatorKey() {
+  return bulletinOperatorKey;
+}
+
 export function mutate<T>(path: string, body: unknown) {
-  return request<T>(path, { method: "POST", body: JSON.stringify(body) });
+  const protectedBulletin =
+    path.startsWith("/bulletins/") && path !== "/bulletins/email-action";
+  return request<T>(path, {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers:
+      protectedBulletin && bulletinOperatorKey
+        ? { Authorization: `Bearer ${bulletinOperatorKey}` }
+        : undefined,
+  });
 }

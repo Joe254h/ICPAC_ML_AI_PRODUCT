@@ -94,6 +94,11 @@ def system_health(platform) -> dict:
     from backend.app.services.bulletin_mail import email_status
 
     email = email_status()
+    components["Bulletin operator access"] = (
+        "Healthy · manual bulletin actions require operator credentials"
+        if len(os.getenv("BULLETIN_OPERATOR_KEY", "")) >= 32
+        else "Warning · manual bulletin access is not configured; email links remain available"
+    )
     components["Bulletin email"] = (
         f"Healthy · review links go to {email['reviewers']} reviewer"
         f"{'s' if email['reviewers'] != 1 else ''}"

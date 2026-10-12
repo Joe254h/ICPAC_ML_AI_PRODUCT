@@ -279,7 +279,16 @@ def load_observed(path: Path, grid: DomainGrid, start: datetime, end: datetime) 
         raise ValueError(f"Observation window {window} differs from the forecast window")
     if not (np.allclose(coords[0], grid.latitude) and np.allclose(coords[1], grid.longitude)):
         raise ValueError("Observations are not on the authoritative model grid")
-    return grid.to_cells(np.asarray(field.values, dtype=np.float64))
+    if field.dims != ("latitude", "longitude"):
+        raise ValueError("Observations must have latitude, longitude dimensions in that order")
+    values = grid.to_cells(np.asarray(field.values, dtype=np.float64))
+    if np.isinf(values).any() or (values < 0).any():
+        raise ValueError(
+            "Observed rainfall must be nonnegative finite mm, or NaN for missing cells"
+        )
+    if not np.isfinite(values).any():
+        raise ValueError("Observations contain no valid rainfall cells in the forecast domain")
+    return values
 
 
 def check_domain(run: ForecastRun, grid: DomainGrid) -> None:

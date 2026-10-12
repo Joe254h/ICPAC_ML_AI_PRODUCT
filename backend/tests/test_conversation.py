@@ -17,6 +17,42 @@ def test_country_names_do_not_confuse_sudan_with_south_sudan():
     assert set(countries_in("Compare Sudan and South Sudan")) == {"Sudan", "South Sudan"}
 
 
+def test_comparison_followups_keep_countries_and_methods_and_reset_explicitly(env, fast_maps):
+    from chatbot.conversation import OperationalConversation
+
+    run(env)
+    chat = OperationalConversation(env.platform)
+    first = chat.compose(ChatRequest(message="Compare raw and MBC for Kenya and Somalia"), {})
+    more = chat.compose(ChatRequest(message="Tell me more"), {"context": first["context"]})
+    assert set(more["context"]["comparison_countries"]) == {"Kenya", "Somalia"}
+    assert more["context"]["comparison_methods"] == ["raw", "mbc"]
+    assert {"Kenya_raw", "Kenya_mbc", "Somalia_raw", "Somalia_mbc"} <= more["sentences"].keys()
+    assert "Somalia_hybrid" not in more["sentences"]
+    changed = chat.compose(ChatRequest(message="And Kenya?"), {"context": more["context"]})
+    assert changed["context"]["comparison_countries"] == ["Kenya"]
+    reset = chat.compose(
+        ChatRequest(message="Tell me more", reset_context=True), {"context": more["context"]}
+    )
+    assert "comparison_countries" not in reset["context"]
+
+
+def test_fallback_distinguishes_valid_week_from_initialization_and_asks_on_ambiguity(
+    env, fast_maps
+):
+    from chatbot.conversation import OperationalConversation
+
+    older = run(env)
+    newer = run(env, "2026-10-12")
+    chat = OperationalConversation(env.platform)
+    valid = chat.compose(ChatRequest(message="Kenya forecast valid on 2026-10-12"), {})
+    assert valid["context"]["forecast_id"] == older["forecast_id"]
+    initialized = chat.compose(ChatRequest(message="Kenya forecast run on 2026-10-12"), {})
+    assert initialized["context"]["forecast_id"] == newer["forecast_id"]
+    ambiguous = chat.compose(ChatRequest(message="Kenya forecast for 2026-10-12"), {})
+    assert "Specify the ECMWF run date" in ambiguous["sentences"]["clarification"]
+    assert ambiguous["tool_trace"] == []
+
+
 def ask(env, message, session_id=None, **kwargs):
     response = env.client.post(
         "/chat",
@@ -165,7 +201,8 @@ def test_llm_gets_conversation_history_with_fresh_approved_facts(env, fast_maps,
     assert second["provider"] == "openai_compatible"
     assert calls[1]["conversation"][0]["content"] == "Compare MBC and the hybrid for Kenya"
     # The model chooses among the answers; the labels are shown with every answer.
-    assert calls[1]["answer_ids"] == ["Somalia_raw", "Somalia_mbc", "Somalia_hybrid"]
+    assert calls[1]["answer_ids"] == ["Somalia_mbc", "Somalia_hybrid"]
+    assert second["context"]["comparison_methods"] == ["mbc", "hybrid"]
     assert "Somalia" in calls[1]["answer_sentences"]["Somalia_hybrid"]
     assert set(calls[1]["always_shown"]) == {"scope", "model_status", "comparison_scope"}
     # A question with one possible answer needs no model call.
