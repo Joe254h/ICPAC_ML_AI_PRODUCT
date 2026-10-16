@@ -15,8 +15,6 @@ import {
   CloudRain,
   Cpu,
   FileText,
-  Map as MapIcon,
-  MessagesSquare,
   Play,
   Satellite,
   Target,
@@ -529,20 +527,22 @@ function Pipeline({ detail }: { detail?: ForecastDetail }) {
   return (
     <section className="section tinted">
       <div className="wrap">
-        <p className="kicker-text center">Operational chain</p>
-        <h2 className="section-title">From the ensemble to the bulletin</h2>
-        <p className="section-sub">
+        <p className="kicker-text">Operational chain</p>
+        <h2 className="section-title left">
+          From the ensemble to the bulletin
+        </h2>
+        <p className="section-sub left">
           Every step runs in this service and is recorded; the state of each is
           shown live.
         </p>
         <ol className="pipeline">
-          {steps.map((step) => {
+          {steps.map((step, index) => {
             const State = Icon[step.state];
             return (
               <li key={step.title} className={step.state}>
                 <Link href={step.href}>
-                  <span className="pipe-icon">
-                    <step.icon size={22} aria-hidden />
+                  <span className="pipe-step">
+                    <step.icon size={16} aria-hidden /> Step {index + 1}
                   </span>
                   <strong>{step.title}</strong>
                   <span className="pipe-text">{step.text}</span>
@@ -564,72 +564,6 @@ function Pipeline({ detail }: { detail?: ForecastDetail }) {
   );
 }
 
-// ------------------------------------------------------------------ products
-
-const PRODUCTS = [
-  {
-    title: "Week-2 forecast",
-    text: "Days 8–14 rainfall for the region and every member state, with its layers and figures.",
-    href: "/forecasts",
-    icon: CloudRain,
-  },
-  {
-    title: "Rainfall maps",
-    text: "The bulletin's maps for the region and each country, ready to download.",
-    href: "/maps/rainfall",
-    icon: MapIcon,
-  },
-  {
-    title: "Rainfall monitoring",
-    text: "Observed rainfall of the latest dekad from CHIRPS, by country.",
-    href: "/monitoring",
-    icon: BarChart3,
-  },
-  {
-    title: "Verification",
-    text: "How each forecast compared with observed rainfall, pooled by season.",
-    href: "/verification",
-    icon: Target,
-  },
-  {
-    title: "Weekly bulletin",
-    text: "The ICPAC bulletin as a Word document and web page, released after review.",
-    href: "/bulletin",
-    icon: FileText,
-  },
-  {
-    title: "Forecaster Copilot",
-    text: "Ask about this week's forecast, or about weather and climate in general.",
-    href: "/copilot",
-    icon: MessagesSquare,
-  },
-];
-
-function Products() {
-  return (
-    <section className="section">
-      <div className="wrap">
-        <p className="kicker-text center">Products and services</p>
-        <h2 className="section-title">Everything in one place</h2>
-        <div className="product-grid">
-          {PRODUCTS.map(({ title, text, href, icon: Icon }) => (
-            <Link key={title} href={href} className="product-card">
-              <span className="product-icon">
-                <Icon size={24} aria-hidden />
-              </span>
-              <strong>{title}</strong>
-              <span>{text}</span>
-              <span className="product-more">
-                Open <ArrowRight size={14} />
-              </span>
-            </Link>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 export default function Home() {
   const latest = useApi<ForecastDetail>("/forecasts/latest");
   const bulletin = useBulletin(latest.data);
@@ -643,7 +577,6 @@ export default function Home() {
       )}
       <ObservedRainfall />
       <Pipeline detail={latest.data} />
-      <Products />
     </>
   );
 }

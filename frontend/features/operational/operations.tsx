@@ -243,7 +243,7 @@ export default function Operations() {
             )}
           </Card>
         </div>
-        <div className="grid-4">
+        <div className="step-grid">
           {STEPS.map(({ action, title, text, icon: Icon }) => (
             <div
               key={action}

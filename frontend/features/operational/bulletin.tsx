@@ -111,10 +111,7 @@ function Body({ detail }: { detail: ForecastDetail }) {
               {busy ? "Preparing draft…" : "Create draft for review"}
             </Button>
             {status.data?.export && (
-              <LinkButton
-                href={"/api" + status.data.export}
-                variant="ghost-light"
-              >
+              <LinkButton href={"/api" + status.data.export} variant="outline">
                 <FileDown size={18} /> Word document
               </LinkButton>
             )}
