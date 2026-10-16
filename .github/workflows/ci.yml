@@ -25,20 +25,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
+      - name: Install PostgreSQL build prerequisites
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends gcc libpq-dev
       - run: pip install -e '.[dev,postgres]'
       - name: Verify the committed HPC artifacts against their SHA256
         run: python -m scripts.verify_artifacts
       - run: ruff format --check backend climate_engine chatbot scripts
       - run: ruff check backend climate_engine chatbot scripts
       - run: mypy backend climate_engine chatbot
-      - name: Ensure native crash diagnostics are available
-        run: |
-          if ! command -v gdb; then
-            sudo apt-get update -qq
-            sudo apt-get install -y gdb
-          fi
-      - name: Backend tests with native shutdown backtrace
-        run: gdb --batch --nx --command=scripts/ci-native.gdb --args python -X faulthandler -m pytest -q
+      - run: python -X faulthandler -m pytest -q
         env:
           TEST_POSTGRES_URL: postgresql://icpac_test:local-ci-test-only@127.0.0.1:5432/icpac_test
       - name: Test PowerShell deployment guards without cloud access

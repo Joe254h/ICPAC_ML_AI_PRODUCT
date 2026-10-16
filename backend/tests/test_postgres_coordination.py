@@ -1,12 +1,37 @@
 """Exercise the cloud database transaction semantics in CI's dedicated PostgreSQL service."""
 
 import os
+import subprocess
+import sys
+from importlib.util import find_spec
 from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
 
 from backend.app.db import Repository
+
+
+@pytest.mark.parametrize("imports", ["netCDF4, eccodes, psycopg", "psycopg, eccodes, netCDF4"])
+def test_linux_postgres_and_ecmwf_native_libraries_exit_cleanly(imports):
+    if sys.platform != "linux" or find_spec("psycopg") is None:
+        pytest.skip("Linux PostgreSQL runtime regression")
+    # Bundled psycopg-binary LDAP conflicts with eckitlib: imports succeed, but
+    # the dynamic loader crashes after Python exits. A child process observes it.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-X",
+            "faulthandler",
+            "-c",
+            f"import {imports}; print(psycopg.pq.__impl__, flush=True)",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "c", "Linux deployments require system-linked psycopg[c]"
 
 
 def test_postgres_worker_claim_and_persistent_chat_quota():

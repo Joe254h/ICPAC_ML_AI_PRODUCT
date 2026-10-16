@@ -7,7 +7,7 @@ ARG PIP_EXTRAS=""
 ENV GIT_COMMIT=${GIT_COMMIT} PYTHONUNBUFFERED=1 MPLBACKEND=Agg
 # Liberation Sans has Helvetica's metrics: the weekly bulletin maps use it to match the
 # ICPAC reference maps (climate_engine/cartography/weekly_maps.py).
-RUN apt-get update && apt-get install -y --no-install-recommends fonts-liberation \
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-liberation libpq5 \
     && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml ./
 COPY backend backend
@@ -21,10 +21,17 @@ COPY templates templates
 # The verified inference artifacts (about 25 MB), so an image pins the model it serves.
 # Mount another ARTIFACT_ROOT (read-only) to serve newer registered versions.
 COPY artifacts artifacts
-RUN extras="$PIP_EXTRAS"; \
+RUN set -eu; extras="$PIP_EXTRAS"; build_postgres=false; \
     if [ "$INSTALL_MODEL_RUNTIMES" = "true" ]; then extras="${extras:+$extras,}models"; fi; \
-    if [ -n "$extras" ]; then pip install --no-cache-dir ".[$extras]"; else pip install --no-cache-dir .; fi \
-    && useradd --create-home --uid 1000 climate && mkdir -p /app/data && chown climate /app/data
+    case ",$extras," in *,postgres,*) \
+        build_postgres=true; apt-get update; \
+        apt-get install -y --no-install-recommends gcc libc6-dev libpq-dev ;; esac; \
+    if [ -n "$extras" ]; then pip install --no-cache-dir ".[$extras]"; else pip install --no-cache-dir .; fi; \
+    if [ "$build_postgres" = "true" ]; then \
+        apt-get purge -y --auto-remove gcc libc6-dev libpq-dev; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*; \
+    useradd --create-home --uid 1000 climate; mkdir -p /app/data; chown climate /app/data
 USER climate
 EXPOSE 8000
 # Cloud Run provides PORT; Compose and local runs use 8000.

@@ -165,7 +165,12 @@ gcloud run deploy icpac-api --image "$IMAGE" --region REGION \
   --set-secrets DATABASE_URL=icpac-database-url:latest
 ```
 
-* `PIP_EXTRAS=postgres` installs psycopg for Supabase; `GIT_COMMIT` makes every forecast's
+* `PIP_EXTRAS=postgres` builds psycopg against system `libpq` on Linux. The Dockerfile
+  installs its runtime library and removes the compiler after installation. This avoids
+  the bundled LDAP-library conflict with ECMWF's native runtime. Native Linux development
+  requires `gcc`, C standard-library headers and `libpq-dev` before installing `.[postgres]`; Windows uses the binary
+  package. See [Psycopg installation](https://www.psycopg.org/psycopg3/docs/basic/install.html).
+  `GIT_COMMIT` makes every forecast's
   provenance name the source revision.
 * The image contains the committed, checksum-pinned artifacts (about 25 MB). To serve a new
   registered version without rebuilding, mount a bucket and set `ARTIFACT_ROOT`.

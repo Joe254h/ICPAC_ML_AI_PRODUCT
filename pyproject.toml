@@ -11,7 +11,8 @@ dependencies = ["fastapi==0.142.2", "uvicorn>=0.35,<1", "pydantic>=2.13,<3", "nu
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff==0.16.10", "mypy==2.4.0", "types-PyYAML", "pandas-stubs", "azure-storage-blob>=12.20"]
 models = ["lightgbm", "xgboost", "scikit-learn"]
-postgres = ["psycopg[binary]"]
+# Linux must share the system libpq/LDAP stack with ECMWF's native libraries.
+postgres = ["psycopg[c]==3.3.6; sys_platform == 'linux'", "psycopg[binary]==3.3.6; sys_platform != 'linux'"]
 # Product packages in Azure Blob Storage (PACKAGE_STORE_CONNECTION).
 azure = ["azure-storage-blob>=12.20"]
 
