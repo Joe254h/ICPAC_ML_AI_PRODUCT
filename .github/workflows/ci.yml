@@ -28,6 +28,19 @@ jobs:
       - name: Install PostgreSQL build prerequisites
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends gcc libpq-dev
       - run: pip install -e '.[dev,postgres]'
+      - name: Configure local ECMWF native dependency loading
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import os
+          from pathlib import Path
+          roots = [Path(importlib.util.find_spec(name).origin).parent for name in ('eccodeslib', 'eckitlib')]
+          paths = ':'.join(str(root / 'lib64') for root in roots)
+          if os.environ.get('LD_LIBRARY_PATH'):
+              paths += ':' + os.environ['LD_LIBRARY_PATH']
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write(f'FINDLIBS_DISABLE_PACKAGE=yes\nECCODES_DIR={roots[0]}\nLD_LIBRARY_PATH={paths}\n')
+          PY
       - name: Verify the committed HPC artifacts against their SHA256
         run: python -m scripts.verify_artifacts
       - run: ruff format --check backend climate_engine chatbot scripts

@@ -170,6 +170,11 @@ gcloud run deploy icpac-api --image "$IMAGE" --region REGION \
   the bundled LDAP-library conflict with ECMWF's native runtime. Native Linux development
   requires `gcc`, C standard-library headers and `libpq-dev` before installing `.[postgres]`; Windows uses the binary
   package. See [Psycopg installation](https://www.psycopg.org/psycopg3/docs/basic/install.html).
+  The image also disables findlibs' global package preloading and configures the native
+  loader paths for the installed ECMWF wheels. This keeps ECMWF's bundled LDAP symbols
+  local instead of exposing them to PostgreSQL. Native Linux runs need the same
+  `FINDLIBS_DISABLE_PACKAGE=yes`, `ECCODES_DIR` and `LD_LIBRARY_PATH` settings shown in
+  `.github/workflows/ci.yml`; the decoder and its definitions retain their packaged version.
   `GIT_COMMIT` makes every forecast's
   provenance name the source revision.
 * The image contains the committed, checksum-pinned artifacts (about 25 MB). To serve a new

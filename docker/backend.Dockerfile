@@ -5,6 +5,12 @@ ARG INSTALL_MODEL_RUNTIMES=false
 # Extra dependency groups, e.g. "postgres" for Supabase or another PostgreSQL.
 ARG PIP_EXTRAS=""
 ENV GIT_COMMIT=${GIT_COMMIT} PYTHONUNBUFFERED=1 MPLBACKEND=Agg
+# Match the fixed Python 3.12 base image. Let the dynamic loader resolve only
+# required ECMWF dependencies locally; findlibs otherwise preloads all of eckit
+# globally, exposing its bundled LDAP symbols to PostgreSQL's LDAP library.
+ENV FINDLIBS_DISABLE_PACKAGE=yes \
+    ECCODES_DIR=/usr/local/lib/python3.12/site-packages/eccodeslib \
+    LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/eccodeslib/lib64:/usr/local/lib/python3.12/site-packages/eckitlib/lib64
 # Liberation Sans has Helvetica's metrics: the weekly bulletin maps use it to match the
 # ICPAC reference maps (climate_engine/cartography/weekly_maps.py).
 RUN apt-get update && apt-get install -y --no-install-recommends fonts-liberation libpq5 \
