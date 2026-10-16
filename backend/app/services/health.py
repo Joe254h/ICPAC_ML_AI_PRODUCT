@@ -8,7 +8,7 @@ import anthropic
 import httpx
 
 from backend.app.services import forecasts, operational
-from chatbot.agent import AnthropicModel, explain_refusal
+from chatbot.agent import AnthropicModel, explain_refusal, provider_message
 from chatbot.providers import MockLLMProvider, provider, provider_name
 from climate_engine.core import ROOT, config
 from climate_engine.provenance import code_version
@@ -128,10 +128,12 @@ def system_health(platform) -> dict:
             )
             if response.is_error and response.status_code < 500:
                 # The service answered but refused: say why (a bad key, a closed API, ...).
+                said = provider_message(response.text)
                 components["Copilot language model"] = (
                     "Unavailable · "
                     + explain_refusal(response.status_code, response.text)
                     + ": the Copilot gives checked fixed answers"
+                    + (f". The AI service said: “{said}”" if said else "")
                 )
             else:
                 response.raise_for_status()
@@ -150,6 +152,11 @@ def system_health(platform) -> dict:
             if LAST_OUTCOME["ok"]
             else f"Warning · last question at {LAST_OUTCOME['at']} not answered by {name}: "
             f"{LAST_OUTCOME['reason']}"
+            + (
+                f". The AI service said: “{LAST_OUTCOME['said']}”"
+                if LAST_OUTCOME.get("said")
+                else ""
+            )
         )
     free = shutil.disk_usage(ROOT).free
     components["Storage"] = (

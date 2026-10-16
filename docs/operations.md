@@ -21,6 +21,18 @@ ECMWF publishes the 00 UTC run about 8–9 hours after 00 UTC, so the cycle is b
 about 09:00 UTC. A forecast's week can be verified about two days after it ends, when the
 CHIRPS preliminary product covers all seven days.
 
+### Verifying past weeks
+
+A new service has no verified forecast until its first week has ended, so verification
+scores and the per-cell maps (correlation needs three weeks) would stay empty for a month.
+**Forecast and verify past weeks** (Operations, Verification and the verification maps
+pages; `past_weeks`, four weeks by default) closes that gap with real forecasts: for each of
+the last weeks CHIRPS has observed, it runs the same model on the ECMWF run a forecaster had
+then (ECMWF Open Data keeps them on its AWS mirror, from 2023) and verifies the forecast
+against CHIRPS. The weeks keep the weekday of the newest forecast; a forecast already issued
+within three days of a week is reused, and the newest week waits if CHIRPS does not cover it
+yet. Past forecasts never become the current forecast. Four weeks take a few minutes.
+
 ### Unattended runs
 
 ```bash
@@ -212,8 +224,9 @@ server when bulletin email is set up, and the Copilot's model (`api.anthropic.co
 
 ## Testing without the internet
 
-`backend/tests/ecmwf_mirror.py` writes real GRIB2 files and indexes for one run, laid out
-like `data.ecmwf.int`, and serves them with byte ranges:
+`backend/tests/ecmwf_mirror.py` writes real GRIB2 files and indexes for yesterday's run
+and the four weekly runs before it (for past weeks), laid out like `data.ecmwf.int`, and
+serves them with byte ranges:
 
 ```bash
 python -m backend.tests.ecmwf_mirror --root /tmp/mirror --port 8998   # yesterday's run
@@ -222,8 +235,9 @@ ECMWF_OPENDATA_MIRRORS=http://127.0.0.1:8998 CHIRPS_BASE_URL=http://127.0.0.1:89
   BULLETIN_REVIEWERS=reviewer@example.org python -m uvicorn backend.app.main:app
 ```
 
-The same server also serves the latest finished CHIRPS dekad under `/chc` and TAMSAT dekad
-under `/tamsat`, laid out like their servers. With `MAIL_OUTBOX_DIR` the bulletin emails
+The same server also serves the latest finished CHIRPS dekad and the CHIRPS days of those
+past weeks under `/chc`, and the latest TAMSAT dekad under `/tamsat`, laid out like their
+servers. With `MAIL_OUTBOX_DIR` the bulletin emails
 are written there as `.eml` files, whose links can be opened in the browser.
 
 The browser tests (`frontend/e2e`) start this mirror and run the weekly cycle through the

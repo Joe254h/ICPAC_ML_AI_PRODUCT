@@ -34,7 +34,11 @@ export function useOperation(onFinished?: (operation: Operation) => void) {
     async (
       action: OperationAction,
       actor: string,
-      extra: { initialization?: string; forecast_id?: string } = {},
+      extra: {
+        initialization?: string;
+        forecast_id?: string;
+        weeks?: number;
+      } = {},
     ) => {
       setError(null);
       try {

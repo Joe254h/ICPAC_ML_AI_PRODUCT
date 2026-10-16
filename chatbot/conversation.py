@@ -2,12 +2,15 @@
 
 import re
 from datetime import datetime, timedelta
+from urllib.parse import quote
 
 from backend.app.schemas import ChatRequest
 from backend.app.services.forecasts import ForecastService
 from chatbot.retrieval import approved_glossary
 from climate_engine.inputs import sources
 from climate_engine.operational.grid import ICPAC_COUNTRIES
+from climate_engine.products import weekly_bulletin as weekly
+from climate_engine.products.bulletin import BulletinInputs
 
 LABELS = {"hybrid": "MBC + AI/ML", "mbc": "MBC", "raw": "Raw ECMWF"}
 
@@ -195,6 +198,17 @@ def intent_for(message: str, previous: dict) -> str:
     ):
         return previous.get("forecast_intent", previous.get("intent", "forecast"))
     return "forecast"
+
+
+def ordinal(position: int) -> str:
+    """1 -> "", 2 -> "second ", ... (as in "the second wettest")."""
+    words = ("", "second ", "third ", "fourth ", "fifth ", "sixth ", "seventh ", "eighth ")
+    return words[position - 1] if position <= len(words) else f"{position}th "
+
+
+def country_slug(country: str) -> str:
+    """The country page's address, as the website builds it."""
+    return country.lower().replace(" ", "-")
 
 
 def unavailable_reason(exc: Exception) -> str:
@@ -402,20 +416,49 @@ class OperationalConversation:
                         if mean is not None
                         else f"Rainfall statistics for {country} are unavailable in this package."
                     )
-                    if (
-                        any(phrase in question for phrase in ("more detail", "tell me more"))
-                        and row
-                    ):
+                    # Where the rain falls, in the bulletin's classes and words.
+                    for index, statement in enumerate(self._statements(fid, variant, country)):
+                        sentences[f"class_{index}"] = statement
+                    ranked = sorted(
+                        (r for r in rows if (r.get(variant) or {}).get("mean_mm") is not None),
+                        key=lambda r: r[variant]["mean_mm"],
+                        reverse=True,
+                    )
+                    if row and country != "GHA" and row in ranked:
                         stats = row[variant]
+                        position = ranked.index(row) + 1
+                        sentences["rank"] = (
+                            f"{country} is the {ordinal(position)}wettest of the {len(ranked)} member states this week."
+                            if position < len(ranked)
+                            else f"{country} is the driest of the {len(ranked)} member states this week."
+                        )
                         sentences["range"] = (
                             f"The median is {stats['median_mm']:.2f} mm, with grid-cell totals from {stats['min_mm']:.2f} to {stats['max_mm']:.2f} mm."
                         )
+                    elif country == "GHA" and len(ranked) > 1:
+                        wet, dry = ranked[0], ranked[-1]
+                        sentences["rank"] = (
+                            f"The wettest member state is {wet['country']} ({wet[variant]['mean_mm']:.1f} mm on average) and the driest {dry['country']} ({dry[variant]['mean_mm']:.1f} mm)."
+                        )
                     if intent == "map":
                         url = detail["maps"][variant]
-                        if country == "Somalia":
-                            url += "&country=Somalia"
-                        images = [{"url": "/api" + url, "alt": f"{label} rainfall for {period}"}]
+                        if country != "GHA":
+                            url += "&country=" + quote(country)
+                        where = "" if country == "GHA" else f" over {country}"
+                        images = [
+                            {"url": "/api" + url, "alt": f"{label} rainfall{where} for {period}"}
+                        ]
                         links = [{"label": "Open forecast maps", "url": f"/forecasts/{fid}"}]
+                        if country != "GHA":
+                            links.append(
+                                {
+                                    "label": f"Open the {country} page",
+                                    "url": f"/countries/{country_slug(country)}",
+                                }
+                            )
+                        sentences["map"] = (
+                            f"Here is the {label} Week-2 rainfall map{where}, in the weekly bulletin's colours."
+                        )
                 trace.append(
                     {
                         "tool": tool,
@@ -467,6 +510,23 @@ class OperationalConversation:
                 else self.forecasts.latest()
             )
         return self.forecasts.get(fid) if fid else self.forecasts.latest()
+
+    def _statements(self, forecast_id: str, variant: str, country: str) -> list[str]:
+        """The weekly bulletin's rainfall statements for the region or one country: where
+        heavy, moderate and light rainfall are expected, from the forecast grid."""
+        try:
+            inputs = BulletinInputs.from_package(self.forecasts.directory(forecast_id))
+            grid = weekly.read_layer(inputs, variant)
+            masks = weekly.country_masks(grid)
+        except (ValueError, KeyError, FileNotFoundError, OSError):
+            return []
+        if country == "GHA":
+            items = weekly.rainfall_bullets(grid, masks, weekly.LEADS)
+        elif country in masks:
+            items = weekly.rainfall_bullets(grid, {country: masks[country]}, weekly.LEADS, country)
+        else:
+            return []
+        return [lead + rest for lead, rest in items]
 
     @staticmethod
     def _period(detail: dict) -> str:

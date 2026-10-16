@@ -102,6 +102,31 @@ test("rainfall monitoring shows the newest CHIRPS and TAMSAT dekads", async ({
   await noHorizontalScroll(page);
 });
 
+test("past weeks are forecast and verified, and the correlation map appears", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  await page.goto("/maps/correlation");
+  await expect(
+    page.getByText(/needs at least 3 verified forecasts; 0 are verified/),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Forecast and verify past weeks" })
+    .click();
+  // The local mirror holds the four previous weekly runs and the CHIRPS days of their
+  // weeks; once they are verified the map replaces the note.
+  await expect(
+    page.getByRole("img", { name: /over verified forecasts/ }),
+  ).toBeVisible({ timeout: 280_000 });
+  await page.goto("/verification");
+  const stat = page.locator(".stat").filter({ hasText: "Verified forecasts" });
+  await expect(stat.locator(".value")).toHaveText("4");
+  await expect(page.getByRole("cell", { name: /SON/ }).first()).toBeVisible();
+  // This week's forecast is still the current one.
+  await page.goto("/forecasts");
+  await expect(page.getByText("Not verified yet.")).toBeVisible();
+});
+
 test("no page shows code, identifiers or checksums", async ({ page }) => {
   const code =
     /w2-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}|[a-z0-9]+_[a-z0-9_]+_v\d|\.ya?ml\b|python -m|sha-?256|\b[0-9a-f]{20,}\b|\{"|week2_steps|max\(|\bHybrid7\b|-candidate\.\d|\bby startup\b|\.(nc|tif|json|py)\b|\b[A-Z][A-Z0-9]*_[A-Z0-9_]{2,}\b/;
@@ -113,6 +138,8 @@ test("no page shows code, identifiers or checksums", async ({ page }) => {
     "/countries",
     "/countries/kenya",
     "/maps/rainfall",
+    "/maps/correlation",
+    "/maps/bias",
     "/monitoring",
     "/monitoring?source=tamsat",
     "/verification",

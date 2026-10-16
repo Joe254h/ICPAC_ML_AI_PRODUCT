@@ -3249,3 +3249,33 @@ table.data .strong {
   font-size: 15.5px;
   color: var(--ink);
 }
+
+/* forecast and verify past weeks */
+.past-weeks {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px 24px;
+  margin: 20px 0;
+  border-left: 5px solid var(--amber);
+}
+.past-weeks-text h3 {
+  margin: 0 0 6px;
+  font-size: 19px;
+}
+.past-weeks-text p {
+  margin: 0;
+  color: var(--muted);
+}
+.past-weeks .notice {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+@media (max-width: 700px) {
+  .past-weeks {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .past-weeks .btn {
+    white-space: normal;
+  }
+}

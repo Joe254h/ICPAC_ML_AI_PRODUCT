@@ -221,3 +221,21 @@ def test_conversations_are_archived_restored_and_deleted(env):
     assert env.client.get(f"/chat/sessions/{first}").status_code == 404
     assert env.client.delete(f"/chat/sessions/{first}").status_code == 404
     assert [s["id"] for s in env.client.get("/chat/sessions").json()] == [second]
+
+
+def test_standard_answers_say_where_rain_falls_and_show_any_countrys_map(env, fast_maps):
+    run(env)
+    kenya = ask(env, "Explain the forecast for Kenya.")
+    text = kenya["text"]
+    # The bulletin's classes, in its words, and where Kenya stands among the member states.
+    assert "Heavy rainfall (above 200 mm)" in text and "Light rainfall" in text
+    assert "expected over" in text
+    assert "of the 11 member states this week" in text or "member states this week" in text
+    assert "median" in text
+    region = ask(env, "Summarise this week's rainfall forecast for the whole region")
+    assert "The wettest member state is" in region["text"]
+    shown = ask(env, "give me kenya map")
+    assert "country=Kenya" in shown["images"][0]["url"]
+    assert "over Kenya" in shown["images"][0]["alt"]
+    assert {"label": "Open the Kenya page", "url": "/countries/kenya"} in shown["links"]
+    assert env.client.get(shown["images"][0]["url"].removeprefix("/api")).status_code == 200

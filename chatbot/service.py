@@ -27,6 +27,14 @@ REQUIRED_SENTENCES = (
     "hybrid_status",
     "metric_scope",
     "comparison_scope",
+    # The details of a forecast answer: where each rainfall class falls, the ranking, the
+    # range and the map caption go with the answer, never instead of it.
+    "class_0",
+    "class_1",
+    "class_2",
+    "rank",
+    "range",
+    "map",
 )
 # The fixed-sentence path's tools, in the words the answer shows.
 FIXED_EVIDENCE = {
@@ -55,6 +63,14 @@ def selection(body: ChatRequest) -> str | None:
     return "; ".join(parts) or None
 
 
+GENERAL_UNAVAILABLE = (
+    "I can't answer that just now: questions outside the forecast need the AI assistant, which "
+    "is not available at the moment. Questions about this week's "
+    'forecast still work, for example "Explain the forecast for Kenya", "Show the rainfall map '
+    'for Kenya", "Has this forecast been verified?" or "Draft the weekly bulletin".'
+)
+
+
 def plain_reason(exc: Exception) -> str:
     """Why the language model did not answer, in words for the person asking."""
     if isinstance(exc, agent.Ungrounded):
@@ -70,6 +86,15 @@ def plain_reason(exc: Exception) -> str:
     if isinstance(exc, ValueError) and "not configured" in str(exc):
         return "no AI service is set up"
     return "the assistant could not finish its answer"
+
+
+def provider_said(exc: Exception) -> str | None:
+    """The provider's own words when it refused, for the System page."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return agent.provider_message(exc.response.text)
+    if isinstance(exc, anthropic.APIStatusError) and exc.body:
+        return agent.provider_message(json.dumps(exc.body))
+    return None
 
 
 def model_name(model) -> str:
@@ -131,7 +156,7 @@ class Copilot:
                     f"shown instead ({type(exc).__name__})."
                 )
                 reason = plain_reason(exc)
-                agent.record_outcome(model_name(model), False, reason)
+                agent.record_outcome(model_name(model), False, reason, provider_said(exc))
         return self._fixed(body, session, fallback, reason)
 
     def _fixed(
@@ -144,6 +169,10 @@ class Copilot:
         if "get_glossary" in tools:
             references = [cited(self.references.get("glossary")), *references[:2]]
         sentences = evidence.pop("sentences")
+        if list(sentences) == ["help"]:
+            # A general question ("what is love?") needs the language model itself, which
+            # did not answer or is not set up.
+            sentences = {"general": GENERAL_UNAVAILABLE}
         required = [key for key in REQUIRED_SENTENCES if key in sentences]
         rendered = render_grounded(body.message, sentences, references, history, required)
         response = {

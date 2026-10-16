@@ -312,7 +312,8 @@ export type OperationAction =
   | "verify_due"
   | "verify_forecast"
   | "update_chirps"
-  | "cycle";
+  | "cycle"
+  | "past_weeks";
 
 export type Operation = {
   id: string;

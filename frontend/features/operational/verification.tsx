@@ -25,6 +25,7 @@ import type {
   Variant,
 } from "@/types/operational";
 import { MetricsTable } from "@/features/operational/shared";
+import PastWeeks, { PAST_WEEKS } from "@/features/operational/past-weeks";
 
 const SEASONS: Record<string, string> = {
   DJF: "December – February",
@@ -46,7 +47,7 @@ function LatestVerified({ run }: { run: ForecastRun }) {
     <Card
       eyebrow="Latest verified week"
       title={validDays(run.valid_start, run.valid_end)}
-      subtitle={`Forecast of ${day(run.initialization)} against ${v.observation?.file ?? "CHIRPS"} · ${v.season ?? ""}`}
+      subtitle={`Forecast from the ECMWF run of ${day(run.initialization)}, scored against CHIRPS${v.season ? ` · ${SEASONS[v.season] ?? v.season}` : ""}`}
       action={
         <LinkButton
           href={`/forecasts?id=${run.forecast_id}`}
@@ -185,10 +186,19 @@ export default function Verification() {
         ) : (
           runs.data && (
             <Notice title="No forecast verified yet.">
-              The first forecast is verified about two days after its Week-2
-              window ends, when CHIRPS covers all seven days.
+              A forecast is verified about two days after its Week-2 window
+              ends, when CHIRPS covers all seven days. Past weeks can be
+              forecast and verified now.
             </Notice>
           )
+        )}
+        {runs.data && verified.length < PAST_WEEKS && (
+          <PastWeeks
+            onDone={() => {
+              runs.reload();
+              seasonal.reload();
+            }}
+          />
         )}
         <Card
           title="Seasonal scores"

@@ -412,11 +412,34 @@ def test_figures_are_checked_to_the_precision_written():
          "Google blocked the key because it was exposed: create a new key"),
         (400, '{"error": {"message": "User location is not supported for the API use."}}',
          "the AI service is not offered in the server's region"),
-        (403, "{}", "the AI service refused the key (no permission for this model or API)"),
+        (403, '[{"error": {"message": "Permission denied: Consumer has been suspended."}}]',
+         "Google suspended the key or its project: check it in Google AI Studio"),
+        (400, '{"error": {"message": "API key expired. Please renew the API key."}}',
+         "the key has expired: create a new key"),
+        (403, '{"error": {"message": "The caller does not have permission"}}', agent.REFUSED_403),
+        (403, "{}", agent.REFUSED_403),
     ],
 )  # fmt: skip
 def test_a_providers_refusal_is_explained_in_words(status, body, reason):
     assert agent.explain_refusal(status, body) == reason
+
+
+def test_the_system_page_gets_the_providers_own_words_without_keys_or_links():
+    body = (
+        '[{"error": {"code": 403, "status": "PERMISSION_DENIED", "message": "Permission denied:'
+        " Consumer 'api_key:AIzaSyA1234567890abcdefghijklmnopqrstu' has been suspended. See"
+        " https://console.cloud.google.com/x for project 123456789012 on"
+        ' generativelanguage.googleapis.com."}}]'
+    )
+    assert agent.provider_message(body) == (
+        "Permission denied: Consumer 'api_key:(key)' has been suspended. See (link) for "
+        "project (number) on (name)."
+    )
+    assert agent.provider_message(
+        '{"error": {"message": "The caller does not have permission"}}'
+    ) == ("The caller does not have permission")
+    assert agent.provider_message("<html>Bad gateway</html>") is None
+    assert agent.provider_message('{"error": "x" }') == "x"
 
 
 def test_a_key_problem_is_not_retried_with_other_models(env, fast_maps, monkeypatch):
@@ -439,3 +462,5 @@ def test_a_key_problem_is_not_retried_with_other_models(env, fast_maps, monkeypa
     assert (
         answer["fallback_reason"] == "the AI service says the key is not valid: enter the key again"
     )
+    # The System page names the reason and what the AI service itself said.
+    assert agent.LAST_OUTCOME["said"] == "API key not valid. Please pass a valid API key."

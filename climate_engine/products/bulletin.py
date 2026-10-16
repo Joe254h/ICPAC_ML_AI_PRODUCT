@@ -61,7 +61,8 @@ FOCUS_HEADING = "6F1BC42D"
 RAINFALL_MAP = "73AD7BDD"  # the paragraph holding the regional map; the table follows it
 FOCUS_MAPS = "171EEC30"  # the reference's rainfall and temperature maps, side by side
 FOCUS_LAST = "4C49DE8B"  # the focus's last rainfall bullet; the forecast note follows it
-FOCUS_MAP_MAX_EMU = (5486400, 4572000)  # 6 x 5 inches at most, in the map's own shape
+# 5.5 x 3.2 inches at most, in the map's own shape: the focus section then shares a page
+FOCUS_MAP_MAX_EMU = (5029200, 2926080)
 
 
 def trimmed(png: bytes, margin: int = 24) -> bytes:
