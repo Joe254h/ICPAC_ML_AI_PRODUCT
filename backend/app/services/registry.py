@@ -167,13 +167,15 @@ class ModelRegistry:
 
     # ------------------------------------------------------------------ evidence
 
-    def validate(self, model_id: str) -> dict:
+    def validate(self, model_id: str, actor: str = "registry") -> dict:
         metadata = self.repo.get("model", model_id)
         if not operational.is_operational(metadata):
             raise KeyError(model_id)
-        return self._revalidate_operational(model_id, metadata)
+        return self._revalidate_operational(model_id, metadata, actor)
 
-    def _revalidate_operational(self, model_id: str, metadata: dict) -> dict:
+    def _revalidate_operational(
+        self, model_id: str, metadata: dict, actor: str = "registry"
+    ) -> dict:
         """Re-verify artifacts and rerun the inference check; never uses test-period data."""
         operational.OperationalModel(metadata).load()
         metadata["inference_test"] = {
@@ -181,7 +183,7 @@ class ModelRegistry:
             "fixture": "controlled synthetic matrix (seed 20261005)",
             "timestamp": now(),
         }
-        self.repo.audit("validate_model", "registry", model_id, {"source": "artifact re-check"})
+        self.repo.audit("validate_model", actor, model_id, {"source": "artifact re-check"})
         return self.repo.save("model", metadata, model_id)
 
     def record_independent_test(self, model_id: str, body: IndependentTestRequest) -> dict:

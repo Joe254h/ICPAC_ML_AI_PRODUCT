@@ -8,7 +8,7 @@ import anthropic
 import httpx
 
 from backend.app.services import forecasts, operational
-from chatbot.agent import AnthropicModel, explain_refusal
+from chatbot.agent import AnthropicModel, explain_refusal, provider_message
 from chatbot.providers import MockLLMProvider, provider, provider_name
 from climate_engine.core import ROOT, config
 from climate_engine.provenance import code_version
@@ -28,6 +28,17 @@ def model_label(model: str) -> str:
 
 def system_health(platform) -> dict:
     components = {"API": "Healthy", "Database": "Healthy"}
+    from backend.app.api.access import credentials
+
+    try:
+        access_ready = bool(credentials())
+    except Exception:
+        access_ready = False
+    components["Release"] = (
+        "Healthy · production release gates enabled"
+        if os.getenv("RELEASE_MODE", "evaluation") == "production"
+        else "Warning · evaluation release; candidate forecasts are not a production release"
+    )
     models = [m for m in platform.repo.list("model") if operational.is_operational(m)]
     in_use = [m for m in models if m["status"] == "production"] or sorted(
         (m for m in models if m["status"] == "candidate"), key=lambda m: m["created_at"]
@@ -44,11 +55,11 @@ def system_health(platform) -> dict:
             "failed": "independent test failed",
         }.get(str(model.get("test_status")), "independent test not yet recorded")
         components["Operational model"] = (
-            f"Healthy · {name} (production model; {tested})"
+            f"Unavailable · {name}: its files changed since registration"
+            if not healthy
+            else f"Healthy · {name} (production model; {tested})"
             if production
             else f"Warning · {name} (candidate in use, no production model yet; {tested})"
-            if healthy
-            else f"Unavailable · {name}: its files changed since registration"
         )
     issues = [i for i in platform.repo.list("registration_issue") if i.get("current")]
     if issues:
@@ -96,7 +107,7 @@ def system_health(platform) -> dict:
     email = email_status()
     components["Bulletin operator access"] = (
         "Healthy · manual bulletin actions require operator credentials"
-        if len(os.getenv("BULLETIN_OPERATOR_KEY", "")) >= 32
+        if access_ready
         else "Warning · manual bulletin access is not configured; email links remain available"
     )
     components["Bulletin email"] = (
@@ -133,10 +144,12 @@ def system_health(platform) -> dict:
             )
             if response.is_error and response.status_code < 500:
                 # The service answered but refused: say why (a bad key, a closed API, ...).
+                said = provider_message(response.text)
                 components["Copilot language model"] = (
                     "Unavailable · "
                     + explain_refusal(response.status_code, response.text)
                     + ": the Copilot gives checked fixed answers"
+                    + (f". The AI service said: “{said}”" if said else "")
                 )
             else:
                 response.raise_for_status()
@@ -155,6 +168,11 @@ def system_health(platform) -> dict:
             if LAST_OUTCOME["ok"]
             else f"Warning · last question at {LAST_OUTCOME['at']} not answered by {name}: "
             f"{LAST_OUTCOME['reason']}"
+            + (
+                f". The AI service said: “{LAST_OUTCOME['said']}”"
+                if LAST_OUTCOME.get("said")
+                else ""
+            )
         )
     free = shutil.disk_usage(ROOT).free
     components["Storage"] = (
@@ -165,6 +183,10 @@ def system_health(platform) -> dict:
         if any(value.startswith(("Unavailable", "Warning")) for value in components.values())
         else "Healthy",
         "mode": "operational",
+        "release_mode": os.getenv("RELEASE_MODE", "evaluation"),
+        "access_configured": access_ready,
+        "durable_storage": platform.repo.url.startswith("postgresql")
+        and bool(os.getenv("PACKAGE_STORE_CONNECTION")),
         # The deployed source revision, so a redeploy can confirm the new version is live.
         "version": code_version(),
         "components": components,

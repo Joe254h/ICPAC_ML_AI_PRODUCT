@@ -358,6 +358,65 @@ def test_the_weekly_cycle_runs_as_one_operation(env, fast_maps, mirror, monkeypa
     assert client.get("/operations").json()[0]["id"] == failed["id"]
 
 
+def test_past_weeks_are_forecast_from_the_archive_and_verified(
+    env, fast_maps, tmp_path, monkeypatch
+):
+    from backend.app.services import operations
+
+    # 11 October: the newest week CHIRPS can cover is that of the run of 20 September
+    # (valid 27 September - 3 October); the archive holds that run and the one before.
+    monkeypatch.setattr(operations, "_today", lambda: date(2026, 10, 11))
+    root = tmp_path / "archive"
+    for day in (date(2026, 9, 20), date(2026, 9, 13)):
+        ecmwf_mirror.build(root, day)
+    monkeypatch.setattr(chirps, "download", chc(week(date(2026, 9, 27))))
+    client = env.client
+    with ecmwf_mirror.serve(root) as url:
+        monkeypatch.setenv("ECMWF_OPENDATA_MIRRORS", url)
+        done = wait(
+            client,
+            client.post(
+                "/operations", json={"action": "past_weeks", "weeks": 2, "actor": "Joe N"}
+            ).json(),
+        )
+    assert done["status"] == "complete", done
+    runs = {r["initialization"][:10]: r for r in client.get("/forecasts").json()}
+    assert set(runs) == {"2026-09-20", "2026-09-13"}
+    assert done["result"]["verified"] == [runs["2026-09-20"]["forecast_id"]]
+    assert runs["2026-09-20"]["verification_status"] == "available"
+    # CHIRPS does not hold the week of the older run, and the archive stops there.
+    assert done["result"]["waiting"] == [runs["2026-09-13"]["forecast_id"]]
+    assert [f[:10] for f in done["result"]["failed"]] == [
+        "2026-09-06",
+        "2026-08-30",
+        "2026-08-23",
+    ]
+    texts = [m["text"] for m in done["messages"]]
+    assert (
+        "The week of 13 September 2026 could not be forecast: the ECMWF archive does not hold "
+        "that run" in texts
+    )
+    assert "CHIRPS does not cover the week of 20 September 2026 yet" in texts
+    assert (
+        "Forecasting the week of 27 September 2026 from the ECMWF run of 20 September 2026" in texts
+    )
+    assert "1 past weeks verified, 1 waiting for CHIRPS, 3 failed" in texts
+    # The past weeks never replace the current forecast; a week already verified is reused,
+    # also when the newest forecast falls on another weekday (the run of 21 September would
+    # be next: the run of 20 September stands for it).
+    current = run(env, "2026-10-05")
+    assert client.get("/forecasts/latest").json()["forecast_id"] == current["forecast_id"]
+    monkeypatch.setattr(chirps, "download", chc({}))
+    again = wait(
+        client,
+        client.post(
+            "/operations", json={"action": "past_weeks", "weeks": 1, "actor": "Joe N"}
+        ).json(),
+    )
+    assert again["result"]["verified"] == [runs["2026-09-20"]["forecast_id"]]
+    assert len(client.get("/forecasts").json()) == 3
+
+
 def test_interrupted_operations_are_marked_on_restart(env):
     from backend.app.services.operations import KIND, OperationService
 

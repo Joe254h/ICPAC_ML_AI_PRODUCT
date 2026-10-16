@@ -13,6 +13,9 @@ export default defineConfig({
   workers: 1,
   use: {
     baseURL: "http://127.0.0.1:3000",
+    extraHTTPHeaders: {
+      Authorization: "Bearer test-bulletin-operator-key-00000000",
+    },
     channel: process.env.LOCAL_BROWSER ?? undefined,
     // A browser already on the machine instead of Playwright's download.
     launchOptions: process.env.CHROMIUM_PATH

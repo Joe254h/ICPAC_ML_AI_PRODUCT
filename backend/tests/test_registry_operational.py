@@ -247,11 +247,18 @@ def test_startup_registers_the_committed_candidate_from_real_artifacts(tmp_path,
         "artifacts/model.yaml",
     ],
 )
-def test_api_registration_reads_descriptors_from_the_registry_folder_only(tmp_path, descriptor):
+def test_api_registration_reads_descriptors_from_the_registry_folder_only(
+    tmp_path, descriptor, monkeypatch
+):
     from fastapi.testclient import TestClient
 
     from backend.app.main import create_app
 
-    with TestClient(create_app(f"sqlite:///{tmp_path / 'db.sqlite'}")) as client:
+    key = "test-registry-admin-access-key-00000000"
+    monkeypatch.setenv("BULLETIN_OPERATOR_KEY", key)
+    with TestClient(
+        create_app(f"sqlite:///{tmp_path / 'db.sqlite'}"),
+        headers={"Authorization": f"Bearer {key}"},
+    ) as client:
         response = client.post("/models/register", json={"descriptor": descriptor, "actor": "me"})
     assert response.status_code == 422

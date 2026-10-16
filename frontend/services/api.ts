@@ -15,7 +15,13 @@ export async function request<T>(
 ): Promise<T> {
   const response = await fetch("/api" + path, {
     ...options,
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(bulletinOperatorKey && path !== "/bulletins/email-action"
+        ? { Authorization: `Bearer ${bulletinOperatorKey}` }
+        : {}),
+      ...options?.headers,
+    },
   });
   if (!response.ok) {
     const error = await response
@@ -28,6 +34,8 @@ export async function request<T>(
       response.status,
     );
   }
+  // 204 (a conversation deleted): nothing to read.
+  if (response.status === 204) return undefined as T;
   return response.json();
 }
 
@@ -41,14 +49,8 @@ export function getBulletinOperatorKey() {
 }
 
 export function mutate<T>(path: string, body: unknown) {
-  const protectedBulletin =
-    path.startsWith("/bulletins/") && path !== "/bulletins/email-action";
   return request<T>(path, {
     method: "POST",
     body: JSON.stringify(body),
-    headers:
-      protectedBulletin && bulletinOperatorKey
-        ? { Authorization: `Bearer ${bulletinOperatorKey}` }
-        : undefined,
   });
 }

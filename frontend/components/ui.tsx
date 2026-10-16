@@ -46,7 +46,13 @@ export function ModelStatus({ status }: { status?: string }) {
   return <Status tone={tone}>{status ?? "unknown"}</Status>;
 }
 
-type ButtonVariant = "amber" | "green" | "outline" | "white" | "ghost-light";
+type ButtonVariant =
+  | "amber"
+  | "green"
+  | "outline"
+  | "white"
+  | "ghost-light"
+  | "danger";
 
 export function Button({
   variant = "green",

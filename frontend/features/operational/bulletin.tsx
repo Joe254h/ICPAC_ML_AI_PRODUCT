@@ -2,7 +2,6 @@
 /** The weekly bulletin of the latest (or a chosen) forecast, as forecasters will issue it. */
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import BulletinAccess from "@/components/bulletin-access";
 import { FileDown, FilePlus2 } from "lucide-react";
 import {
   Button,
@@ -60,6 +59,7 @@ function Product({ section, eyebrow }: { section: Section; eyebrow: string }) {
         <div>
           <p className="eyebrow">{eyebrow}</p>
           <h2 style={{ fontSize: 26, marginBottom: 16 }}>{section.title}</h2>
+          {section.why && <p className="focus-why">{section.why}</p>}
           <Bullets section={section} />
         </div>
         {section.map && (
@@ -111,17 +111,13 @@ function Body({ detail }: { detail: ForecastDetail }) {
               {busy ? "Preparing draft…" : "Create draft for review"}
             </Button>
             {status.data?.export && (
-              <LinkButton
-                href={"/api" + status.data.export}
-                variant="ghost-light"
-              >
+              <LinkButton href={"/api" + status.data.export} variant="outline">
                 <FileDown size={18} /> Word document
               </LinkButton>
             )}
           </>
         }
       />
-      <BulletinAccess />
       {error && <ErrorState message={error} />}
       {status.loading && <Skeleton height={480} />}
       {status.error && (
@@ -177,8 +173,8 @@ function Body({ detail }: { detail: ForecastDetail }) {
           </div>
         </Card>
       )}
-      {get("somalia") && !get("somalia")?.missing_dependency && (
-        <Product section={get("somalia") as Section} eyebrow="Country focus" />
+      {get("focus") && (
+        <Product section={get("focus") as Section} eyebrow="Country focus" />
       )}
       {get("about") && (
         <Card title="About this forecast">

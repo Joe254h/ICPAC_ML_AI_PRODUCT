@@ -7,7 +7,8 @@ the ECMWF ensemble from ECMWF Open Data, issues the forecast on the authoritativ
 review (approved and published on the website or from emailed links) and verifies finished
 forecasts against CHIRPS. It shows three forecast layers:
 
-* **Raw ECMWF**: the ensemble mean of the Week-2 total (50 perturbed members);
+* **Raw ECMWF**: the ensemble mean of the Week-2 total (perturbed members 1–10, the
+  ensemble size the model was trained on);
 * **MBC**: the locked multiplicative bias correction, `max(0, raw × R[month, cell])`,
   the forecast issued today;
 * **MBC + AI/ML**: the hybrid residual-corrected forecast,
@@ -48,6 +49,7 @@ Documentation: [weekly operations, data sources and monitoring](docs/operations.
 [operational models](docs/operational_models.md) ·
 [forecast input format](docs/forecast_input_format.md) ·
 [deployment (Vercel, Azure or Cloud Run, Supabase)](docs/deployment.md) ·
+[Azure Cloud Shell PowerShell](docs/deployment-powershell.md) ·
 [self-hosted Copilot model](docs/self-hosted-llm.md) ·
 [HPC integration audit](docs/hpc_integration_audit.md) ·
 [integration report](docs/hpc_integration_report.md) ·
@@ -90,12 +92,14 @@ python -m scripts.register_model \
 
 ## Issue this week's forecast
 
-Open Data & Tools › Operations, enter your name and run the weekly cycle: it downloads the
+Connect through **Staff access** with a personal operator/admin key, then open Data & Tools
+› Operations and run the weekly cycle: it downloads the
 newest 00 UTC ECMWF ensemble, issues the forecast, verifies every earlier forecast that
 CHIRPS now covers and downloads the newest CHIRPS dekad for rainfall monitoring. The same through the API:
 
 ```bash
 curl -X POST http://localhost:8000/operations -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $STAFF_KEY" \
   -d '{"action": "cycle", "actor": "Joe254h"}'
 ```
 

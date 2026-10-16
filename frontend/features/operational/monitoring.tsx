@@ -119,7 +119,7 @@ function DekadMap({ dekad }: { dekad: Dekad }) {
             : `Mean ${num(row.mean_mm)} mm · up to ${num(row.max_mm, 0)} mm`;
         }}
       >
-        <div className="map-switch">
+        <div className="map-switch" data-map-reserve="top left">
           <div className="segmented light" role="group" aria-label="Product">
             <button
               type="button"
@@ -140,7 +140,7 @@ function DekadMap({ dekad }: { dekad: Dekad }) {
             </button>
           </div>
         </div>
-        <div className="map-legend-corner light">
+        <div className="map-legend-corner light" data-map-reserve="bottom left">
           <LegendBar
             title={legend.title}
             unit={legend.unit}

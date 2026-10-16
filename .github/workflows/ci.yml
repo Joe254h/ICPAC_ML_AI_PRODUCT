@@ -10,17 +10,33 @@ concurrency:
 jobs:
   checks:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: icpac_test
+          POSTGRES_USER: icpac_test
+          POSTGRES_PASSWORD: local-ci-test-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U icpac_test -d icpac_test"
+          --health-interval 10s --health-timeout 5s --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - run: pip install -e '.[dev]'
+      - run: pip install -e '.[dev,postgres]'
       - name: Verify the committed HPC artifacts against their SHA256
         run: python -m scripts.verify_artifacts
       - run: ruff format --check backend climate_engine chatbot scripts
       - run: ruff check backend climate_engine chatbot scripts
       - run: mypy backend climate_engine chatbot
       - run: pytest -q
+        env:
+          TEST_POSTGRES_URL: postgresql://icpac_test:local-ci-test-only@127.0.0.1:5432/icpac_test
+      - name: Test PowerShell deployment guards without cloud access
+        shell: pwsh
+        run: ./deploy/azure/tests/backend.Tests.ps1
       - uses: pnpm/action-setup@v4
         with: {version: '11.19.0'}
       - uses: actions/setup-node@v4

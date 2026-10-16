@@ -1,10 +1,11 @@
 "use client";
 /**
- * Site shell after www.icpac.net: the IGAD seal and ICPAC name over a satellite image
- * under a green veil, utility links (status, search, run forecast), the uppercase menu
- * with drop-down panels, the page banner and the footer.
+ * Site shell: the organisation bar (service status, icpac.net), the white header with the
+ * IGAD seal, the service's name and search, the green menu bar with drop-down panels, the
+ * page header and the footer.
  */
 import Link from "next/link";
+import BulletinAccess from "@/components/bulletin-access";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
@@ -15,7 +16,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { ChevronDown, Menu as MenuIcon, Search, X } from "lucide-react";
+import {
+  ChevronDown,
+  ExternalLink,
+  Menu as MenuIcon,
+  Search,
+  X,
+} from "lucide-react";
 import { BannerSlot } from "@/components/banner";
 import { cx } from "@/components/ui";
 import { MENUS, ROUTES, findRoute, href, menuRoutes } from "@/features/routes";
@@ -210,7 +217,7 @@ function StatusDot({ health }: { health: Loaded<Health> }) {
         height: 9,
         borderRadius: "50%",
         background: colour,
-        boxShadow: "0 0 0 3px rgba(255,255,255,.18)",
+        boxShadow: "0 0 0 2px rgba(255,255,255,.14)",
       }}
     />
   );
@@ -274,7 +281,13 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [mobile, setMobile] = useState(false);
   const [search, setSearch] = useState(false);
   const [slot, setSlot] = useState<HTMLElement | null>(null);
+  const [accessVersion, setAccessVersion] = useState(0);
   const nav = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const changed = () => setAccessVersion((v) => v + 1);
+    window.addEventListener("staff-access", changed);
+    return () => window.removeEventListener("staff-access", changed);
+  }, []);
 
   const refresh = useCallback(() => {
     config.reload();
@@ -319,29 +332,48 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         Skip to content
       </a>
       <header className={cx("site-top", home && "home")}>
+        <div className="topbar">
+          <div className="wrap">
+            <span className="topbar-org">
+              IGAD Climate Prediction and Applications Centre · WMO Regional
+              Climate Centre for Eastern Africa
+            </span>
+            <div className="topbar-links">
+              <Link href="/system">
+                Service status <StatusDot health={health} />
+              </Link>
+              <a href="https://www.icpac.net" target="_blank" rel="noreferrer">
+                icpac.net <ExternalLink size={12} aria-hidden />
+              </a>
+            </div>
+          </div>
+        </div>
         <div className="wrap brandbar">
           <Link
             className="brand"
             href="/"
             aria-label="ICPAC Week-2 forecasts, home"
           >
-            <img src="/igad-seal-white.png" alt="" width={74} height={74} />
-            <div>
+            <img src="/igad-seal.png" alt="" width={54} height={54} />
+            <div className="brand-name">
               <b>ICPAC</b>
               <small>IGAD Climate Prediction and Applications Centre</small>
             </div>
+            <div className="brand-product">
+              Week-2 Rainfall Forecasts
+              <small>Days 8–14 · Eastern Africa</small>
+            </div>
           </Link>
           <div className="utility">
-            <Link className="hide-sm" href="/system">
-              Status <StatusDot health={health} />
-            </Link>
-            <button type="button" onClick={() => setSearch(true)}>
+            <button
+              type="button"
+              className="search-trigger"
+              onClick={() => setSearch(true)}
+            >
+              <Search size={16} aria-hidden />
               <span className="label">Search</span>
-              <Search size={18} aria-hidden />
+              <kbd aria-hidden>/</kbd>
             </button>
-            <Link className="pill-white hide-sm" href="/data/runs">
-              Run forecast
-            </Link>
             <button
               type="button"
               className="menu-toggle"
@@ -349,7 +381,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               aria-expanded={mobile}
               onClick={() => setMobile((m) => !m)}
             >
-              {mobile ? <X size={26} /> : <MenuIcon size={26} />}
+              {mobile ? <X size={22} /> : <MenuIcon size={22} />}
             </button>
           </div>
         </div>
@@ -382,19 +414,30 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         )}
       </header>
       <ServiceNotice health={health} />
+      <details className="wrap" style={{ paddingBlock: 12 }}>
+        <summary>Staff access</summary>
+        <BulletinAccess />
+      </details>
       <BannerSlot.Provider value={slot}>
-        <main id="content">{children}</main>
+        <main id="content" key={accessVersion}>
+          {children}
+        </main>
       </BannerSlot.Provider>
       <footer className="site-footer">
         <div className="wrap cols">
           <div className="about">
             <Link className="brand" href="/">
-              <img src="/igad-seal-white.png" alt="" width={56} height={56} />
-              <div>
+              <img src="/igad-seal-white.png" alt="" width={46} height={46} />
+              <div className="brand-name">
                 <b>ICPAC</b>
                 <small>IGAD Climate Prediction and Applications Centre</small>
               </div>
             </Link>
+            <p>
+              Week-2 (days 8–14) rainfall forecasts for the eleven member
+              states: the ECMWF ensemble, bias-corrected by ICPAC and verified
+              against CHIRPS.
+            </p>
           </div>
           <div>
             <h4>Forecasts</h4>

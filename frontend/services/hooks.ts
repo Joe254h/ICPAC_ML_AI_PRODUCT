@@ -17,6 +17,11 @@ export function useApi<T>(path: string | null): Loaded<T> {
   });
   const [tick, setTick] = useState(0);
   useEffect(() => {
+    const changed = () => setTick((t) => t + 1);
+    window.addEventListener("staff-access", changed);
+    return () => window.removeEventListener("staff-access", changed);
+  }, []);
+  useEffect(() => {
     if (path === null) {
       setState({ loading: false });
       return;

@@ -14,6 +14,7 @@ import httpx
 from backend.app.db import now
 from backend.app.schemas import ChatRequest
 from chatbot import agent
+from chatbot.budget import request_budget
 from chatbot.conversation import OperationalConversation
 from chatbot.providers import render_grounded
 from chatbot.retrieval import ReferenceIndex
@@ -27,6 +28,14 @@ REQUIRED_SENTENCES = (
     "hybrid_status",
     "metric_scope",
     "comparison_scope",
+    # The details of a forecast answer: where each rainfall class falls, the ranking, the
+    # range and the map caption go with the answer, never instead of it.
+    "class_0",
+    "class_1",
+    "class_2",
+    "rank",
+    "range",
+    "map",
 )
 # The fixed-sentence path's tools, in the words the answer shows.
 FIXED_EVIDENCE = {
@@ -55,6 +64,14 @@ def selection(body: ChatRequest) -> str | None:
     return "; ".join(parts) or None
 
 
+GENERAL_UNAVAILABLE = (
+    "I can't answer that just now: questions outside the forecast need the AI assistant, which "
+    "is not available at the moment. Questions about this week's "
+    'forecast still work, for example "Explain the forecast for Kenya", "Show the rainfall map '
+    'for Kenya", "Has this forecast been verified?" or "Draft the weekly bulletin".'
+)
+
+
 def plain_reason(exc: Exception) -> str:
     """Why the language model did not answer, in words for the person asking."""
     if isinstance(exc, agent.Ungrounded):
@@ -72,6 +89,15 @@ def plain_reason(exc: Exception) -> str:
     return "the assistant could not finish its answer"
 
 
+def provider_said(exc: Exception) -> str | None:
+    """The provider's own words when it refused, for the System page."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return agent.provider_message(exc.response.text)
+    if isinstance(exc, anthropic.APIStatusError) and exc.body:
+        return agent.provider_message(json.dumps(exc.body))
+    return None
+
+
 def model_name(model) -> str:
     return str(getattr(model, "model", "") or "the language model")
 
@@ -81,12 +107,17 @@ class Copilot:
         self.platform = platform
         self.references = ReferenceIndex()
 
-    def answer(self, body: ChatRequest) -> dict:
+    @request_budget
+    def answer(self, body: ChatRequest, owner: str | None = None) -> dict:
         session: dict = (
             self.platform.repo.get("chat_session", body.session_id)
             if body.session_id
             else {"messages": [], "created_at": now(), "title": body.message[:80]}
         )
+        if owner is not None:
+            if body.session_id and session.get("owner") != owner:
+                raise KeyError(body.session_id)
+            session["owner"] = owner
         fallback = None
         reason = None
         try:
@@ -131,7 +162,7 @@ class Copilot:
                     f"shown instead ({type(exc).__name__})."
                 )
                 reason = plain_reason(exc)
-                agent.record_outcome(model_name(model), False, reason)
+                agent.record_outcome(model_name(model), False, reason, provider_said(exc))
         return self._fixed(body, session, fallback, reason)
 
     def _fixed(
@@ -144,6 +175,10 @@ class Copilot:
         if "get_glossary" in tools:
             references = [cited(self.references.get("glossary")), *references[:2]]
         sentences = evidence.pop("sentences")
+        if list(sentences) == ["help"]:
+            # A general question ("what is love?") needs the language model itself, which
+            # did not answer or is not set up.
+            sentences = {"general": GENERAL_UNAVAILABLE}
         required = [key for key in REQUIRED_SENTENCES if key in sentences]
         rendered = render_grounded(body.message, sentences, references, history, required)
         response = {
@@ -169,6 +204,7 @@ class Copilot:
         ]
         session["updated_at"] = now()
         session.setdefault("title", body.message[:80])
+        session.pop("archived_at", None)  # a conversation taken up again is back in the list
         record = self.platform.repo.save("chat_session", session, body.session_id)
         self.platform.repo.audit(
             "copilot_answer",

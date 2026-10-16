@@ -3,14 +3,19 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   ArrowDown,
+  ArrowLeft,
   ArrowUp,
+  Ellipsis,
   FileText,
   LoaderCircle,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
   SquarePen,
+  Trash2,
 } from "lucide-react";
 import { Button, Notice, PageBanner } from "@/components/ui";
 import { cx } from "@/components/ui";
@@ -141,6 +146,13 @@ export default function Copilot() {
   // drawer on narrow ones.
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyHidden, setHistoryHidden] = useState(false);
+  // Archived conversations: out of the list, kept until deleted.
+  const [archived, setArchived] = useState<ChatSession[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
+  /** The conversation whose options menu is open. */
+  const [menu, setMenu] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<ChatSession | null>(null);
+  const [removing, setRemoving] = useState(false);
   const stream = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const stickToBottom = useRef(true);
@@ -218,6 +230,29 @@ export default function Copilot() {
   }, []);
 
   useEffect(() => {
+    if (!menu) return;
+    const outside = (e: PointerEvent) => {
+      const target = e.target as Element | null;
+      if (!target?.closest(".history-menu, .history-more")) setMenu(null);
+    };
+    const escape = (e: KeyboardEvent) => e.key === "Escape" && setMenu(null);
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [menu]);
+
+  useEffect(() => {
+    if (!deleting) return;
+    const escape = (e: KeyboardEvent) =>
+      e.key === "Escape" && !removing && setDeleting(null);
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [deleting, removing]);
+
+  useEffect(() => {
     if (stickToBottom.current && stream.current)
       stream.current.scrollTop = stream.current.scrollHeight;
   }, [messages, pending, restoring]);
@@ -241,6 +276,61 @@ export default function Copilot() {
       setError((e as Error).message);
     } finally {
       setRestoring(false);
+    }
+  }
+
+  const newest = (a: ChatSession, b: ChatSession) =>
+    (b.updated_at ?? b.created_at).localeCompare(a.updated_at ?? a.created_at);
+
+  async function openArchived(open: boolean) {
+    setMenu(null);
+    setShowArchived(open);
+    if (!open) return;
+    try {
+      setArchived(await request<ChatSession[]>("/chat/sessions?archived=true"));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function archive(item: ChatSession, value: boolean) {
+    setMenu(null);
+    setError("");
+    try {
+      await request(
+        `/chat/sessions/${encodeURIComponent(item.id)}/archive?archived=${value}`,
+        { method: "POST" },
+      );
+      const moved = { ...item, archived: value };
+      if (value) {
+        setSessions((old) => old.filter((s) => s.id !== item.id));
+        setArchived((old) => [moved, ...old].sort(newest));
+        if (item.id === session) newConversation();
+      } else {
+        setArchived((old) => old.filter((s) => s.id !== item.id));
+        setSessions((old) => [moved, ...old].sort(newest));
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function remove(item: ChatSession) {
+    setRemoving(true);
+    setError("");
+    try {
+      await request(`/chat/sessions/${encodeURIComponent(item.id)}`, {
+        method: "DELETE",
+      });
+      setSessions((old) => old.filter((s) => s.id !== item.id));
+      setArchived((old) => old.filter((s) => s.id !== item.id));
+      if (item.id === session) newConversation();
+      setDeleting(null);
+    } catch (e) {
+      setError((e as Error).message);
+      setDeleting(null);
+    } finally {
+      setRemoving(false);
     }
   }
 
@@ -300,6 +390,8 @@ export default function Copilot() {
           ...old.filter((s) => s.id !== answer.session_id),
         ];
       });
+      // Asking in an archived conversation brings it back to the list.
+      setArchived((old) => old.filter((s) => s.id !== answer.session_id));
     } catch (e) {
       setMessages((old) => old.slice(0, -1));
       setInput((draft) => draft || message);
@@ -323,6 +415,8 @@ export default function Copilot() {
       : forecast
         ? [forecast.valid_start, forecast.valid_end]
         : null;
+
+  const shown = showArchived ? archived : sessions.slice(0, 50);
 
   const startNew = () => {
     newConversation();
@@ -373,32 +467,112 @@ export default function Copilot() {
                 <PanelLeftClose size={19} />
               </button>
             </div>
-            <h2 className="history-heading">Conversations</h2>
-            {!sessions.length ? (
-              <p className="history-empty">Your conversations are kept here.</p>
+            <h2 className="history-heading">
+              {showArchived ? "Archived conversations" : "Conversations"}
+            </h2>
+            {!shown.length ? (
+              <p className="history-empty">
+                {showArchived
+                  ? "No archived conversations."
+                  : "Your conversations are kept here."}
+              </p>
             ) : (
-              <nav className="history-list" aria-label="Saved conversations">
-                {sessions.slice(0, 20).map((item) => (
-                  <button
+              <nav
+                className="history-list"
+                aria-label={
+                  showArchived
+                    ? "Archived conversations"
+                    : "Saved conversations"
+                }
+              >
+                {shown.map((item) => (
+                  <div
                     key={item.id}
-                    type="button"
-                    disabled={locked}
-                    aria-current={item.id === session ? "true" : undefined}
-                    onClick={() => {
-                      setHistoryOpen(false);
-                      openSession(item.id);
-                    }}
+                    className={cx(
+                      "history-item",
+                      menu === item.id && "menu-open",
+                    )}
                   >
-                    <span className="history-title">{item.title}</span>
-                    <span className="history-meta">
-                      {relativeDay(item.updated_at ?? item.created_at)}
-                      {" · "}
-                      {item.message_count} messages
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      className="history-open"
+                      disabled={locked}
+                      aria-current={item.id === session ? "true" : undefined}
+                      onClick={() => {
+                        setHistoryOpen(false);
+                        openSession(item.id);
+                      }}
+                    >
+                      <span className="history-title">{item.title}</span>
+                      <span className="history-meta">
+                        {relativeDay(item.updated_at ?? item.created_at)}
+                        {" · "}
+                        {item.message_count} messages
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="history-more"
+                      aria-label={`Options for ${item.title}`}
+                      title="Archive or delete"
+                      aria-haspopup="menu"
+                      aria-expanded={menu === item.id}
+                      disabled={locked}
+                      onClick={() =>
+                        setMenu((open) => (open === item.id ? null : item.id))
+                      }
+                    >
+                      <Ellipsis size={17} />
+                    </button>
+                    {menu === item.id && (
+                      <div className="history-menu" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => archive(item, !showArchived)}
+                        >
+                          {showArchived ? (
+                            <>
+                              <ArchiveRestore size={16} aria-hidden /> Restore
+                            </>
+                          ) : (
+                            <>
+                              <Archive size={16} aria-hidden /> Archive
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="danger"
+                          onClick={() => {
+                            setMenu(null);
+                            setDeleting(item);
+                          }}
+                        >
+                          <Trash2 size={16} aria-hidden /> Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 ))}
               </nav>
             )}
+            <button
+              type="button"
+              className="history-shelf"
+              onClick={() => openArchived(!showArchived)}
+            >
+              {showArchived ? (
+                <>
+                  <ArrowLeft size={16} aria-hidden /> Back to conversations
+                </>
+              ) : (
+                <>
+                  <Archive size={16} aria-hidden /> Archived conversations
+                </>
+              )}
+            </button>
           </aside>
           <section className="chat-card" aria-label="Conversation">
             <header className="chat-context">
@@ -635,6 +809,43 @@ export default function Copilot() {
           )}
         </div>
       </div>
+      {deleting && (
+        <div
+          className="modal-backdrop"
+          onClick={() => !removing && setDeleting(null)}
+        >
+          <div
+            className="modal confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="delete-title">Delete this conversation?</h2>
+            <p>
+              <strong>{deleting.title}</strong> and its messages will be deleted
+              for good. To keep it out of the list instead, archive it.
+            </p>
+            <div className="row">
+              <Button
+                variant="outline"
+                autoFocus
+                disabled={removing}
+                onClick={() => setDeleting(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                disabled={removing}
+                onClick={() => remove(deleting)}
+              >
+                {removing ? "Deleting…" : "Delete"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -42,16 +42,20 @@ test("a bulletin goes from draft to review, approval and publication", async ({
   page,
 }) => {
   await page.goto("/bulletin");
+  await page.getByText("Staff access", { exact: true }).click();
   await page
-    .getByLabel("Bulletin operator access key")
+    .getByLabel("Staff access key")
     .fill("test-bulletin-operator-key-00000000");
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Total Rainfall" }),
   ).toBeVisible();
-  // The bulletin carries what the service has: rainfall, the member states, Somalia.
+  // The bulletin carries what the service has: rainfall, the member states and the
+  // country with the most distinctive outlook, with the reason it was chosen.
   await expect(
     page.getByRole("heading", { name: "Rainfall by Country" }),
   ).toBeVisible();
+  await expect(page.getByText(/is this week's country focus/)).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "About this forecast" }),
   ).toBeVisible();
@@ -81,9 +85,11 @@ test("a bulletin is approved and published from the emailed links", async ({
   page,
 }) => {
   await page.goto("/bulletin");
+  await page.getByText("Staff access", { exact: true }).click();
   await page
-    .getByLabel("Bulletin operator access key")
+    .getByLabel("Staff access key")
     .fill("test-bulletin-operator-key-00000000");
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
   await page.getByRole("button", { name: "Create draft for review" }).click();
   await page.waitForURL(/\/bulletins\?id=/, { timeout: 60_000 });
   await expect(
@@ -141,7 +147,7 @@ test("operations lists the weekly cycle with who ran it", async ({ page }) => {
     .filter({ hasText: "Weekly cycle" })
     .first();
   await expect(row).toContainText("complete");
-  await expect(row).toContainText("Browser forecaster");
+  await expect(row).toContainText("Joe254h");
   await row.getByRole("button", { name: "Details" }).click();
   await expect(
     page.getByRole("link", { name: "Open forecast →" }).first(),

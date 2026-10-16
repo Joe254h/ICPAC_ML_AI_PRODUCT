@@ -137,7 +137,9 @@ def test_definitions_and_unrelated_questions_get_fitting_answers(tmp_path):
     chirps = operational(copilot, "What is CHIRPS?")
     assert "rain gauges" in chirps["text"]
     other = operational(copilot, "tell me a joke")
-    assert other["tool_trace"] == [] and other["text"].startswith("I can help with")
+    # Without a language model, a general question is answered honestly, with what works.
+    assert other["tool_trace"] == [] and other["text"].startswith("I can't answer that just now")
+    assert "Explain the forecast for Kenya" in other["text"]
     assert not re.search(r"\d mm", other["text"])
     # Their own definitions keep precedence, and forecast questions are not mistaken for terms.
     assert "bias correction" in operational(copilot, "What is MBC?")["text"]
@@ -229,6 +231,10 @@ def test_opening_the_copilot_wakes_a_model_that_scales_to_zero(tmp_path, monkeyp
     assert len(calls) == 1
     # The Copilot page lists the saved conversations when it opens.
     monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
-    with TestClient(create_app(f"sqlite:///{tmp_path / 'test.db'}")) as client:
+    key = "test-chat-access-key-0000000000000000"
+    monkeypatch.setenv("BULLETIN_OPERATOR_KEY", key)
+    with TestClient(
+        create_app(f"sqlite:///{tmp_path / 'test.db'}"), headers={"Authorization": f"Bearer {key}"}
+    ) as client:
         assert client.get("/chat/sessions").json() == []
     assert len(calls) == 2

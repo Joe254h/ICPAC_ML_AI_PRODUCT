@@ -114,18 +114,41 @@ def test_rainfall_bullets_use_the_reference_wording_and_the_forecast_grid(inputs
     assert moderate == "Moderate rainfall (50-200 mm) expected over most parts of Somalia."
     assert light == "Light rainfall (less than 50 mm) expected over most parts of Kenya."
     assert sections["headline"]["text"][0] == heavy
-    somalia = sections["somalia"]
-    assert somalia["leads"] == [
+    # The country focus: heavy rainfall decides, and only Somalia has it.
+    focus = sections["focus"]
+    assert focus["title"] == "Country Focus: Somalia" and focus["map_country"] == "Somalia"
+    assert focus["why"].startswith(
+        "Somalia is this week's country focus: 40% of its area is expected to receive heavy "
+        "rainfall (above 200 mm), the only member state where it occurs over a wide area"
+    )
+    assert focus["leads"] == [
         "Heavy rainfall of above 200mm",
         "Moderate rainfall",
         "Light rainfall",
     ]
     assert (
-        somalia["text"][0]
-        == "Heavy rainfall of above 200mm expected over northern parts of Somalia."
+        focus["text"][0] == "Heavy rainfall of above 200mm expected over northern parts of Somalia."
     )
-    assert somalia["text"][2] == "Light rainfall not expected over Somalia."
-    assert somalia["map_country"] == "Somalia"
+    assert focus["text"][2] == "Light rainfall not expected over Somalia."
+
+
+def test_the_country_focus_is_the_most_distinctive_outlook_and_says_why():
+    lat = np.round(np.arange(-5.0, 12.01, 0.1), 3)
+    lon = np.round(np.arange(33.0, 52.01, 0.1), 3)
+    lat2, _ = np.meshgrid(lat, lon, indexing="ij")
+    masks = weekly.country_masks(weekly.Grid(np.zeros(lat2.shape), lat, lon))
+    values = np.full(lat2.shape, np.nan)
+    for country in ("Kenya", "Somalia", "Ethiopia"):
+        values[masks[country]] = 20.0  # light everywhere
+    # Moderate rain over most of Kenya and a little of Ethiopia: Kenya stands out.
+    values[masks["Kenya"] & (lat2 < 2.0)] = 80.0
+    values[masks["Ethiopia"] & (lat2 > 11.0)] = 80.0
+    grid = weekly.Grid(values, lat, lon)
+    focus = weekly.country_focus(grid, {k: masks[k] for k in ("Kenya", "Somalia", "Ethiopia")})
+    assert focus is not None and focus.country == "Kenya"
+    assert focus.rainfall_class == "moderate" and focus.share > 0.5
+    assert "the largest share of the 2 member states where it occurs" in focus.why
+    assert "(across the region:" in focus.why
 
 
 def test_the_bulletin_carries_what_the_service_has(inputs):
@@ -135,7 +158,7 @@ def test_the_bulletin_carries_what_the_service_has(inputs):
         "decision_support",
         "rainfall",
         "countries",
-        "somalia",
+        "focus",
         "about",
     ]
     sections = {s["key"]: s for s in found}
@@ -238,10 +261,11 @@ def test_word_draft_keeps_the_template_and_its_bold_leads(inputs, monkeypatch):
         ):
             assert old not in joined
         assert text.index("Total Rainfall") < text.index("Rainfall by Country")
-        assert text.index("Rainfall by Country") < text.index("Somalia ")
-        assert text.index("Somalia ") < text.index("About this Forecast")
+        assert text.index("Rainfall by Country") < text.index("Country Focus: Somalia")
+        assert text.index("Country Focus: Somalia") < text.index("About this Forecast")
+        assert any(t.startswith("Somalia is this week's country focus:") for t in text)
         assert "Somalia" in text and "150.5" in text  # the member states' table
-        assert document.count(b"<w:drawing>") == 2  # the regional and Somalia rainfall maps
+        assert document.count(b"<w:drawing>") == 2  # the regional and the focus country's maps
         header = "".join(t for p in paragraphs(output.read("word/header1.xml")) for t, _ in p)
         assert header.startswith("DRAFT - NOT APPROVED · ECMWF ensemble + MBC + AI/ML")
         assert "SYNTHETIC TEST INPUT" in header and "reviewed_candidate" not in header

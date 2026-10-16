@@ -73,7 +73,11 @@ function Ecmwf({ source }: { source?: DataSource }) {
           { label: "ECMWF ensemble" },
         ]}
         subtitle="The forecast input: the real-time ECMWF ensemble from ECMWF Open Data, 00 UTC run, 0.25°, 15-day range. Only the Week-2 rainfall is downloaded."
-        facts={["50 ensemble members", "Days 8–14", "Open licence (CC BY 4.0)"]}
+        facts={[
+          "10 ensemble members, as in training",
+          "Days 8–14",
+          "Open licence (CC BY 4.0)",
+        ]}
       />
       <div className="grid-2">
         <Card
@@ -117,9 +121,9 @@ function Ecmwf({ source }: { source?: DataSource }) {
         <Card title="How it is processed">
           <ol style={{ margin: 0, paddingLeft: 22, display: "grid", gap: 8 }}>
             <li>
-              Only the total rainfall of the 50 ensemble members at days 7 and
-              14 is downloaded, as the model was trained; nothing else is
-              fetched.
+              Only the total rainfall of ensemble members 1–10 (the size of the
+              ensemble the model was trained on) at days 7 and 14 is downloaded,
+              as the model was trained; nothing else is fetched.
             </li>
             <li>
               Each field is checked: the right variable, date, run, member,

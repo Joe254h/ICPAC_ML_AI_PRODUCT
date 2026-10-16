@@ -15,8 +15,6 @@ import {
   CloudRain,
   Cpu,
   FileText,
-  Map as MapIcon,
-  MessagesSquare,
   Play,
   Satellite,
   Target,
@@ -63,16 +61,12 @@ function useBulletin(detail?: ForecastDetail) {
 // ------------------------------------------------------------------ hero
 
 /** Room for the outlook panel: the region sits to its right on wide screens. */
+/** The key figures overlap the bottom of the hero on wide screens; the panel and the
+ * legend keep their own space clear (``data-map-reserve``). */
 function heroPadding() {
   const width = typeof window === "undefined" ? 1440 : window.innerWidth;
-  if (width < 900) return { top: 215, bottom: 140, left: 16, right: 16 };
-  const panel = Math.max(0, (width - 1200) / 2) + 24 + 440 + 40;
-  return {
-    top: 40,
-    bottom: 120,
-    left: Math.min(panel, width * 0.5),
-    right: 70,
-  };
+  const bottom = width < 900 ? 16 : 70;
+  return { top: 16, bottom, left: 16, right: 16 };
 }
 
 function OutlookHero({
@@ -95,7 +89,7 @@ function OutlookHero({
     return (
       <section className="outlook-hero still">
         <div className="wrap outlook-inner">
-          <div className="outlook-panel">
+          <div className="outlook-panel" data-map-reserve="left top">
             <p className="outlook-eyebrow">
               Week-2 rainfall outlook · days 8–14
             </p>
@@ -154,7 +148,7 @@ function OutlookHero({
         className="outlook-map"
       >
         <div className="wrap outlook-inner">
-          <div className="outlook-panel">
+          <div className="outlook-panel" data-map-reserve="left top">
             <p className="outlook-eyebrow">
               Week-2 rainfall outlook · days 8–14
             </p>
@@ -193,7 +187,7 @@ function OutlookHero({
             </div>
           </div>
         </div>
-        <div className="outlook-legend">
+        <div className="outlook-legend" data-map-reserve="right bottom">
           <LegendBar
             title="Week-2 total rainfall"
             unit="mm"
@@ -436,7 +430,7 @@ function ObservedRainfall() {
                 return row ? `Mean ${num(row.mean_mm)} mm this dekad` : null;
               }}
             >
-              <div className="map-legend-corner">
+              <div className="map-legend-corner" data-map-reserve="bottom left">
                 <LegendBar
                   title="Dekad total"
                   unit="mm"
@@ -533,20 +527,22 @@ function Pipeline({ detail }: { detail?: ForecastDetail }) {
   return (
     <section className="section tinted">
       <div className="wrap">
-        <p className="kicker-text center">Operational chain</p>
-        <h2 className="section-title">From the ensemble to the bulletin</h2>
-        <p className="section-sub">
+        <p className="kicker-text">Operational chain</p>
+        <h2 className="section-title left">
+          From the ensemble to the bulletin
+        </h2>
+        <p className="section-sub left">
           Every step runs in this service and is recorded; the state of each is
           shown live.
         </p>
         <ol className="pipeline">
-          {steps.map((step) => {
+          {steps.map((step, index) => {
             const State = Icon[step.state];
             return (
               <li key={step.title} className={step.state}>
                 <Link href={step.href}>
-                  <span className="pipe-icon">
-                    <step.icon size={22} aria-hidden />
+                  <span className="pipe-step">
+                    <step.icon size={16} aria-hidden /> Step {index + 1}
                   </span>
                   <strong>{step.title}</strong>
                   <span className="pipe-text">{step.text}</span>
@@ -568,72 +564,6 @@ function Pipeline({ detail }: { detail?: ForecastDetail }) {
   );
 }
 
-// ------------------------------------------------------------------ products
-
-const PRODUCTS = [
-  {
-    title: "Week-2 forecast",
-    text: "Days 8–14 rainfall for the region and every member state, with its layers and figures.",
-    href: "/forecasts",
-    icon: CloudRain,
-  },
-  {
-    title: "Rainfall maps",
-    text: "The bulletin's maps for the region and each country, ready to download.",
-    href: "/maps/rainfall",
-    icon: MapIcon,
-  },
-  {
-    title: "Rainfall monitoring",
-    text: "Observed rainfall of the latest dekad from CHIRPS, by country.",
-    href: "/monitoring",
-    icon: BarChart3,
-  },
-  {
-    title: "Verification",
-    text: "How each forecast compared with observed rainfall, pooled by season.",
-    href: "/verification",
-    icon: Target,
-  },
-  {
-    title: "Weekly bulletin",
-    text: "The ICPAC bulletin as a Word document and web page, released after review.",
-    href: "/bulletin",
-    icon: FileText,
-  },
-  {
-    title: "Forecaster Copilot",
-    text: "Ask about this week's forecast, or about weather and climate in general.",
-    href: "/copilot",
-    icon: MessagesSquare,
-  },
-];
-
-function Products() {
-  return (
-    <section className="section">
-      <div className="wrap">
-        <p className="kicker-text center">Products and services</p>
-        <h2 className="section-title">Everything in one place</h2>
-        <div className="product-grid">
-          {PRODUCTS.map(({ title, text, href, icon: Icon }) => (
-            <Link key={title} href={href} className="product-card">
-              <span className="product-icon">
-                <Icon size={24} aria-hidden />
-              </span>
-              <strong>{title}</strong>
-              <span>{text}</span>
-              <span className="product-more">
-                Open <ArrowRight size={14} />
-              </span>
-            </Link>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 export default function Home() {
   const latest = useApi<ForecastDetail>("/forecasts/latest");
   const bulletin = useBulletin(latest.data);
@@ -647,7 +577,6 @@ export default function Home() {
       )}
       <ObservedRainfall />
       <Pipeline detail={latest.data} />
-      <Products />
     </>
   );
 }

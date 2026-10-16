@@ -3,17 +3,50 @@ name: Publish backend image
 # (ghcr.io/<owner>/icpac-backend). Images from this public repository are public, so a
 # cloud host (Azure Container Apps, Cloud Run) pulls them without credentials.
 on:
-  push: {branches: [main]}
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
-permissions: {contents: read, packages: write}
+    inputs:
+      commit:
+        description: Full source SHA with passing CI and Container build
+        required: true
+permissions: {contents: read, packages: write, actions: read}
 concurrency:
   group: publish-backend
   cancel-in-progress: true
 jobs:
   publish:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
+      - name: Require passing checks for the exact source revision
+        id: source
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.eventName === 'workflow_dispatch'
+              ? context.payload.inputs.commit : context.payload.workflow_run.head_sha;
+            if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('A full source SHA is required');
+            // Container build can finish after CI; wait for its result before publishing.
+            for (let attempt = 0; attempt < 180; attempt++) {
+              const {data} = await github.rest.actions.listWorkflowRunsForRepo({
+                ...context.repo, head_sha: sha, per_page: 100
+              });
+              const checks = ['CI', 'Container build'].map(name =>
+                data.workflow_runs.filter(r => r.name === name).sort((a,b) => b.run_number-a.run_number)[0]);
+              if (checks.some(r => r?.status === 'completed' && r.conclusion !== 'success'))
+                throw new Error('Required checks failed for ' + sha);
+              if (checks.every(r => r?.status === 'completed' && r.conclusion === 'success')) {
+                core.setOutput('sha', sha); return;
+              }
+              await new Promise(resolve => setTimeout(resolve, 10000));
+            }
+            throw new Error('Timed out waiting for exact source checks');
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.sha }}
       - name: Image name (lowercase owner)
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/icpac-backend" >> "$GITHUB_ENV"
       - uses: docker/login-action@v3
@@ -28,10 +61,10 @@ jobs:
           push: true
           build-args: |
             PIP_EXTRAS=postgres,azure
-            GIT_COMMIT=${{ github.sha }}
+            GIT_COMMIT=${{ steps.source.outputs.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
           tags: |
             ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:${{ steps.source.outputs.sha }}

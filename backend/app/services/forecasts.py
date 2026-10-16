@@ -166,6 +166,10 @@ class ForecastService:
             raise ValueError(f"{record['model_id']} is a demonstration model on the synthetic grid")
         if record["status"] not in {"production", "candidate", "experimental"}:
             raise ValueError(f"{record['model_id']} is {record['status']} and cannot forecast")
+        if os.getenv("RELEASE_MODE", "evaluation") == "production":
+            if record["status"] != "production":
+                raise ValueError("Production releases can only run the production model")
+            ModelRegistry(self.platform)._check_production_gate(record)
         return record
 
     # ------------------------------------------------------------------ ECMWF input
@@ -725,7 +729,7 @@ class ForecastService:
         if len(records) < MAP_MIN_CASES[metric]:
             raise Unavailable(
                 f"{VERIFICATION_MAPS[metric][1]} needs {MAP_MIN_CASES[metric]} verified "
-                f"forecasts of {model_id}; {len(records)} available"
+                f"forecasts of the model in use; {len(records)} available"
             )
         key = (
             metric,
@@ -776,7 +780,7 @@ class ForecastService:
         else:
             values = stats[variant].metric(metric)
         label = {"raw": "RAW ECMWF", "mbc": "MBC", "hybrid": method}[variant]
-        note = f"{len(records)} verified forecasts of {model_id} against CHIRPS | cell-based\n" + (
+        note = f"{len(records)} verified weekly forecasts against CHIRPS | cell-based\n" + (
             "Includes the protected 2022-2024 test period: display only"
             if include_protected
             else f"Excludes the protected 2022-2024 test period ({skipped} forecasts)"

@@ -1,25 +1,106 @@
-"""Fail-closed operator access for manual bulletin writes.
+"""Named, revocable staff credentials; public proxies never supply credentials."""
 
-Personal emailed decisions use their separate, single-use signed tokens. The operator
-credential is supplied by the caller, never attached by a public frontend proxy.
-"""
-
+import json
 import os
 import secrets
+import threading
+from dataclasses import dataclass
 
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 
 
-def require_bulletin_operator(authorization: str | None = Header(default=None)) -> None:
-    expected = os.getenv("BULLETIN_OPERATOR_KEY", "")
-    if len(expected) < 32:
-        raise HTTPException(503, "Manual bulletin access is not configured; contact the operator.")
+@dataclass(frozen=True)
+class Principal:
+    name: str
+    roles: frozenset[str]
+
+
+def credentials() -> list[dict]:
+    try:
+        raw = os.getenv("STAFF_CREDENTIALS", "")
+        records = json.loads(raw) if raw else []
+        if not raw and os.getenv("BULLETIN_OPERATOR_KEY"):
+            records = [
+                {
+                    "name": os.getenv("OPERATOR_NAME", "Joe254h"),
+                    "key": os.environ["BULLETIN_OPERATOR_KEY"],
+                    "roles": ["admin"],
+                }
+            ]
+        if not isinstance(records, list):
+            raise ValueError("Invalid credentials")
+        names: set[str] = set()
+        keys: set[str] = set()
+        for item in records:
+            name, key, roles = item["name"], item["key"], item["roles"]
+            if (
+                not isinstance(name, str)
+                or not 2 <= len(name.strip()) <= 80
+                or name != name.strip()
+                or name in names
+                or not isinstance(key, str)
+                or len(key) < 32
+                or key in keys
+                or not isinstance(roles, list)
+                or not roles
+                or not set(roles) <= {"admin", "operator", "reviewer", "publisher", "chat"}
+            ):
+                raise ValueError("Invalid credential")
+            names.add(name)
+            keys.add(key)
+        return records
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(503, "Staff access is not configured correctly.") from None
+
+
+def principal(authorization: str | None = Header(default=None)) -> Principal:
+    records = credentials()
+    if not records:
+        raise HTTPException(503, "Staff access is not configured; contact the operator.")
     scheme, _, supplied = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or not secrets.compare_digest(
-        supplied.encode(), expected.encode()
-    ):
+    for record in records:
+        if scheme.lower() == "bearer" and secrets.compare_digest(
+            supplied.encode(), record["key"].encode()
+        ):
+            return Principal(record["name"], frozenset(record["roles"]))
+    raise HTTPException(
+        401, "Enter your staff access key to continue.", headers={"WWW-Authenticate": "Bearer"}
+    )
+
+
+def require_role(role: str):
+    def allowed(user: Principal = Depends(principal)) -> Principal:
+        if "admin" not in user.roles and role not in user.roles:
+            raise HTTPException(403, f"The {role} role is required.")
+        return user
+
+    return allowed
+
+
+require_operator = require_role("operator")
+require_reviewer = require_role("reviewer")
+require_publisher = require_role("publisher")
+require_admin = require_role("admin")
+require_chat = require_role("chat")
+require_bulletin_operator = require_operator
+
+
+def owned_session(repo, session_id: str, user: Principal) -> dict:
+    session = repo.get("chat_session", session_id)
+    if session.get("owner") != user.name:
+        raise KeyError(session_id)
+    return session
+
+
+CHAT_SLOTS = threading.BoundedSemaphore(2)
+
+
+def chat_slot():
+    if not CHAT_SLOTS.acquire(blocking=False):
         raise HTTPException(
-            401,
-            "Operator access is required. Use your personal email link for review decisions.",
-            headers={"WWW-Authenticate": "Bearer"},
+            429, "The assistant is busy; try again shortly.", headers={"Retry-After": "10"}
         )
+    try:
+        yield
+    finally:
+        CHAT_SLOTS.release()

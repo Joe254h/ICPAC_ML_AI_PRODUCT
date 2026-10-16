@@ -60,7 +60,7 @@ test("posts JSON bodies", async () => {
   );
 });
 
-test("operator credentials are sent only with manual bulletin writes", async () => {
+test("staff credentials cover chat and manual actions, while email links use their token", async () => {
   const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
   vi.stubGlobal("fetch", fetch);
   setBulletinOperatorKey("private-test-key");
@@ -70,5 +70,5 @@ test("operator credentials are sent only with manual bulletin writes", async () 
   const headers = fetch.mock.calls.map((call) => call[1].headers);
   expect(headers[0].Authorization).toBe("Bearer private-test-key");
   expect(headers[1].Authorization).toBeUndefined();
-  expect(headers[2].Authorization).toBeUndefined();
+  expect(headers[2].Authorization).toBe("Bearer private-test-key");
 });

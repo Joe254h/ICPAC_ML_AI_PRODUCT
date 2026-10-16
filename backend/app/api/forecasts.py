@@ -4,6 +4,7 @@ runs, packages, maps, countries and verification."""
 from fastapi import Depends, FastAPI, HTTPException, Path, Query
 from fastapi.responses import Response
 
+from backend.app.api.access import Principal, require_operator
 from backend.app.schemas import (
     FORECAST_ID,
     ForecastRunRequest,
@@ -90,16 +91,20 @@ def install(app: FastAPI, dependency) -> None:
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
-    @app.get("/operations")
+    @app.get("/operations", dependencies=[Depends(require_operator)])
     def operations(platform=Depends(dependency)) -> list[dict]:
         return OperationService(platform).list()
 
     @app.post("/operations", status_code=202)
-    def start_operation(body: OperationRequest, platform=Depends(dependency)) -> dict:
+    def start_operation(
+        body: OperationRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_operator),
+    ) -> dict:
         """Start a background task (download, run, verify or the weekly cycle)."""
-        return OperationService(platform).start(body)
+        return OperationService(platform).start(body.model_copy(update={"actor": user.name}))
 
-    @app.get("/operations/{operation_id}")
+    @app.get("/operations/{operation_id}", dependencies=[Depends(require_operator)])
     def operation(operation_id: str, platform=Depends(dependency)) -> dict:
         return OperationService(platform).get(operation_id)
 
@@ -114,12 +119,22 @@ def install(app: FastAPI, dependency) -> None:
         return ForecastService(platform).latest()
 
     @app.post("/forecasts/run", status_code=201)
-    def run(body: ForecastRunRequest, platform=Depends(dependency)) -> dict:
-        return ForecastService(platform).run(body)
+    def run(
+        body: ForecastRunRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_operator),
+    ) -> dict:
+        return ForecastService(platform).run(body.model_copy(update={"actor": user.name}))
 
     @app.post("/forecasts/import", status_code=201)
-    def import_package(body: PackageImportRequest, platform=Depends(dependency)) -> dict:
-        return ForecastService(platform).import_package(body)
+    def import_package(
+        body: PackageImportRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_operator),
+    ) -> dict:
+        return ForecastService(platform).import_package(
+            body.model_copy(update={"actor": user.name})
+        )
 
     @app.get("/forecasts/{forecast_id}")
     def forecast(forecast_id: str = ForecastId, platform=Depends(dependency)) -> dict:
@@ -174,9 +189,14 @@ def install(app: FastAPI, dependency) -> None:
 
     @app.post("/forecasts/{forecast_id}/verification")
     def verify_forecast(
-        body: VerificationRequest, forecast_id: str = ForecastId, platform=Depends(dependency)
+        body: VerificationRequest,
+        forecast_id: str = ForecastId,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_operator),
     ) -> dict:
-        return ForecastService(platform).verify(forecast_id, body)
+        return ForecastService(platform).verify(
+            forecast_id, body.model_copy(update={"actor": user.name})
+        )
 
     @app.get("/forecasts/{forecast_id}/bulletin")
     def forecast_bulletin(forecast_id: str = ForecastId, platform=Depends(dependency)) -> dict:

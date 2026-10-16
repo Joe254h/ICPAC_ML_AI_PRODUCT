@@ -27,7 +27,7 @@ import {
 
 const STEPS: Record<Variant, string[]> = {
   raw: [
-    "Download the 00 UTC ECMWF ensemble from ECMWF Open Data: total precipitation of the 50 perturbed members at 168 h and 336 h.",
+    "Download the 00 UTC ECMWF ensemble from ECMWF Open Data: total precipitation of perturbed members 1–10 (the training ensemble size) at 168 h and 336 h.",
     "Week-2 total per member = precipitation at 336 h minus precipitation at 168 h.",
     "Average the 0.25° fields to the 1.5° grid of the ECMWF S2S forecasts the models were trained on, then interpolate bilinearly to the 0.05° ICPAC grid.",
     "Ensemble mean (the raw forecast) and spread over the members.",

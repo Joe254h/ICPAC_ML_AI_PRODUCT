@@ -59,7 +59,7 @@ GROUP=${GROUP:-icpac}
 APP=${APP:-icpac-api}
 ENVIRONMENT=${ENVIRONMENT:-icpac-env}
 IMAGE=${IMAGE:-}
-EXPECTED=""
+EXPECTED="${EXPECTED_COMMIT:-}"
 DATABASE_URL=${DATABASE_URL:-}
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   # Claude replaces every earlier Copilot setting (see docs/chatbot.md).
@@ -226,11 +226,17 @@ import sys
 import time
 
 e = os.environ
+if not e["DATABASE_URL"].startswith(("postgres://", "postgresql://", "postgresql+psycopg://")):
+    raise SystemExit("Persistent PostgreSQL DATABASE_URL is required for Azure deployments")
 env = [
     # A changed value makes every run a new revision, which pulls the latest image
     # (express environments do not accept revision suffixes).
     {"name": "DEPLOYED_AT", "value": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
     {"name": "AUTO_REGISTER_MODELS", "value": "true"},
+    {"name": "CLOUD_DEPLOYMENT", "value": "true"},
+    {"name": "OPERATION_WORKER_ENABLED", "value": "true"},
+    {"name": "RELEASE_MODE", "value": e.get("RELEASE_MODE", "evaluation")},
+    {"name": "LLM_TOTAL_SECONDS", "value": "120"},
     # Packages are written to the container disk and copied to Blob Storage, from which a
     # restarted replica fetches them again.
     {"name": "PACKAGE_STORE_CONNECTION", "secretRef": "package-store"},
@@ -289,6 +295,7 @@ for name, reference in (
     ("SMTP_PASSWORD", "smtp-password"),
     ("EMAIL_ACTION_SECRET", "email-action-secret"),
     ("BULLETIN_OPERATOR_KEY", "bulletin-operator-key"),
+    ("STAFF_CREDENTIALS", "staff-credentials"),
 ):
     deployed = current.get(name) or {}
     value = (e.get(name) or "").strip() or stored.get(deployed.get("secretRef", reference)) or deployed.get("value")
@@ -299,6 +306,8 @@ for name, reference in (
     if value:
         secrets.append({"name": reference, "value": value})
         env.append({"name": name, "secretRef": reference})
+if not any(s["name"] in {"BULLETIN_OPERATOR_KEY", "STAFF_CREDENTIALS"} for s in env):
+    raise SystemExit("Staff credentials are required. Use backend.ps1 to configure Joe254h securely.")
 mail = {s["name"]: s.get("value") for s in env}
 print(
     "Bulletin email: "
@@ -337,7 +346,7 @@ definition = {
                 }
             ],
             # One replica: forecasts run one at a time and the app keeps one database.
-            "scale": {"minReplicas": 0, "maxReplicas": 1},
+            "scale": {"minReplicas": 1, "maxReplicas": 1},
         },
     },
 }
@@ -399,6 +408,7 @@ if { [ -n "$EXPECTED" ] && [ "$VERSION" != "$EXPECTED" ]; } \
   az containerapp logs show --name "$APP" --resource-group "$GROUP" --type system --tail 20 \
     2>/dev/null || true
   echo "Its own log: az containerapp logs show -n $APP -g $GROUP --tail 80"
+  exit 1
 fi
 curl -fsS --max-time 60 "https://$FQDN/health" | python3 -c '
 import json, sys
@@ -408,7 +418,7 @@ for name, value in health["components"].items():
     if name.startswith(("Operational", "Model", "Database", "Storage", "ECMWF", "CHIRPS",
                         "TAMSAT", "MBC", "Copilot", "Bulletin")):
         print(f"  {name}: {value}")
-' || echo "The API is not answering yet; check: az containerapp logs show -n $APP -g $GROUP --follow"
+' || { echo "The API is not answering; deployment failed."; exit 1; }
 
 if [ -z "$DATABASE_URL" ] && [ "$KEEP_DATABASE" = false ]; then
   echo

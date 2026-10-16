@@ -1,5 +1,8 @@
 # Deployment
 
+For the existing Azure app, follow the [Azure Cloud Shell PowerShell procedure](deployment-powershell.md).
+It pins the tested commit, preserves existing configuration and checks the new revision.
+
 ```text
 GitHub (Joe254h/ICPAC_ML_AI_PRODUCT)
    │  CI: lint, types, tests, build, browser end-to-end, container build
@@ -76,8 +79,13 @@ Every weekly bulletin follows the reference's layout, fonts and wording, with wh
 service produces: the title ("Weekly Forecast for 05-12 October 2026", the week named by
 its boundary dates as in the reference's 06-13), the headline, the decision-support note,
 the regional Total Rainfall map and bullets, a table of each member state's mean, median
-and highest rainfall, the Somalia map and bullets, and "About this Forecast" (the ECMWF
-run, the method, verification and the issuer). The rainfall bullets use the reference's
+and highest rainfall, the country focus, and "About this Forecast" (the ECMWF run, the
+method, verification and the issuer). The country focus is the member state with the
+most distinctive outlook: of the heaviest rainfall class expected over a meaningful area
+(at least 12 grid cells and 1% of a country), the country where it covers the largest
+share. The bulletin says why ("Eritrea is this week's country focus: 4% of its area is
+expected to receive moderate rainfall (50-200 mm), the largest share of the 2 member
+states where it occurs") and adds that country's map and bullets. The rainfall bullets use the reference's
 classes (heavy above 200 mm, moderate 50-200 mm, light below 50 mm) and name where each
 falls ("most parts of", "northern parts of", "isolated areas in") from the share and
 position of each country's grid cells. The reference's rainfall anomaly, exceptional
@@ -116,65 +124,28 @@ Draft bulletins (Bulletin drafts) keep their frozen map in Blob Storage too
 A draft made before that, whose map was lost with the disk, is rendered again from its
 frozen selection and accepted only when the image is identical to the recorded checksum.
 
-## Backend: Azure Container Apps (Azure for Students)
+## Backend: Azure Container Apps
 
-Azure for Students (GitHub Student Developer Pack, no credit card) runs the backend on
-Container Apps, Azure's counterpart of Cloud Run. Its monthly free grant (180,000
-vCPU-seconds, 360,000 GiB-seconds, 2 million requests) covers a demonstration; the app
-scales to zero when idle.
+Use the [native PowerShell deployment guide](deployment-powershell.md) for the existing
+`icpac-api` app. Its script verifies the exact CI-tested image digest and source version,
+keeps the app in its existing environment and region, and preserves email/Copilot settings.
+The image is published after both CI and Container build succeed.
 
-1. The **Publish backend image** workflow builds `docker/backend.Dockerfile` on every push
-   to `main` and publishes `ghcr.io/joe254h/icpac-backend` (public, because the repository
-   is public). Azure Container Registry builds are not available on free-credit
-   subscriptions, so nothing is built in Azure.
-2. In [Azure Cloud Shell](https://shell.azure.com) (Bash):
+Azure deployment requires PostgreSQL, private Blob Storage and named staff credentials.
+The worker keeps one running replica to drain persisted jobs with no browser open; account
+for idle Azure compute charges. A temporary container disk is only a cache. Packages and
+frozen bulletin documents must stay in Blob Storage, and metadata and jobs in PostgreSQL.
+The release remains explicitly `evaluation` until the reviewed scientific production
+artifacts and frozen configuration are supplied. Personal email review links are preserved.
 
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/Joe254h/ICPAC_ML_AI_PRODUCT/main/deploy/azure/backend.sh -o backend.sh
-   DATABASE_URL='<Supabase connection string>' bash backend.sh
-   ```
+For Bash automation, `deploy/azure/backend.sh` requires `DATABASE_URL` and staff credentials
+(`STAFF_CREDENTIALS`, or the legacy owner key), preserves configured secrets and exits
+nonzero on a failed revision/version check. The PowerShell guide is the recommended path
+for updating this user's existing app. Inspect logs with:
 
-   The script ([deploy/azure/backend.sh](../deploy/azure/backend.sh)) creates the resource
-   group `icpac`, a storage account whose blob container `forecast-packages` holds the
-   product packages, a Container Apps environment and the app `icpac-api` (2 vCPU, 4 GiB,
-   0–1 replica). It prints the backend URL for `API_URL`. Run it again to deploy the latest
-   image; the stored database connection is kept.
-3. Settings: `LOCATION` (default `southafricanorth`; Azure for Students allows a fixed
-   list of regions, shown by `az policy assignment list --disable-scope-strict-match
-   --query "[].parameters.listOfAllowedLocations.value" -o tsv`; choose the one nearest the
-   database), `IMAGE`, `CPU` and `MEMORY`. Container Apps allow outbound HTTPS, so the
-   app downloads ECMWF Open Data, CHIRPS and TAMSAT itself; run the weekly cycle from the
-   Operations page.
-4. Bulletin approval by email (optional): give the mail server and the addresses once;
-   later runs keep them. In Cloud Shell's PowerShell, for Gmail with an app password:
-
-   ```powershell
-   $env:SMTP_HOST = "smtp.gmail.com"; $env:SMTP_PORT = "587"
-   $env:SMTP_USER = "forecasts.account@gmail.com"
-   $env:SMTP_PASSWORD = Read-Host "Gmail app password" -MaskInput
-   $env:BULLETIN_REVIEWERS = "reviewer1@icpac.net, reviewer2@icpac.net"
-   $env:BULLETIN_PUBLISHERS = "publisher@icpac.net"
-   $env:BULLETIN_DISTRIBUTION = "bulletin-list@icpac.net"
-   bash backend.sh
-   ```
-
-   The password is stored as an app secret, a link-signing secret is generated once, and
-   the links open `PUBLIC_SITE_URL` (default the Vercel site). See
-   [Bulletin approval by email](operations.md#bulletin-approval-by-email).
-
-Azure for Students creates **express** Container Apps environments, which cannot mount
-Azure Files. The app therefore needs no mounted disk: with `PACKAGE_STORE_CONNECTION` (a
-storage connection string) set, every package is copied to Blob Storage when it is
-published or verified, and a package missing from the container disk is fetched back
-([climate_engine/products/store.py](../climate_engine/products/store.py)). HPC packages
-can be uploaded to the same container (`<forecast_id>/<file>`) and registered with
-`POST /forecasts/import`.
-
-Without `DATABASE_URL` the database lives in the container and is emptied whenever the
-app scales to zero; use Supabase (below) for a lasting deployment. The first request after
-an idle period starts the app (about a minute: image pull, artifact checks, model load);
-the interface waits up to 90 s for it. Logs: `az containerapp logs show -n icpac-api -g
-icpac --follow`. Remove everything: `az group delete --name icpac`.
+```powershell
+az containerapp logs show -n icpac-api -g icpac --type system --tail 50
+```
 
 ## Backend: Google Cloud Run
 
@@ -230,34 +201,21 @@ python -m scripts.run_operational --init-date 2026-10-05 \
   --rainfall ecmwf_s2s_tp_2026-10-05.nc --pressure ecmwf_s2s_pl_2026-10-05.nc \
   --output /path/synced/to/the/RUN_ROOT/bucket/forecasts
 curl -X POST "$API_URL/forecasts/import" -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $STAFF_KEY" \
   -d '{"forecast_id": "w2-2026-10-05-xxxxxxxx", "actor": "HPC operator"}'
 ```
 
 ## Before operational use
 
-### Manual bulletin access
+### Named staff access and release gates
 
-Set `BULLETIN_OPERATOR_KEY` on the **backend** to a randomly generated secret of at least
-32 characters. For example, `python -c "import secrets; print(secrets.token_urlsafe(48))"`
-generates a suitable value. Store it as an Azure Container Apps secret and reference that
-secret from the environment variable of the same name, then deploy a new revision.
-Docker Compose reads it from the local `.env`. The Azure deployment script accepts it
-as an environment variable and preserves a previously configured value.
+Configure backend-only `STAFF_CREDENTIALS` with distinct keys and stable names for each
+person. Roles restrict forecast work, registry changes, manual review, publication,
+audit and private conversations. The authenticated identity overrides a name typed in
+an API request. Email decisions use separate single-use signed links.
+See [configuration, privacy, quotas and recovery](deployment-powershell.md#access-privacy-and-recovery).
 
-Give the secret only to trusted bulletin operators. Enter it in **Bulletin operator
-access key** on the weekly bulletin or drafts page. It stays in the tab's memory and is
-cleared by a reload or closing the tab. The frontend forwards the caller's credential;
-it never injects a backend secret into an anonymous request. Manual draft generation,
-submission, approval, rejection, publication and email resend require the credential.
-Without a configured key these routes fail closed. Personal email decisions continue to
-require their signed, expiring, single-use token and do not need this key.
-
-This is shared operator access, not individual role-based login. Only give it to people
-authorized for every manual bulletin action. Review names are still self-reported;
-per-person roles and authentication for the remaining operation/model/chat endpoints
-remain required before a public multi-user operational deployment. Use HTTPS.
-
-Authentication and role-based approval (Supabase Auth or the existing identity provider),
-TLS, backups of the database and buckets, the seven Week-2 pressure steps, and the other
-dependencies in [operational_models.md](operational_models.md#missing-dependencies).
-No credentials, keys or `.env` files belong in Git; use Vercel and Cloud Run secrets.
+`RELEASE_MODE=evaluation` is the default. A production release requires an independently
+tested production model and the frozen seven upper-air steps; startup refuses missing
+requirements. See [scientific release requirements](deployment-powershell.md#scientific-release-remains-evaluation).
+Keep database and package backups. Never commit keys or real `.env` files.

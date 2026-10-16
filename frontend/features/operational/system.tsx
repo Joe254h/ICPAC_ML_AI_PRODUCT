@@ -92,7 +92,7 @@ export default function System() {
           ]}
           subtitle="Live checks of the forecast inputs, runs, models and platform. A warning means something needs attention; an item in progress is not built yet and is not used."
           actions={
-            <Button variant="ghost-light" onClick={health.reload}>
+            <Button variant="outline" onClick={health.reload}>
               <RotateCw size={16} /> Check again
             </Button>
           }

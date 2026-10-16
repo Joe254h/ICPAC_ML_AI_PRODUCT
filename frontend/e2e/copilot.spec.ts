@@ -214,3 +214,58 @@ test("continuous chat sends on Enter, restores history and retries failures", as
   );
   expect(overflow).toBeLessThanOrEqual(1);
 });
+
+test("conversations are archived, restored and deleted", async ({ page }) => {
+  await page.goto("/copilot");
+  const input = page.getByLabel("Ask Forecaster Copilot");
+  await input.fill("What is RMSE?");
+  await input.press("Enter");
+  await expect(page.locator(".chat-message.assistant")).toHaveCount(1, {
+    timeout: 60_000,
+  });
+  const saved = page.getByRole("navigation", { name: "Saved conversations" });
+  const item = saved.locator(".history-item").first();
+  await expect(item).toContainText("What is RMSE?");
+
+  // Archive: out of the list, onto the archived shelf, and a new conversation starts.
+  await item.getByRole("button", { name: "Options for What is RMSE?" }).click();
+  await page.getByRole("menuitem", { name: "Archive" }).click();
+  await expect(saved.getByText("What is RMSE?")).toHaveCount(0);
+  await expect(page.locator(".chat-message")).toHaveCount(0);
+  await page.getByRole("button", { name: "Archived conversations" }).click();
+  const shelf = page.getByRole("navigation", {
+    name: "Archived conversations",
+  });
+  await expect(shelf).toContainText("What is RMSE?");
+
+  // Restore brings it back.
+  await shelf
+    .getByRole("button", { name: "Options for What is RMSE?" })
+    .click();
+  await page.getByRole("menuitem", { name: "Restore" }).click();
+  await expect(page.getByText("No archived conversations.")).toBeVisible();
+  await page.getByRole("button", { name: "Back to conversations" }).click();
+  await expect(saved).toContainText("What is RMSE?");
+
+  // Delete asks first; Cancel keeps it, Delete removes it for good.
+  await saved
+    .getByRole("button", { name: "Options for What is RMSE?" })
+    .first()
+    .click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Delete this conversation?",
+  });
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(saved).toContainText("What is RMSE?");
+  await saved
+    .getByRole("button", { name: "Options for What is RMSE?" })
+    .first()
+    .click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  await dialog.getByRole("button", { name: "Delete" }).click();
+  await expect(dialog).toBeHidden();
+  await page.reload();
+  await expect(page.getByText("What is RMSE?")).toHaveCount(0);
+});

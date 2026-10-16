@@ -14,6 +14,7 @@ from collections.abc import Sequence
 
 import httpx
 
+from chatbot.budget import timeout
 from climate_engine.core import config
 
 
@@ -107,7 +108,7 @@ class OpenAICompatibleProvider(LLMProvider):
             base_url + "/chat/completions",
             headers=headers,
             # A model on the forecaster's own CPU server needs longer than a hosted one.
-            timeout=float(os.getenv("LLM_TIMEOUT_SECONDS") or 20),
+            timeout=timeout(float(os.getenv("LLM_TIMEOUT_SECONDS") or 20)),
             json={
                 "model": os.getenv("LLM_MODEL", cfg["model"]),
                 "temperature": 0,

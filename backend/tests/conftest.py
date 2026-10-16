@@ -14,5 +14,8 @@ def _no_startup_registration(monkeypatch):
         "BULLETIN_REVIEWERS",
         "BULLETIN_PUBLISHERS",
         "BULLETIN_DISTRIBUTION",
+        "STAFF_CREDENTIALS",
+        "CLOUD_DEPLOYMENT",
+        "RELEASE_MODE",
     ):
         monkeypatch.delenv(name, raising=False)

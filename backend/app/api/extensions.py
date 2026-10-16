@@ -1,9 +1,18 @@
 import re
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.responses import Response
 
-from backend.app.api.access import require_bulletin_operator
+from backend.app.api.access import (
+    Principal,
+    chat_slot,
+    owned_session,
+    principal,
+    require_admin,
+    require_chat,
+    require_operator,
+)
+from backend.app.db import now
 from backend.app.schemas import (
     BulletinRequest,
     ChatRequest,
@@ -26,30 +35,54 @@ DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 def install(app: FastAPI, dependency):
     @app.post("/models/register")
-    def register_model(body: DescriptorRegisterRequest, platform=Depends(dependency)) -> dict:
+    def register_model(
+        body: DescriptorRegisterRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_admin),
+    ) -> dict:
         """Operational models register from a reviewed descriptor."""
-        return ModelRegistry(platform).register_descriptor(body.descriptor, body.actor)
+        return ModelRegistry(platform).register_descriptor(body.descriptor, user.name)
 
     @app.post("/models/{id}/independent-test")
     def independent_test(
-        id: str, body: IndependentTestRequest, platform=Depends(dependency)
+        id: str,
+        body: IndependentTestRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_admin),
     ) -> dict:
-        return ModelRegistry(platform).record_independent_test(id, body)
+        return ModelRegistry(platform).record_independent_test(
+            id, body.model_copy(update={"actor": user.name})
+        )
 
     @app.post("/models/{id}/validate")
-    def validate_model(id: str, platform=Depends(dependency)) -> dict:
+    def validate_model(
+        id: str, platform=Depends(dependency), user: Principal = Depends(require_admin)
+    ) -> dict:
         """Re-verify the model's artifacts and rerun its inference check."""
-        return ModelRegistry(platform).validate(id)
+        return ModelRegistry(platform).validate(id, user.name)
 
     @app.post("/models/{id}/{action}")
     def model_action(
-        id: str, action: str, body: ReviewRequest, platform=Depends(dependency)
+        id: str,
+        action: str,
+        body: ReviewRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_admin),
     ) -> dict:
-        return ModelRegistry(platform).transition(id, action, body)
+        return ModelRegistry(platform).transition(
+            id, action, body.model_copy(update={"actor": user.name})
+        )
 
-    @app.post("/chat")
-    def chat(body: ChatRequest, platform=Depends(dependency)) -> dict:
-        return Copilot(platform).answer(body)
+    @app.post("/chat", dependencies=[Depends(chat_slot)])
+    def chat(
+        body: ChatRequest, platform=Depends(dependency), user: Principal = Depends(require_chat)
+    ) -> dict:
+        if body.session_id:
+            session = owned_session(platform.repo, body.session_id, user)
+            if len(session["messages"]) >= 100:
+                raise HTTPException(422, "Start a new conversation after 50 questions.")
+        platform.repo.chat_allowance(user.name)
+        return Copilot(platform).answer(body, owner=user.name)
 
     def first_question(session: dict) -> str:
         """Older conversations have no title: name them by their first question."""
@@ -57,7 +90,13 @@ def install(app: FastAPI, dependency):
         return " ".join(str(asked or "").split())[:80]
 
     @app.get("/chat/sessions")
-    def sessions(background: BackgroundTasks, platform=Depends(dependency)) -> list[dict]:
+    def sessions(
+        background: BackgroundTasks,
+        archived: bool = False,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_chat),
+    ) -> list[dict]:
+        """Conversations, newest first: the open ones, or with ``archived`` the archived."""
         # The Copilot page lists sessions when it opens: wake a model that scaled to zero.
         background.add_task(warm_up)
         return [
@@ -68,17 +107,42 @@ def install(app: FastAPI, dependency):
                 "updated_at": s.get("updated_at", s["created_at"]),
                 "message_count": len(s["messages"]),
                 "context": s.get("context"),
+                "archived": bool(s.get("archived_at")),
             }
             for s in sorted(
                 platform.repo.list("chat_session"),
                 key=lambda s: s.get("updated_at", s["created_at"]),
                 reverse=True,
             )
+            if bool(s.get("archived_at")) == archived and s.get("owner") == user.name
         ]
 
     @app.get("/chat/sessions/{id}")
-    def session(id: str, platform=Depends(dependency)) -> dict:
-        return platform.repo.get("chat_session", id)
+    def session(
+        id: str, platform=Depends(dependency), user: Principal = Depends(require_chat)
+    ) -> dict:
+        return owned_session(platform.repo, id, user)
+
+    @app.post("/chat/sessions/{id}/archive")
+    def archive_session(
+        id: str,
+        archived: bool = True,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_chat),
+    ) -> dict:
+        """Archive a conversation (out of the list, kept), or bring it back."""
+        record = owned_session(platform.repo, id, user)
+        record["archived_at"] = now() if archived else None
+        return platform.repo.save("chat_session", record, id)
+
+    @app.delete("/chat/sessions/{id}", status_code=204)
+    def delete_session(
+        id: str, platform=Depends(dependency), user: Principal = Depends(require_chat)
+    ) -> Response:
+        """Delete a conversation and its messages for good."""
+        owned_session(platform.repo, id, user)
+        platform.repo.delete("chat_session", id)
+        return Response(status_code=204)
 
     @app.get("/references/{id}")
     def reference(id: str) -> dict:
@@ -95,12 +159,15 @@ def install(app: FastAPI, dependency):
             and not ((b.get("facts") or {}).get("input") or {}).get("synthetic")
         ]
 
-    @app.post("/bulletins/generate", dependencies=[Depends(require_bulletin_operator)])
+    @app.post("/bulletins/generate")
     def generate_bulletin(
-        body: BulletinRequest, parent_id: str | None = None, platform=Depends(dependency)
+        body: BulletinRequest,
+        parent_id: str | None = None,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_operator),
     ) -> dict:
         """The weekly bulletin draft of a forecast (the latest by default)."""
-        return BulletinService(platform).generate(body.forecast_id, parent_id, body.actor)
+        return BulletinService(platform).generate(body.forecast_id, parent_id, user.name)
 
     @app.get("/bulletins/email-status")
     def bulletin_email_status() -> dict:
@@ -161,19 +228,43 @@ def install(app: FastAPI, dependency):
             content, media_type="text/html", headers={"Content-Disposition": disposition}
         )
 
-    @app.post("/bulletins/{id}/resend", dependencies=[Depends(require_bulletin_operator)])
-    def resend_bulletin_email(id: str, body: ResendRequest, platform=Depends(dependency)) -> dict:
+    @app.post("/bulletins/{id}/resend")
+    def resend_bulletin_email(
+        id: str,
+        body: ResendRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_operator),
+    ) -> dict:
         """Send the email of the bulletin's current step again (new links)."""
         bulletin = platform.repo.get("bulletin", id)
-        platform.repo.audit("bulletin_email_resent", body.actor, id, {"status": bulletin["status"]})
+        platform.repo.audit("bulletin_email_resent", user.name, id, {"status": bulletin["status"]})
         return bulletin_mail.notify(platform, bulletin)
 
-    @app.post("/bulletins/{id}/{action}", dependencies=[Depends(require_bulletin_operator)])
+    @app.post("/bulletins/{id}/{action}")
     def review_bulletin(
-        id: str, action: str, body: ReviewRequest, platform=Depends(dependency)
+        id: str,
+        action: str,
+        body: ReviewRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(principal),
     ) -> dict:
-        return BulletinService(platform).transition(id, action, body)
+        role = (
+            "publisher"
+            if action == "publish"
+            else "reviewer"
+            if action in {"approve", "reject"}
+            else "operator"
+        )
+        if "admin" not in user.roles and role not in user.roles:
+            raise HTTPException(403, f"The {role} role is required.")
+        return BulletinService(platform).transition(
+            id, action, body.model_copy(update={"actor": user.name})
+        )
 
     @app.get("/audit")
-    def audit(platform=Depends(dependency)) -> list[dict]:
+    def audit(platform=Depends(dependency), user: Principal = Depends(require_admin)) -> list[dict]:
         return list(reversed(platform.repo.list("audit")))[0:100]
+
+    @app.get("/access/me")
+    def me(user: Principal = Depends(principal)) -> dict:
+        return {"name": user.name, "roles": sorted(user.roles)}

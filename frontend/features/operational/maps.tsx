@@ -13,6 +13,7 @@ import {
   Tabs,
 } from "@/components/ui";
 import type { PageProps } from "@/features/view";
+import PastWeeks from "@/features/operational/past-weeks";
 import { COUNTRIES } from "@/features/routes";
 import { SERIES, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
@@ -186,6 +187,7 @@ function VerificationMap({ metric }: { metric: string }) {
                 {data.cases === 1 ? "is" : "are"} verified so far. Each weekly
                 forecast is verified once CHIRPS covers its week.
               </InProgress>
+              <PastWeeks onDone={status.reload} />
               <Notice tone="green">
                 Verification runs automatically in the weekly cycle (
                 <Link href="/data/runs">Operations</Link>); see{" "}

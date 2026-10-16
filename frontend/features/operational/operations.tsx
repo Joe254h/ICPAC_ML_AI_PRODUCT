@@ -6,6 +6,7 @@ import {
   BarChart3,
   CheckCircle2,
   CloudDownload,
+  History,
   Loader2,
   Play,
   RefreshCw,
@@ -60,6 +61,12 @@ const STEPS: {
     title: "Verify finished forecasts",
     text: "Fetch CHIRPS for every week that has ended.",
     icon: CheckCircle2,
+  },
+  {
+    action: "past_weeks",
+    title: "Forecast and verify past weeks",
+    text: "Forecast the last four weeks CHIRPS has observed, from the ECMWF runs of that time, and verify them.",
+    icon: History,
   },
   {
     action: "update_chirps",
@@ -236,7 +243,7 @@ export default function Operations() {
             )}
           </Card>
         </div>
-        <div className="grid-4">
+        <div className="step-grid">
           {STEPS.map(({ action, title, text, icon: Icon }) => (
             <div
               key={action}

@@ -1,9 +1,10 @@
 """ECMWF ensemble Week-2 rainfall from ECMWF Open Data.
 
 For one initialization date the 00 UTC ENS run is read: total precipitation (``tp``,
-accumulated from the start of the forecast, in metres) of the 50 perturbed members at the
-168 h and 336 h steps, i.e. exactly what the Week-2 (days 8-14) accumulation needs. Only
-those 100 GRIB messages are downloaded (byte ranges listed in the files' ``.index``), the
+accumulated from the start of the forecast, in metres) of the perturbed members the model
+was trained with (``members`` in the config: 1-10, the S2S reforecasts' perturbed members)
+at the 168 h and 336 h steps, i.e. exactly what the Week-2 (days 8-14) accumulation needs.
+Only those GRIB messages (20 for ten members) are downloaded (byte ranges listed in the files' ``.index``), the
 global 0.25 degree fields are cropped to Eastern Africa and written as the documented
 forecast input ``ecmwf_s2s_tp_<date>.nc`` (docs/forecast_input_format.md), which the
 operational pipeline reads like any other ECMWF input.
@@ -11,7 +12,7 @@ operational pipeline reads like any other ECMWF input.
 The AI/ML model's upper-air predictors come from the same run: specific humidity, winds,
 temperature and geopotential height at the pressure levels it was trained on (q at 850 and
 700 hPa, u and v at 850 and 200 hPa, t at 850 and 500 hPa, gh at 500 hPa), for the seven
-Week-2 forecast hours of the training definition, 50 perturbed members. Only those fields
+Week-2 forecast hours of the training definition, the same members. Only those fields
 are downloaded, one forecast hour and parameter at a time so the disk holds little at once;
 each is checked, kept only when its values are physically plausible, averaged to the 1.5
 degree grid of the training forecasts and written as ``ecmwf_s2s_pl_<date>.nc``.
@@ -97,6 +98,12 @@ def client(mirror: str):
     return Client(source=mirror, model=cfg["model"], resol=cfg["resolution"])
 
 
+def member_numbers() -> list[int]:
+    """The perturbed members downloaded (ECMWF numbering, 1 to 50)."""
+    first, last = settings().get("members", [1, 50])
+    return list(range(int(first), int(last) + 1))
+
+
 def request(initialization: date) -> dict[str, Any]:
     cfg = settings()
     return {
@@ -104,6 +111,7 @@ def request(initialization: date) -> dict[str, Any]:
         "time": int(cfg["run_hour"]),
         "stream": cfg["stream"],
         "type": cfg["type"],
+        "number": member_numbers(),
         "param": cfg["parameter"],
         "step": list(STEPS_HOURS),
     }
@@ -343,6 +351,7 @@ def pressure_request(initialization: date, name: str, levels: tuple[int, ...], s
         "time": int(cfg["run_hour"]),
         "stream": cfg["stream"],
         "type": cfg["type"],
+        "number": member_numbers(),
         "param": name,
         "levtype": "pl",
         "levelist": [str(level) for level in levels],

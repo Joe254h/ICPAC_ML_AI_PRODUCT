@@ -484,6 +484,7 @@ class ToolBox:
             "sections": [
                 {
                     "title": s["title"],
+                    **({"why": s["why"]} if s.get("why") else {}),
                     "text": s.get("text", []),
                     **(
                         {"status": f"in progress: needs {s['missing_dependency']}"}
@@ -718,7 +719,9 @@ class ChatModel(Protocol):
 
 
 def _timeout() -> float:
-    return float(os.getenv("LLM_TIMEOUT_SECONDS") or 60)
+    from chatbot.budget import timeout
+
+    return timeout(float(os.getenv("LLM_TIMEOUT_SECONDS") or 60))
 
 
 #: The HTTP client for Claude; the tests put a scripted Claude behind it.
@@ -748,7 +751,7 @@ class AnthropicModel:
             Literal["low", "medium", "high", "xhigh", "max"], os.getenv("LLM_EFFORT") or "low"
         )
         self.client = anthropic.Anthropic(
-            api_key=key, timeout=_timeout(), max_retries=1, http_client=HTTP_CLIENT
+            api_key=key, timeout=_timeout(), max_retries=0, http_client=HTTP_CLIENT
         )
         self.label = "Claude"
 
@@ -779,7 +782,7 @@ class AnthropicModel:
             for t in tools
         ]
         output_config: BetaOutputConfigParam = {"effort": self.effort}
-        response = self.client.beta.messages.create(
+        response = self.client.with_options(timeout=_timeout(), max_retries=0).beta.messages.create(
             model=self.model,
             max_tokens=16000,
             system=system,
@@ -846,16 +849,41 @@ WORKING_MODEL: dict[tuple[str, str], str] = {}
 LAST_OUTCOME: dict[str, Any] = {}
 
 
-def record_outcome(model: str, ok: bool, reason: str | None = None) -> None:
+def record_outcome(
+    model: str, ok: bool, reason: str | None = None, said: str | None = None
+) -> None:
+    """``said``: the provider's own words when it refused (see provider_message)."""
     LAST_OUTCOME.clear()
     LAST_OUTCOME.update(
         {
             "model": model,
             "ok": ok,
             "reason": reason,
+            "said": said,
             "at": time.strftime("%H:%M UTC", time.gmtime()),
         }
     )
+
+
+def provider_message(text: str, limit: int = 220) -> str | None:
+    """The message in a provider's error body (Google wraps it in a list), as plain words
+    for the System page: keys, links and long numbers (project numbers) are left out."""
+    try:
+        data: Any = json.loads(text)
+    except ValueError:
+        return None
+    if isinstance(data, list) and data:
+        data = data[0]
+    error = data.get("error") if isinstance(data, dict) else None
+    message = error.get("message") if isinstance(error, dict) else error
+    if not isinstance(message, str) or not message.strip():
+        return None
+    message = re.sub(r"AIza[0-9A-Za-z_\-]{20,}|sk-[0-9A-Za-z_\-]{16,}", "(key)", message)
+    message = re.sub(r"https?://\S+", "(link)", message)
+    message = re.sub(r"\b[\w.-]*\d{6,}[\w.-]*\b", "(number)", message)
+    message = re.sub(r"\b[a-z0-9]+(?:[._][a-z0-9]+){2,}\b", "(name)", message)
+    message = " ".join(message.split())
+    return message if len(message) <= limit else message[: limit - 1].rstrip() + "…"
 
 
 # What a provider's refusal says, in words for the person asking (Gemini's and OpenAI's
@@ -871,6 +899,8 @@ REFUSALS = (
       "are blocked", "referer"),
      "the key is restricted and does not allow this server or the Gemini API"),
     (("leaked",), "Google blocked the key because it was exposed: create a new key"),
+    (("expired", "api_key_expired"), "the key has expired: create a new key"),
+    (("suspended",), "Google suspended the key or its project: check it in Google AI Studio"),
     (("location is not supported", "user location"),
      "the AI service is not offered in the server's region"),
     (("billing", "free tier is not available"),
@@ -878,6 +908,14 @@ REFUSALS = (
     (("quota", "resource_exhausted", "rate limit"),
      "the AI service's usage limit was reached; try again in a minute"),
 )  # fmt: skip
+
+
+#: A 403 none of the markers explain: Google's "The caller does not have permission" for
+#: the model or the API. Another model may be open to the key, so it is tried.
+REFUSED_403 = (
+    "the AI service refused the key (no permission for this model or API; the System page "
+    "shows Google's reason)"
+)
 
 
 def explain_refusal(status: int, text: str) -> str:
@@ -891,7 +929,7 @@ def explain_refusal(status: int, text: str) -> str:
     if status == 401:
         return "the AI service says the key is not valid: enter the key again"
     if status == 403:
-        return "the AI service refused the key (no permission for this model or API)"
+        return REFUSED_403
     if status == 404:
         return "the AI model is not available to this key"
     if status >= 500:
@@ -905,8 +943,7 @@ def _model_refused(response: httpx.Response) -> bool:
         return True
     if response.status_code == 403:
         # A key problem is not solved by another model; a model closed to the key may be.
-        reason = explain_refusal(403, response.text)
-        return reason.startswith("the AI service refused the key (no permission")
+        return explain_refusal(403, response.text) == REFUSED_403
     text = response.text.lower()
     return (
         response.status_code == 400
@@ -1081,6 +1118,7 @@ RECHECK = (
 def _converse(model: ChatModel, transcript: list[dict[str, Any]], toolbox: ToolBox) -> str:
     """Let the model call tools until it answers; its answer."""
     for _ in range(MAX_ROUNDS):
+        _timeout()
         reply = model.respond(SYSTEM, transcript, TOOLS)
         if not reply.calls:
             break

@@ -1,7 +1,8 @@
 """A local mirror for tests: ECMWF Open Data (real GRIB2 files and .index files laid out as
 on data.ecmwf.int, so the official client runs unchanged) and, under /chc, a CHIRPS
-preliminary dekad laid out as on data.chc.ucsb.edu (with its directory listing). The
-rainfall in both is a made-up pattern: it exercises the chain, it is not weather."""
+preliminary dekad and preliminary daily files laid out as on data.chc.ucsb.edu (with their
+directory listings). The rainfall in all of them is a made-up pattern: it exercises the
+chain, it is not weather."""
 
 import argparse
 import json
@@ -18,15 +19,24 @@ import numpy as np
 STEP = 2.5  # coarse global grid keeps the files small; the decoder reads it from the GRIB
 
 
-def rainfall_m(number: int, step: int) -> np.ndarray:
-    """Accumulated tp (m) on the 2.5 degree global grid: grows with the step and member."""
+def rainfall_m(number: int, step: int, wetness: float = 1.0) -> np.ndarray:
+    """Accumulated tp (m) on the 2.5 degree global grid: grows with the step and member;
+    ``wetness`` scales a run (past runs differ from week to week)."""
     lat = np.arange(90.0, -90.0 - 1e-9, -STEP)
     lon = np.arange(-180.0, 180.0, STEP)
     pattern = 0.004 + 0.003 * np.cos(np.deg2rad(lat))[:, None] * (1 + np.sin(np.deg2rad(lon)))
-    return pattern * (step / 168.0) * (1 + 0.05 * number)
+    return pattern * (step / 168.0) * (1 + 0.05 * number) * wetness
 
 
-def message(codes, number: int, step: int, day: date, kind: str = "pf", param: int = 228):
+def message(
+    codes,
+    number: int,
+    step: int,
+    day: date,
+    kind: str = "pf",
+    param: int = 228,
+    wetness: float = 1.0,
+):
     gid = codes.codes_grib_new_from_samples("GRIB2")
     for key, value in [
         ("centre", "ecmf"),
@@ -55,7 +65,7 @@ def message(codes, number: int, step: int, day: date, kind: str = "pf", param: i
         ("iScansNegatively", 0),
     ]:
         codes.codes_set(gid, key, value)
-    codes.codes_set_values(gid, rainfall_m(number, step).ravel())
+    codes.codes_set_values(gid, rainfall_m(number, step, wetness).ravel())
     data = codes.codes_get_message(gid)
     codes.codes_release(gid)
     return data
@@ -115,7 +125,14 @@ def pressure_message(codes, name: str, level: int, number: int, step: int, day: 
     return data
 
 
-def build(root: Path, day: date, members: int = 3, steps=(168, 336), pressure_steps=()) -> Path:
+def build(
+    root: Path,
+    day: date,
+    members: int = 3,
+    steps=(168, 336),
+    pressure_steps=(),
+    wetness: float = 1.0,
+) -> Path:
     """Files for one 00 UTC ENS run: tp for the control and perturbed members, plus another
     parameter, so the client's index filtering is exercised; with ``pressure_steps``, also
     the upper-air fields of the perturbed members at those forecast hours."""
@@ -146,7 +163,7 @@ def build(root: Path, day: date, members: int = 3, steps=(168, 336), pressure_st
             entries += [("pf", 1, 167)]  # 2 m temperature, which must not be downloaded
             for kind, number, param in entries:
                 add(
-                    message(codes, number, step, day, kind, param),
+                    message(codes, number, step, day, kind, param, wetness),
                     {
                         "type": kind,
                         "levtype": "sfc",
@@ -206,6 +223,44 @@ def build_chirps_dekad(root: Path, today: date) -> Path:
     path = folder / dekad.name
     data.to_netcdf(path)
     return path
+
+
+def wetness(day: date) -> float:
+    """How wet a made-up day or run is: it changes from week to week, so verification
+    scores over several weeks (a correlation) have something to measure."""
+    return 1.0 + 0.6 * np.sin(day.toordinal() / 5.0)
+
+
+def build_chirps_days(root: Path, first: date, last: date) -> list[Path]:
+    """CHIRPS preliminary daily GeoTIFFs (mm/day, 0.05 degree, over the region; the real
+    files are global) for every day from ``first`` to ``last``, laid out as on CHC."""
+    import tifffile
+
+    lat = np.round(np.arange(24.975, -14.976, -0.05), 3)  # north first, as CHIRPS
+    lon = np.round(np.arange(19.025, 53.976, 0.05), 3)
+    pattern = 2.0 + 2.0 * np.cos(np.deg2rad(lat * 6))[:, None] * (1 + np.sin(np.deg2rad(lon * 9)))
+    geokeys = (1, 1, 0, 3, 1024, 0, 1, 2, 1025, 0, 1, 1, 2048, 0, 1, 4326)
+    written = []
+    day = first
+    while day <= last:
+        folder = root / f"chc/products/CHIRPS-2.0/prelim/global_daily/tifs/p05/{day.year}"
+        folder.mkdir(parents=True, exist_ok=True)
+        values = np.round(pattern * wetness(day) * 2) / 2  # half millimetres compress well
+        path = folder / f"chirps-v2.0.{day.year}.{day.month:02d}.{day.day:02d}.tif"
+        tifffile.imwrite(
+            path,
+            values.astype(np.float32),
+            compression="zlib",
+            extratags=[
+                (33550, 12, 3, (0.05, 0.05, 0.0), False),
+                (33922, 12, 6, (0.0, 0.0, 0.0, 19.0, 25.0, 0.0), False),
+                (34735, 3, len(geokeys), geokeys, False),
+                (42113, 2, 0, "-9999", False),
+            ],
+        )
+        written.append(path)
+        day += timedelta(days=1)
+    return written
 
 
 def build_tamsat_dekad(root: Path, today: date) -> Path:
@@ -279,10 +334,16 @@ class _RangeHandler(_Quiet):
         return io.BytesIO(chunk)
 
 
+#: Past weeks held: the runs one forecaster would forecast them from (a week apart, the
+#: newest whose week CHIRPS covers being 15 days before today), and their CHIRPS days.
+PAST_WEEKS = 4
+
+
 def main() -> None:
     """Build and serve a mirror holding yesterday's run, the newest a forecaster would find,
-    and the newest ended CHIRPS and TAMSAT dekads (browser tests point ECMWF_OPENDATA_MIRRORS
-    at the mirror, CHIRPS_BASE_URL at its /chc folder and TAMSAT_BASE_URL at /tamsat)."""
+    the newest ended CHIRPS and TAMSAT dekads, and, for past weeks, the archived runs and
+    the CHIRPS days that verify them (browser tests point ECMWF_OPENDATA_MIRRORS at the
+    mirror, CHIRPS_BASE_URL at its /chc folder and TAMSAT_BASE_URL at /tamsat)."""
     parser = argparse.ArgumentParser(description=main.__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8998)
@@ -292,6 +353,11 @@ def main() -> None:
     day = args.date or datetime.now(timezone.utc).date() - timedelta(days=1)
     shutil.rmtree(args.root, ignore_errors=True)
     build(args.root, day, args.members)
+    past = [day - timedelta(days=14 + 7 * week) for week in range(PAST_WEEKS)]
+    for run in past:
+        build(args.root, run, args.members, wetness=wetness(run))
+    # Each run's Week-2 window: days 7 to 13 after it.
+    build_chirps_days(args.root, past[-1] + timedelta(days=7), past[0] + timedelta(days=13))
     build_chirps_dekad(args.root, day + timedelta(days=1))
     build_tamsat_dekad(args.root, day + timedelta(days=1))
     handler = partial(_RangeHandler, directory=str(args.root))

@@ -51,6 +51,8 @@ MBC = ROOT / "artifacts" / "mbc" / "final_mbc_params_2005_2021_full_corrected_do
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    key = "test-end-to-end-admin-access-key-00000"
+    monkeypatch.setenv("BULLETIN_OPERATOR_KEY", key)
     monkeypatch.delenv("ARTIFACT_ROOT", raising=False)
     monkeypatch.setenv("AUTO_REGISTER_MODELS", "true")
     monkeypatch.setenv("RUN_ROOT", str(tmp_path / "runs"))
@@ -61,7 +63,10 @@ def client(tmp_path, monkeypatch):
     operational._models.clear()
     with ecmwf_mirror.serve(root) as url:
         monkeypatch.setenv("ECMWF_OPENDATA_MIRRORS", url)
-        with TestClient(create_app(f"sqlite:///{tmp_path / 'db.sqlite'}")) as c:
+        with TestClient(
+            create_app(f"sqlite:///{tmp_path / 'db.sqlite'}"),
+            headers={"Authorization": f"Bearer {key}"},
+        ) as c:
             yield c
 
 

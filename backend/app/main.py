@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
@@ -13,6 +14,7 @@ from backend.app.services.forecasts import RunInProgress, Unavailable, capabilit
 from backend.app.services.health import system_health
 from backend.app.services.operations import OperationService
 from backend.app.services.platform import Platform
+from backend.app.services.release import validate_release
 from climate_engine.inputs import sources
 
 
@@ -37,6 +39,7 @@ handler = logging.StreamHandler()
 handler.setFormatter(JSONFormatter())
 logging.getLogger("icpac").addHandler(handler)
 logging.getLogger("icpac").setLevel(logging.INFO)
+HEAVY_READ_SLOTS = threading.BoundedSemaphore(4)
 
 
 def create_app(database_url: str | None = None) -> FastAPI:
@@ -46,11 +49,46 @@ def create_app(database_url: str | None = None) -> FastAPI:
             Repository(database_url),
             register_descriptors=os.getenv("AUTO_REGISTER_MODELS", "true") == "true",
         )
-        OperationService(app.state.platform).recover()
+        validate_release(app.state.platform)
+        stopped = threading.Event()
+        worker = threading.Thread(
+            target=OperationService(app.state.platform).worker, args=(stopped,), daemon=True
+        )
+        enabled = os.getenv("OPERATION_WORKER_ENABLED", "true") == "true"
+        if enabled:
+            worker.start()
         yield
-        app.state.platform.repo.engine.dispose()
+        stopped.set()
+        if enabled:
+            worker.join(timeout=5)
+        # In-flight work keeps its connection pool until process exit; its persisted
+        # request is resumed after lease expiry if Azure terminates this replica.
+        if not worker.is_alive():
+            app.state.platform.repo.engine.dispose()
 
     app = FastAPI(title="ICPAC Week-2 Forecast Service", version="0.2.0", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def private_response(request: Request, call_next):
+        path = request.url.path
+        heavy = request.method == "GET" and (
+            path.startswith("/verification/")
+            or path.endswith(("/map", "/overlay", "/export", "/bulletin"))
+        )
+        if heavy and not HEAVY_READ_SLOTS.acquire(blocking=False):
+            return JSONResponse(
+                status_code=429,
+                headers={"Retry-After": "5", "Cache-Control": "no-store"},
+                content={"detail": "Maps and exports are busy; retry shortly."},
+            )
+        try:
+            response = await call_next(request)
+        finally:
+            if heavy:
+                HEAVY_READ_SLOTS.release()
+        if request.headers.get("authorization") or request.url.path.startswith("/chat"):
+            response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     @app.exception_handler(ValueError)
     async def value_error(request: Request, exc: ValueError):

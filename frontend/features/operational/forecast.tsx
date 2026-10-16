@@ -110,7 +110,7 @@ function Body({ detail }: { detail: ForecastDetail }) {
             {bulletin.data?.export && (
               <LinkButton
                 href={"/api" + bulletin.data.export}
-                variant="ghost-light"
+                variant="outline"
               >
                 <FileDown size={18} /> Word draft
               </LinkButton>

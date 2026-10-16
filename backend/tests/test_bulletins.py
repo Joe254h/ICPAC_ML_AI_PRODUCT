@@ -87,13 +87,14 @@ def test_drafts_are_the_weekly_bulletin_of_the_latest_forecast(env, fast_maps, m
     # maps are the frozen ones.
     assert part(approved, "word/document.xml") == part(word.content, "word/document.xml")
     header = part(approved, "word/header1.xml")
-    assert re.search(r"APPROVED by Reviewer on \d{1,2} [A-Z][a-z]{2} 20\d\d", header)
+    # The authenticated staff identity overrides the name typed into the request.
+    assert re.search(r"APPROVED by Joe254h on \d{1,2} [A-Z][a-z]{2} 20\d\d", header)
     assert "DRAFT - NOT APPROVED" not in header
     assert "forecaster review required" not in header
     published = client.post(f"/bulletins/{draft['id']}/publish", json=review).json()
     assert published["status"] == "published"
     page = client.get(f"/bulletins/{draft['id']}/export").text
-    assert "PUBLISHED by Reviewer" in page and 'class="chip approved">' in page
+    assert "PUBLISHED by Joe254h" in page and 'class="chip approved">' in page
 
     revision = client.post(f"/bulletins/generate?parent_id={draft['id']}", json={}).json()
     assert revision["forecast_id"] == record["forecast_id"]
