@@ -393,6 +393,11 @@ def test_past_weeks_are_forecast_from_the_archive_and_verified(
     ]
     texts = [m["text"] for m in done["messages"]]
     assert (
+        "The week of 13 September 2026 could not be forecast: the ECMWF archive does not hold "
+        "that run" in texts
+    )
+    assert "CHIRPS does not cover the week of 20 September 2026 yet" in texts
+    assert (
         "Forecasting the week of 27 September 2026 from the ECMWF run of 20 September 2026" in texts
     )
     assert "1 past weeks verified, 1 waiting for CHIRPS, 3 failed" in texts

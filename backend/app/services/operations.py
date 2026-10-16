@@ -8,6 +8,7 @@ while the interface polls its record. One task runs at a time: a forecast run ne
 about 1 GB of memory. A task left unfinished by a restart is marked interrupted.
 """
 
+import re
 import threading
 import traceback
 from datetime import date, datetime, timedelta, timezone
@@ -22,6 +23,18 @@ KIND = "operation"
 
 def _today() -> date:
     return datetime.now(timezone.utc).date()
+
+
+def _plain(exc: Exception) -> str:
+    """Why a past week could not be done, in words for the task log (no links or internals)."""
+    from climate_engine.inputs.ecmwf_opendata import ECMWFDataUnavailable
+
+    if isinstance(exc, ECMWFDataUnavailable):
+        return "the ECMWF archive does not hold that run"
+    if isinstance(exc, RunInProgress):
+        return "another forecast run was in progress"
+    text = re.sub(r"https?://\S+", "", str(exc)).strip(" :;")
+    return text[:160] or "the service could not finish it"
 
 
 def _day(value: date | str) -> str:
@@ -265,9 +278,10 @@ class OperationService:
                     )
                 except Exception as exc:  # e.g. a run missing from the archive
                     self._log(
-                        operation_id, f"{week[0].upper()}{week[1:]} could not be forecast: {exc}"
+                        operation_id,
+                        f"{week[0].upper()}{week[1:]} could not be forecast: {_plain(exc)}",
                     )
-                    failed.append(f"{initialization.isoformat()}: {exc}")
+                    failed.append(f"{initialization.isoformat()}: {_plain(exc)}")
                     continue
             if record.get("verification_status") == "available":
                 self._log(operation_id, f"The forecast for {week} is already verified")
@@ -275,12 +289,15 @@ class OperationService:
                 continue
             try:
                 forecasts.verify_with_chirps(record["forecast_id"], body.actor, server)
-            except (chirps.CHIRPSUnavailable, Unavailable) as exc:
-                self._log(operation_id, f"CHIRPS does not cover {week} yet: {exc}")
+            except (chirps.CHIRPSUnavailable, Unavailable):
+                self._log(operation_id, f"CHIRPS does not cover {week} yet")
                 waiting.append(record["forecast_id"])
             except Exception as exc:
-                self._log(operation_id, f"The forecast for {week} could not be verified: {exc}")
-                failed.append(f"{record['forecast_id']}: {exc}")
+                self._log(
+                    operation_id,
+                    f"The forecast for {week} could not be verified: {_plain(exc)}",
+                )
+                failed.append(f"{record['forecast_id']}: {_plain(exc)}")
             else:
                 self._log(operation_id, f"The forecast for {week} is verified against CHIRPS")
                 verified.append(record["forecast_id"])
