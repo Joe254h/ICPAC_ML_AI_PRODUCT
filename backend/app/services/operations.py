@@ -134,7 +134,7 @@ class OperationService:
                     lost.set()
                     return
 
-        thread = threading.Thread(target=heartbeat, daemon=True)
+        thread = threading.Thread(target=heartbeat, name="icpac-lease-heartbeat", daemon=False)
         thread.start()
         self._lease_lost = lost
         try:
@@ -151,7 +151,7 @@ class OperationService:
             return True
         finally:
             stopped.set()
-            thread.join(timeout=15)
+            thread.join()
             self.repo.release_lease(owner)
 
     def worker(self, stopped: threading.Event) -> None:

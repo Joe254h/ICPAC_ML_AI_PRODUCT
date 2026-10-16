@@ -31,7 +31,7 @@ jobs:
       - run: ruff format --check backend climate_engine chatbot scripts
       - run: ruff check backend climate_engine chatbot scripts
       - run: mypy backend climate_engine chatbot
-      - run: pytest -q
+      - run: python -X faulthandler -m pytest -q
         env:
           TEST_POSTGRES_URL: postgresql://icpac_test:local-ci-test-only@127.0.0.1:5432/icpac_test
       - name: Test PowerShell deployment guards without cloud access

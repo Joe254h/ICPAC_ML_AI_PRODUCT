@@ -12,6 +12,10 @@ After a restart, incomplete persisted requests resume; completed forecast dates 
 verification commits are reused. Keep one replica running to drain the queue after the
 browser is closed. See [Azure PowerShell deployment](deployment-powershell.md).
 
+Graceful shutdown stops queue polling and waits for the current task and lease heartbeat
+before closing database resources. A forced container termination leaves the persisted
+request available for another worker after lease expiry.
+
 ## The weekly cycle
 
 | Step | What happens | Recorded as |

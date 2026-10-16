@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -49,21 +50,28 @@ def create_app(database_url: str | None = None) -> FastAPI:
             Repository(database_url),
             register_descriptors=os.getenv("AUTO_REGISTER_MODELS", "true") == "true",
         )
-        validate_release(app.state.platform)
         stopped = threading.Event()
         worker = threading.Thread(
-            target=OperationService(app.state.platform).worker, args=(stopped,), daemon=True
+            target=OperationService(app.state.platform).worker,
+            args=(stopped,),
+            name="icpac-operation-worker",
+            daemon=False,
         )
         enabled = os.getenv("OPERATION_WORKER_ENABLED", "true") == "true"
-        if enabled:
-            worker.start()
-        yield
-        stopped.set()
-        if enabled:
-            worker.join(timeout=5)
-        # In-flight work keeps its connection pool until process exit; its persisted
-        # request is resumed after lease expiry if Azure terminates this replica.
-        if not worker.is_alive():
+        started = False
+        try:
+            validate_release(app.state.platform)
+            if enabled:
+                worker.start()
+                started = True
+            yield
+        finally:
+            stopped.set()
+            if started:
+                # Native GRIB/NetCDF/model calls cannot be abandoned safely during
+                # interpreter cleanup. Drain the current task off the event loop.
+                # A forced container stop is recovered through the persisted lease.
+                await asyncio.to_thread(worker.join)
             app.state.platform.repo.engine.dispose()
 
     app = FastAPI(title="ICPAC Week-2 Forecast Service", version="0.2.0", lifespan=lifespan)
