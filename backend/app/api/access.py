@@ -6,6 +6,7 @@ import re
 import secrets
 import threading
 from dataclasses import dataclass
+from hashlib import sha256
 
 from fastapi import Depends, Header, HTTPException
 
@@ -73,7 +74,9 @@ def principal(
         visitor = x_visitor_id or secrets.token_hex(16)
         if not re.fullmatch(r"[0-9a-f]{32}", visitor):
             raise HTTPException(400, "Invalid browser session; reload the page.")
-        return Principal(f"visitor:{visitor}", frozenset({"admin"}))
+        # Audit entries are visible in the public app. Store a one-way identity,
+        # so seeing an actor in the audit cannot grant their conversation access.
+        return Principal(f"visitor:{sha256(visitor.encode()).hexdigest()}", frozenset({"admin"}))
     records = credentials()
     if not records:
         raise HTTPException(503, "Staff access is not configured; contact the operator.")

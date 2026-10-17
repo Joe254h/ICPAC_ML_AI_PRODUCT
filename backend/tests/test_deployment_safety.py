@@ -2,6 +2,7 @@
 
 import json
 from datetime import date
+from hashlib import sha256
 from types import SimpleNamespace
 
 import httpx
@@ -17,6 +18,10 @@ from chatbot import agent, budget
 
 ALICE = "alice-private-test-access-key-0000000000"
 BOB = "bob-private-test-access-key-000000000000"
+
+
+def visitor_name(visitor: str) -> str:
+    return "visitor:" + sha256(visitor.encode()).hexdigest()
 
 
 @pytest.fixture
@@ -227,14 +232,17 @@ def test_public_evaluation_needs_no_staff_key_and_can_be_switched_back(client, m
     client.headers["X-Visitor-Id"] = "a" * 32
     me = client.get("/access/me")
     assert me.status_code == 200
-    assert me.json()["name"] == "visitor:" + "a" * 32
+    assert me.json()["name"] == visitor_name("a" * 32)
+    assert "a" * 32 not in me.json()["name"]
     assert me.json()["roles"] == ["admin"]
     operation = client.post(
         "/operations", json={"action": "past_weeks", "weeks": 2, "actor": "Visitor"}
     )
     assert operation.status_code == 202
     assert operation.json()["created_by"] == me.json()["name"]
-    assert client.get("/audit").status_code == 200
+    audit = client.get("/audit")
+    assert audit.status_code == 200
+    assert "a" * 32 not in audit.text
     for path in (
         "/models/missing/validate",
         "/models/missing/promote",
@@ -258,11 +266,11 @@ def test_public_chat_history_is_separate_from_other_visitors_and_staff(client, m
     monkeypatch.setenv("ACCESS_MODE", "public")
     repo = client.app.state.platform.repo
     mine = repo.save(
-        "chat_session", {"owner": "visitor:" + "a" * 32, "messages": [], "created_at": now()}
+        "chat_session", {"owner": visitor_name("a" * 32), "messages": [], "created_at": now()}
     )
     others = [
         repo.save("chat_session", {"owner": owner, "messages": [], "created_at": now()})
-        for owner in ("Alice", "visitor:" + "b" * 32)
+        for owner in ("Alice", visitor_name("b" * 32))
     ]
     client.headers["X-Visitor-Id"] = "a" * 32
     assert [s["id"] for s in client.get("/chat/sessions").json()] == [mine["id"]]
@@ -280,7 +288,7 @@ def test_public_chat_history_is_separate_from_other_visitors_and_staff(client, m
     monkeypatch.setattr(agent, "chat_model", lambda: None)
     answer = client.post("/chat", json={"message": "Hello"})
     assert answer.status_code == 200
-    assert repo.get("chat_session", answer.json()["session_id"])["owner"] == "visitor:" + "a" * 32
+    assert repo.get("chat_session", answer.json()["session_id"])["owner"] == visitor_name("a" * 32)
     assert client.get(f"/chat/sessions/{answer.json()['session_id']}").status_code == 200
     assert client.post(f"/chat/sessions/{mine['id']}/archive").status_code == 200
     assert client.delete(f"/chat/sessions/{mine['id']}").status_code == 204
