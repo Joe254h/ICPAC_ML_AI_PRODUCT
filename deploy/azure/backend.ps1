@@ -6,6 +6,7 @@ Update the existing ICPAC Container App from an exact, CI-tested source revision
 Run in Azure Cloud Shell PowerShell. Existing environment variables, secrets and region
 are preserved. Missing durable storage or staff credentials stop deployment. No credentials
 are printed or written into this repository. Keep a database backup before updating.
+Use -VerifyOnly to check an existing deployment without reading secrets or changing Azure.
 #>
 [CmdletBinding()]
 param(
@@ -13,10 +14,12 @@ param(
     [string]$ResourceGroup = 'icpac',
     [string]$AppName = 'icpac-api',
     [ValidateSet('evaluation', 'production')][string]$ReleaseMode = 'evaluation',
-    [switch]$PlanOnly
+    [switch]$PlanOnly,
+    [switch]$VerifyOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($PlanOnly -and $VerifyOnly) { throw 'Choose either -PlanOnly or -VerifyOnly.' }
 
 function Invoke-Azure([string[]]$Arguments) {
     $result = & az @Arguments --only-show-errors --output json
@@ -27,6 +30,71 @@ function Invoke-Azure([string[]]$Arguments) {
 function Read-Private([string]$Prompt) {
     $secure = Read-Host $Prompt -AsSecureString
     return [System.Net.NetworkCredential]::new('', $secure).Password
+}
+
+function Confirm-Deployment([switch]$Once) {
+    $deadline = [DateTime]::UtcNow.AddMinutes(15)
+    $environmentMode = $null
+    do {
+        $current = Invoke-Azure @('containerapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroup)
+        $properties = $current.properties
+        $state = [string]$properties['provisioningState']
+        if ($state -in @('Failed', 'Canceled')) { throw "Azure provisioning $state. Inspect the revision system logs." }
+        $pending = [System.Collections.Generic.List[string]]::new()
+        if ($state -ne 'Succeeded') { $pending.Add("provisioning=$state") }
+        $revision = [string]$properties['latestRevisionName']
+        $readyRevision = [string]$properties['latestReadyRevisionName']
+        if (-not $revision) { $pending.Add('latest revision is missing') }
+        if ($readyRevision) {
+            if ($readyRevision -ne $revision) { $pending.Add('latest revision is not the ready revision') }
+        } else {
+            # Express rolls updates into its active revision and can omit the ready
+            # revision field. Confirm the environment mode rather than guessing
+            # from the revision suffix or accepting missing readiness everywhere.
+            if ($null -eq $environmentMode) {
+                $environmentId = $properties['environmentId']
+                if (-not $environmentId) { $environmentId = $properties['managedEnvironmentId'] }
+                if (-not $environmentId) { throw 'Azure did not return the app environment ID.' }
+                $environment = Invoke-Azure @('rest', '--method', 'get', '--url', "https://management.azure.com${environmentId}?api-version=2026-07-01")
+                $environmentMode = [string]$environment.properties['environmentMode']
+            }
+            if ($environmentMode -ne 'Express') { $pending.Add('ready revision is missing outside an Express environment') }
+            if ($properties['runningStatus'] -ne 'Running') { $pending.Add('Express app is not Running') }
+        }
+        $containers = @($properties.template.containers)
+        if ($containers.Count -ne 1 -or $containers[0].image -ne $image) { $pending.Add('configured image does not match the expected immutable digest') }
+        if ($properties.template.scale.minReplicas -lt 1) { $pending.Add('worker minimum replicas is below one') }
+        $fqdn = [string]$properties.configuration.ingress['fqdn']
+        $health = $null
+        if (-not $fqdn) { $pending.Add('ingress hostname is missing') }
+        else {
+            try { $health = Invoke-RestMethod "https://$fqdn/health" -TimeoutSec 20 }
+            catch { $pending.Add("health endpoint unavailable: $($_.Exception.Message)") }
+        }
+        if ($null -ne $health) {
+            # Normalize HTTP JSON for safe optional-field access under strict mode.
+            $health = $health | ConvertTo-Json -Depth 20 | ConvertFrom-Json -AsHashtable
+            if ($health -isnot [System.Collections.IDictionary]) { $pending.Add('health response is not an object') }
+            else {
+                if ($health['version'] -ne $ExpectedCommit) { $pending.Add('health source version differs from the expected commit') }
+                if ($health['access_configured'] -ne $true) { $pending.Add('staff access is not configured') }
+                if ($health['durable_storage'] -ne $true) { $pending.Add('durable storage is not configured') }
+                if ($health['release_mode'] -ne $ReleaseMode) { $pending.Add('release mode differs from the requested mode') }
+                if ($health['components'] -isnot [System.Collections.IDictionary] -or $health['components']['Database'] -ne 'Healthy') { $pending.Add('database is not Healthy') }
+            }
+        } else { $pending.Add('health response is missing') }
+        if (-not $pending.Count) {
+            Write-Host "Deployment verified: https://$fqdn"
+            Write-Host "Vercel API_URL=https://$fqdn (server environment variable)."
+            Write-Host "Release mode: $($health['release_mode']). Health: $($health['status']). Review /health for scientific/data warnings."
+            return
+        }
+        $reason = $pending -join '; '
+        if ($Once) { throw "Deployment verification failed for ${ExpectedCommit}: $reason. No Azure resources were changed." }
+        Write-Host "Waiting for deployment: $reason"
+        Start-Sleep -Seconds 10
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Deployment did not become ready for ${ExpectedCommit}: $reason. Check Azure revision logs."
 }
 
 # A success from another revision, a skipped job, or a pending check is insufficient.
@@ -50,6 +118,11 @@ if ($digest -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Registry did not return 
 $image = "ghcr.io/joe254h/icpac-backend@$digest"
 $app = Invoke-Azure @('containerapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroup)
 if ($app.properties.template.containers.Count -ne 1) { throw 'This script expects one API container.' }
+if ($VerifyOnly) {
+    Confirm-Deployment -Once
+    Write-Host 'Read-only verification complete. No secrets were read or Azure resources changed.'
+    return
+}
 $secrets = @(Invoke-Azure @('containerapp', 'secret', 'list', '--name', $AppName, '--resource-group', $ResourceGroup, '--show-values'))
 $variables = @{}
 foreach ($item in $app.properties.template.containers[0].env) { $variables[$item.name] = $item }
@@ -177,24 +250,4 @@ try {
     Remove-Item -LiteralPath $file -Force
 }
 
-$deadline = [DateTime]::UtcNow.AddMinutes(15)
-$ready = $false
-while ([DateTime]::UtcNow -lt $deadline) {
-    $current = Invoke-Azure @('containerapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroup)
-    if ($current.properties.provisioningState -in @('Failed', 'Canceled')) { throw 'Azure provisioning failed. Inspect the revision system logs.' }
-    $fqdn = $current.properties.configuration.ingress.fqdn
-    try {
-        $health = Invoke-RestMethod "https://$fqdn/health" -TimeoutSec 20
-        if ($current.properties.provisioningState -eq 'Succeeded' -and
-            $current.properties.latestReadyRevisionName -eq $current.properties.latestRevisionName -and
-            $health.version -eq $ExpectedCommit -and $health.access_configured -and $health.durable_storage -and
-            $health.release_mode -eq $ReleaseMode -and $health.components.Database -eq 'Healthy') {
-            $ready = $true; break
-        }
-    } catch { Write-Host 'Waiting for the new API revision...' }
-    Start-Sleep -Seconds 10
-}
-if (-not $ready) { throw "New revision did not become ready for $ExpectedCommit. Deployment has NOT passed; check Azure revision logs." }
-Write-Host "Deployment verified: https://$fqdn"
-Write-Host "Vercel API_URL=https://$fqdn (server environment variable). Redeploy the frontend."
-Write-Host "Release mode: $($health.release_mode). Health: $($health.status). Review /health for scientific/data warnings."
+Confirm-Deployment

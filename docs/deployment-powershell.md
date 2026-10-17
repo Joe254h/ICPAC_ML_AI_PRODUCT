@@ -47,6 +47,30 @@ For a read-only preflight after configuration exists:
 & $Script -ExpectedCommit $Commit -ResourceGroup icpac -AppName icpac-api -PlanOnly
 ```
 
+To verify a deployment that already ran, without deploying again or reading secrets:
+
+```powershell
+& $Script -ExpectedCommit $Commit -ResourceGroup icpac -AppName icpac-api -ReleaseMode evaluation -VerifyOnly
+```
+
+This checks once and reports the unmet conditions immediately. It does not prompt for
+keys, replace credentials, create storage, or update the app. `-PlanOnly` and `-VerifyOnly`
+cannot be combined. When using a newer verifier for an existing release, download the
+script using the verifier's source SHA and keep `-ExpectedCommit` set to the deployed
+release SHA. Its CI, Container build and Publish backend image must still have passed.
+
+Standard environments require matching latest and ready revision names. If Azure omits
+the ready revision name, the verifier reads the existing environment with the management
+API and requires `environmentMode=Express`, successful provisioning and `runningStatus=Running`.
+Express uses [rolling updates within its active revision](https://learn.microsoft.com/en-us/azure/container-apps/express-overview).
+Both paths require the configured immutable image digest, at least one minimum replica,
+the exact `/health.version`, staff access, durable storage, the requested release mode
+and a healthy database. Missing readiness in other environments remains a failure.
+The environment mode field is documented in the
+[managed environment API](https://learn.microsoft.com/en-us/rest/api/resource-manager/containerapps/managed-environments/get?view=rest-resource-manager-containerapps-2026-07-01).
+Overall health may remain `Warning` for an evaluation release; inspect its scientific
+and data warnings separately. A warning is not evidence of production model validation.
+
 After deployment, the script prints the backend URL. Set **Vercel → project → Settings →
 Environment Variables → API_URL** to that URL, without a trailing slash, and redeploy the
 frontend from the same source. Enable Fluid compute for the 300-second route duration:
