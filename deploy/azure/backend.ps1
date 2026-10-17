@@ -15,12 +15,17 @@ param(
     [string]$AppName = 'icpac-api',
     [ValidateSet('evaluation', 'production')][string]$ReleaseMode = 'evaluation',
     [ValidateSet('staff', 'public')][string]$AccessMode = 'staff',
+    [switch]$EnableAutomation,
+    [switch]$DisableAutomation,
+    [ValidateRange(0, 23)][int]$AutomationHourUtc = 10,
     [switch]$PlanOnly,
     [switch]$VerifyOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($PlanOnly -and $VerifyOnly) { throw 'Choose either -PlanOnly or -VerifyOnly.' }
+if ($EnableAutomation -and $DisableAutomation) { throw 'Choose either -EnableAutomation or -DisableAutomation.' }
+if ($VerifyOnly -and ($EnableAutomation -or $DisableAutomation)) { throw 'Verification cannot change the automation schedule.' }
 if ($AccessMode -eq 'public' -and $ReleaseMode -ne 'evaluation') { throw 'Public access requires an evaluation release.' }
 
 function Invoke-Azure([string[]]$Arguments) {
@@ -83,6 +88,8 @@ function Confirm-Deployment([switch]$Once) {
                 $reportedAccessMode = $health['access_mode']
                 if (-not $reportedAccessMode) { $reportedAccessMode = 'staff' }
                 if ($reportedAccessMode -ne $AccessMode) { $pending.Add('access mode differs from the requested mode') }
+                if ($EnableAutomation -and $health['automation_scheduler_enabled'] -ne $true) { $pending.Add('automation scheduler is not enabled') }
+                if ($DisableAutomation -and $health['automation_scheduler_enabled'] -ne $false) { $pending.Add('automation scheduler is not disabled') }
                 if ($health['durable_storage'] -ne $true) { $pending.Add('durable storage is not configured') }
                 if ($health['release_mode'] -ne $ReleaseMode) { $pending.Add('release mode differs from the requested mode') }
                 if ($health['components'] -isnot [System.Collections.IDictionary] -or $health['components']['Database'] -ne 'Healthy') { $pending.Add('database is not Healthy') }
@@ -194,6 +201,9 @@ if ($AccessMode -eq 'staff') {
     } catch { throw 'STAFF_CREDENTIALS must contain distinct named people, strong keys and valid roles.' }
 }
 Set-Value 'ACCESS_MODE' $AccessMode
+if ($EnableAutomation) { Set-Value 'AUTOMATION_SCHEDULER_ENABLED' 'true' }
+elseif ($DisableAutomation -or -not (Get-Setting 'AUTOMATION_SCHEDULER_ENABLED')) { Set-Value 'AUTOMATION_SCHEDULER_ENABLED' 'false' }
+if ($PSBoundParameters.ContainsKey('AutomationHourUtc') -or -not (Get-Setting 'AUTOMATION_DAILY_HOUR_UTC')) { Set-Value 'AUTOMATION_DAILY_HOUR_UTC' ([string]$AutomationHourUtc) }
 Set-Value 'RELEASE_MODE' $ReleaseMode
 Set-Value 'CLOUD_DEPLOYMENT' 'true'
 Set-Value 'OPERATION_WORKER_ENABLED' 'true'

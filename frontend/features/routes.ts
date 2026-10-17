@@ -16,6 +16,7 @@ export type PageKey =
   | "data"
   | "source"
   | "operations"
+  | "automations"
   | "bulletin"
   | "drafts"
   | "decision"
@@ -84,6 +85,12 @@ export const PLANNED_SOURCES = [
 ] as const;
 
 export const ROUTES: Route[] = [
+  {
+    path: "automations",
+    title: "Automation workspace",
+    menu: "Data & Tools",
+    page: "automations",
+  },
   { path: "", title: "Home", menu: "Home", page: "home" },
   {
     path: "forecasts",

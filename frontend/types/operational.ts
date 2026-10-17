@@ -314,6 +314,7 @@ export type OperationAction =
   | "verify_forecast"
   | "update_chirps"
   | "cycle"
+  | "end_to_end"
   | "past_weeks";
 
 export type Operation = {
@@ -330,6 +331,8 @@ export type Operation = {
   messages: { time: string; text: string }[];
   result: Record<string, unknown> | null;
   error: string | null;
+  retry_at?: string | null;
+  attempts?: number;
 };
 
 /** Figures of a CHIRPS dekad over an area (cos-latitude weighted means). */

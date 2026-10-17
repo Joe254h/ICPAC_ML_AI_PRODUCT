@@ -30,7 +30,7 @@ from backend.app.schemas import OperationRequest
 from backend.app.services.operations import OperationService
 from backend.app.services.platform import Platform
 
-TASKS = {"cycle": ["cycle"], "daily": ["update_chirps", "verify_due"]}
+TASKS = {"cycle": ["cycle"], "daily": ["update_chirps", "verify_due"], "connected": ["end_to_end"]}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
@@ -43,7 +43,9 @@ if __name__ == "__main__":
     failed = False
     for action in TASKS[args.task]:
         record = service.start(
-            OperationRequest(action=action, initialization=args.init_date, actor=args.actor),
+            OperationRequest.model_validate(
+                {"action": action, "initialization": args.init_date, "actor": args.actor}
+            ),
             background=False,
         )
         print(json.dumps(record, indent=2, default=str))

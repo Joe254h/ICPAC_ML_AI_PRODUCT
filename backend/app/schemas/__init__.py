@@ -101,6 +101,7 @@ class OperationRequest(BaseModel):
         "verify_forecast",
         "update_chirps",
         "cycle",
+        "end_to_end",
         "past_weeks",
     ]
     initialization: date | None = None

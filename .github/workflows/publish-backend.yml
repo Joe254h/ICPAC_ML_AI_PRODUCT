@@ -60,7 +60,7 @@ jobs:
           file: docker/backend.Dockerfile
           push: true
           build-args: |
-            PIP_EXTRAS=postgres,azure
+            PIP_EXTRAS=postgres,azure,feeds
             GIT_COMMIT=${{ steps.source.outputs.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}

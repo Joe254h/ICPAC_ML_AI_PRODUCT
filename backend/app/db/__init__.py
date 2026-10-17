@@ -144,6 +144,19 @@ class Repository:
             session.commit()
         return result
 
+    def insert_once(self, kind: str, payload: dict, record_id: str) -> bool:
+        """Create a durable outbox item once, including across replicas/restarts."""
+        with Session(self.engine) as session:
+            session.add(
+                Record(id=record_id, kind=kind, payload=json.dumps({**payload, "id": record_id}))
+            )
+            try:
+                session.commit()
+                return True
+            except IntegrityError:
+                session.rollback()
+                return False
+
     def list(self, kind: str) -> list[dict]:
         with Session(self.engine) as session:
             return [

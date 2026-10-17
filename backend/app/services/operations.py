@@ -9,9 +9,13 @@ time. Persisted requests resume after restart; legacy requests without parameter
 marked interrupted. Azure must keep one replica running to drain the queue when idle.
 """
 
+from __future__ import annotations
+
 import re
 import threading
+import time
 import traceback
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -51,6 +55,7 @@ ACTIONS = {
     "verify_forecast": "Verify one forecast against CHIRPS",
     "update_chirps": "Update the rainfall monitoring (CHIRPS and TAMSAT)",
     "cycle": "Weekly cycle: download ECMWF, run the forecast, verify against CHIRPS",
+    "end_to_end": "Connected forecast workflow: acquire, forecast, verify, map and prepare bulletin",
     "past_weeks": "Forecast and verify past weeks (ECMWF archive and CHIRPS)",
 }
 #: Weeks tried beyond those asked for, when CHIRPS does not cover the newest ones yet.
@@ -80,7 +85,14 @@ class OperationService:
                 )
                 self.repo.save(KIND, record, record["id"])
 
-    def start(self, body: OperationRequest, background: bool = True) -> dict[str, Any]:
+    def start(
+        self, body: OperationRequest, background: bool = True, identifier: str | None = None
+    ) -> dict[str, Any]:
+        if identifier:
+            try:
+                return self.get(identifier)
+            except KeyError:
+                pass
         if body.action == "verify_forecast" and not body.forecast_id:
             raise ValueError("Name the forecast to verify")
         if len([r for r in self.repo.list(KIND) if r["status"] in {"queued", "running"}]) >= 10:
@@ -88,26 +100,44 @@ class OperationService:
         if body.action == "past_weeks" and body.initialization is None:
             # A local clock read is safe on submission; no network lookup is needed.
             body = body.model_copy(update={"initialization": _today()})
-        record = self.repo.save(
-            KIND,
-            {
-                "action": body.action,
-                "title": ACTIONS[body.action],
-                "status": "queued",
-                "initialization": body.initialization.isoformat() if body.initialization else None,
-                "forecast_id": body.forecast_id,
-                "created_at": now(),
-                "created_by": body.actor,
-                "messages": [],
-                "result": None,
-                "error": None,
-                "request": body.model_dump(mode="json"),
-            },
-        )
+        payload: dict[str, Any] = {
+            "action": body.action,
+            "title": ACTIONS[body.action],
+            "status": "queued",
+            "initialization": body.initialization.isoformat() if body.initialization else None,
+            "forecast_id": body.forecast_id,
+            "created_at": now(),
+            "created_by": body.actor,
+            "messages": [],
+            "result": None,
+            "error": None,
+            "request": body.model_dump(mode="json"),
+        }
+        if identifier:
+            self.repo.insert_once(KIND, payload, identifier)
+            record = self.get(identifier)
+        else:
+            record = self.repo.save(KIND, payload)
         if background:
             return record
         self.run_pending()
         return self.get(record["id"])
+
+    def _pending(self) -> Sequence[dict[str, Any]]:
+        stamp = datetime.now(timezone.utc)
+        return [
+            r
+            for r in self.repo.list(KIND)
+            if r.get("request")
+            and (
+                r["status"] in {"queued", "running"}
+                or (
+                    r["status"] == "failed"
+                    and r.get("retry_at")
+                    and datetime.fromisoformat(r["retry_at"]) <= stamp
+                )
+            )
+        ]
 
     def run_pending(self) -> bool:
         """Execute one persisted request under a renewable cross-process lease.
@@ -116,7 +146,9 @@ class OperationService:
         commits let retries reuse completed scientific work; mail is never a queued action.
         """
         # Idle polling must not take a write lock (especially on a local SQLite DB).
-        if not any(r["status"] in {"queued", "running"} for r in self.repo.list(KIND)):
+        if not self._pending() and not any(
+            r["status"] in {"queued", "running"} for r in self.repo.list(KIND)
+        ):
             return False
         owner = str(uuid4())
         if not self.repo.lease(owner):
@@ -139,11 +171,7 @@ class OperationService:
         self._lease_lost = lost
         try:
             self.recover()
-            pending = [
-                r
-                for r in self.repo.list(KIND)
-                if r["status"] in {"queued", "running"} and r.get("request")
-            ]
+            pending = self._pending()
             if not pending:
                 return False
             record = min(pending, key=lambda r: r["created_at"])
@@ -155,8 +183,21 @@ class OperationService:
             self.repo.release_lease(owner)
 
     def worker(self, stopped: threading.Event) -> None:
+        last_tick = float("-inf")
         while not stopped.is_set():
             try:
+                if time.monotonic() - last_tick >= 60:
+                    from backend.app.services.automation import AutomationService
+
+                    last_tick = time.monotonic()
+                    try:
+                        AutomationService(self.platform).tick()
+                    except Exception:
+                        import logging
+
+                        logging.getLogger("icpac").exception(
+                            "Daily scheduling failed; queued operations will still drain"
+                        )
                 worked = self.run_pending()
             except Exception:
                 import logging
@@ -183,11 +224,18 @@ class OperationService:
                 "Started",
                 status="running",
                 started_at=self.get(operation_id).get("started_at") or now(),
+                attempts=self.get(operation_id).get("attempts", 0) + 1,
+                retry_at=None,
+                retryable=False,
+                error=None,
+                error_type=None,
+                trace=None,
             )
             if not body.initialization and body.action in {
                 "fetch_ecmwf",
                 "run_forecast",
                 "cycle",
+                "end_to_end",
                 "past_weeks",
             }:
                 from climate_engine.inputs.ecmwf_opendata import latest_initialization
@@ -212,7 +260,12 @@ class OperationService:
         except Exception as exc:
             if getattr(self, "_lease_lost", threading.Event()).is_set():
                 return
-            # Forecasters see the message; the exception type and trace stay in the record.
+            from climate_engine.inputs.ecmwf_opendata import ECMWFDataUnavailable
+
+            retry = (
+                isinstance(exc, ECMWFDataUnavailable)
+                and self.get(operation_id).get("attempts", 1) < 3
+            )
             self._log(
                 operation_id,
                 f"Failed: {exc}",
@@ -221,6 +274,10 @@ class OperationService:
                 error=str(exc) or type(exc).__name__,
                 error_type=type(exc).__name__,
                 trace=traceback.format_exc(limit=5),
+                retry_at=(datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+                if retry
+                else None,
+                retryable=retry,
             )
 
     def _forecasts(self) -> ForecastService:
@@ -270,6 +327,80 @@ class OperationService:
             operation_id,
             f"{len(result['verified'])} verified, {len(result['waiting'])} waiting for CHIRPS, "
             f"{len(result['failed'])} failed",
+        )
+        return result
+
+    def _end_to_end(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
+        """Prepare products for review; never promote, approve, email or publish."""
+        from backend.app.services.bulletins import WEEKLY, BulletinService
+
+        result = self._cycle(operation_id, body)
+        forecast_id = result["forecast_id"]
+        forecasts = self._forecasts()
+        self._log(operation_id, "Checking forecast package, maps and country summaries")
+        detail = forecasts.get(forecast_id)
+        countries = forecasts.countries(forecast_id)
+        result["countries"] = len(countries)
+        result["layers"] = detail["layers"]
+        result["products"] = detail["products"]
+        from backend.app.services.external_feeds import ExternalFeeds
+
+        feeds = ExternalFeeds(self.platform)
+        result["external_inputs"] = []
+        for profile in feeds.status():
+            if not profile["enabled"] or not profile["run_in_cycle"]:
+                continue
+            self._log(
+                operation_id, f"Acquiring the approved {profile['id'].upper()} source profile"
+            )
+            try:
+                record = feeds.acquire(
+                    profile["id"], date.fromisoformat(result["initialization"]), body.actor
+                )
+                result["external_inputs"].append(
+                    {"source": profile["id"], "status": "complete", "id": record["id"]}
+                )
+            except Exception as exc:
+                result["external_inputs"].append(
+                    {"source": profile["id"], "status": "failed", "error_type": type(exc).__name__}
+                )
+                self._log(
+                    operation_id,
+                    f"The {profile['id'].upper()} integration did not finish; the baseline forecast remains available",
+                )
+        from backend.app.services.supplemental import SupplementalService
+
+        self._log(
+            operation_id, "Checking approved climatology, extreme-rainfall and temperature inputs"
+        )
+        supplemental_service = SupplementalService(self.platform)
+        result["supplemental"] = supplemental_service.build(forecast_id, body.actor)
+        extra_record_id = (supplemental_service.appendix(forecast_id) or {}).get("record_id")
+        self._log(operation_id, "Preparing a frozen weekly bulletin draft for forecaster review")
+        existing = next(
+            (
+                b
+                for b in reversed(self.repo.list("bulletin"))
+                if b.get("kind") == WEEKLY
+                and b.get("forecast_id") == forecast_id
+                and b["status"] != "rejected"
+                and (b.get("facts", {}).get("supplemental") or {}).get("record_id")
+                == extra_record_id
+            ),
+            None,
+        )
+        bulletin = existing or BulletinService(self.platform).generate(
+            forecast_id=forecast_id, actor=body.actor
+        )
+        result["bulletin_id"] = bulletin["id"]
+        result["bulletin_status"] = bulletin["status"]
+        result["review_required"] = True
+        result["workflow_scope"] = (
+            "Available forecast products and a frozen bulletin prepared for review; blocked scientific products are not approximated."
+        )
+        self._log(
+            operation_id,
+            "Products are ready for review; unavailable scientific layers remain labelled pending",
         )
         return result
 

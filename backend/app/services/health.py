@@ -27,6 +27,9 @@ def model_label(model: str) -> str:
 
 
 def system_health(platform) -> dict:
+    from backend.app.services.automation import scheduler_settings
+
+    automation = scheduler_settings()
     components = {"API": "Healthy", "Database": "Healthy"}
     from backend.app.api.access import access_mode, credentials
 
@@ -189,6 +192,8 @@ def system_health(platform) -> dict:
         "release_mode": os.getenv("RELEASE_MODE", "evaluation"),
         "access_configured": access_ready,
         "access_mode": "public" if public_access else "staff",
+        "automation_scheduler_enabled": automation["enabled"],
+        "automation_daily_hour_utc": automation["hour_utc"],
         "durable_storage": platform.repo.url.startswith("postgresql")
         and bool(os.getenv("PACKAGE_STORE_CONNECTION")),
         # The deployed source revision, so a redeploy can confirm the new version is live.

@@ -95,7 +95,9 @@ def client(mirror: str):
     from ecmwf.opendata import Client
 
     cfg = settings()
-    return Client(source=mirror, model=cfg["model"], resol=cfg["resolution"])
+    return Client(
+        source=mirror, model=cfg["model"], resol=cfg["resolution"], maximum_retries=2, retry_after=5
+    )
 
 
 def member_numbers() -> list[int]:
@@ -124,15 +126,20 @@ def mirrors() -> list[str]:
 
 
 def is_published(initialization: date, mirror: str) -> bool:
-    """Whether the run's last needed step (336 h) is published on the mirror."""
+    """Both accumulation endpoints must exist; a partially published run is not ready."""
     import requests
 
     session_client = client(mirror)
-    params = {**request(initialization), "step": STEPS_HOURS[-1]}
     try:
-        urls = session_client._get_urls(use_index=False, **params).urls
-        index = os.path.splitext(urls[0])[0] + ".index"
-        return requests.head(index, timeout=20, allow_redirects=True).status_code == 200
+        for step in STEPS_HOURS:
+            params = {**request(initialization), "step": step}
+            urls = session_client._get_urls(use_index=False, **params).urls
+            if not urls:
+                return False
+            index = os.path.splitext(urls[0])[0] + ".index"
+            if requests.head(index, timeout=20, allow_redirects=True).status_code != 200:
+                return False
+        return True
     except (requests.RequestException, ValueError):
         return False
 
@@ -296,6 +303,9 @@ def fetch(initialization: date, directory: Path) -> FetchResult:
     directory.mkdir(parents=True, exist_ok=True)
     failures = []
     for mirror in mirrors():
+        if not is_published(initialization, mirror):
+            failures.append(f"{mirror}: accumulation endpoints are not both published yet")
+            continue
         with tempfile.TemporaryDirectory(prefix="ecmwf-") as scratch:
             grib = Path(scratch) / "tp.grib2"
             try:

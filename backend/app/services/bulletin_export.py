@@ -112,6 +112,12 @@ def images(document: bytes) -> dict[str, tuple[str, bytes]]:
     found = {}
     with zipfile.ZipFile(io.BytesIO(document)) as package:
         names = set(package.namelist())
+        from climate_engine.products.supplemental import NAMES
+
+        for key in NAMES:
+            part = f"word/media/automation-{key}.png"
+            if part in names:
+                found[key] = ("image/png", package.read(part))
         for name, key in IMAGE_SLOTS.items():
             part = name if name in names else f"word/{name}"
             if part in names:
@@ -237,6 +243,18 @@ class WeeklyHTMLExporter:
                 "here once ICPAC supplies them; nothing is inferred for them.</p>"
                 f'<div class="pending">{"".join(_pending(s) for s in pending)}</div></section>'
             )
+
+        for section in facts["sections"]:
+            if section.get("supplemental"):
+                image = maps.get(section["key"])
+                picture = (
+                    f'<img src="{data_uri(image[1])}" alt="{escape(section["title"])}" />'
+                    if image
+                    else ""
+                )
+                body.append(
+                    f'<section class="card"><h2>{escape(section["title"])}</h2>{"".join(f"<p>{text}</p>" for text in _paragraphs(section))}{picture}</section>'
+                )
 
         reviews = (
             "".join(

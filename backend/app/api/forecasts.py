@@ -26,6 +26,36 @@ IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
 def install(app: FastAPI, dependency) -> None:
+    @app.get("/automations")
+    def automations(platform=Depends(dependency)) -> dict:
+        from backend.app.services.automation import AutomationService
+
+        return AutomationService(platform).status()
+
+    @app.get("/automations/integrations")
+    def integrations(platform=Depends(dependency)) -> dict:
+        from backend.app.services.external_feeds import ExternalFeeds
+        from backend.app.services.hpc import HPCService
+
+        return {"feeds": ExternalFeeds(platform).status(), "hpc": HPCService(platform).status()}
+
+    @app.get("/forecasts/{forecast_id}/supplemental")
+    def supplemental_products(forecast_id: str = ForecastId, platform=Depends(dependency)) -> dict:
+        from backend.app.services.supplemental import SupplementalService
+
+        return SupplementalService(platform).current(forecast_id)
+
+    @app.get("/forecasts/{forecast_id}/supplemental/{product}/map")
+    def supplemental_map(product: str, forecast_id: str = ForecastId, platform=Depends(dependency)):
+        from backend.app.services.supplemental import SupplementalService
+
+        service = SupplementalService(platform)
+        return Response(
+            service.map(service.current(forecast_id), product),
+            media_type="image/png",
+            headers={"Cache-Control": "no-store"},
+        )
+
     @app.get("/data/sources")
     def data_sources(platform=Depends(dependency)) -> list[dict]:
         """Observation and forecast sources: active ones with what has been fetched,

@@ -1,5 +1,10 @@
 # Weekly operations
 
+For the connected 20-capability workspace, daily scheduler, provider adapters, HPC bridge
+and supplementary products, see [Automation workspace](automation-workspace.md).
+Public evaluation access is supported; the staff credential instructions below apply
+when `ACCESS_MODE=staff`.
+
 The service issues the Week-2 (days 8–14) rainfall forecast from data it downloads itself,
 and verifies each forecast once its week has been observed. Everything below runs from the
 **Operations** page (Data & Tools › Operations) or, unattended, from

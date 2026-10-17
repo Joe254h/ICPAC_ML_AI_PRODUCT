@@ -103,6 +103,21 @@ class Style:
 
 
 STYLES: dict[str, Style] = {
+    "supplemental_rainfall_anomaly": Style(
+        "BrBG", "Rainfall anomaly (mm/week)", "diverging", provisional=True
+    ),
+    "supplemental_exceptional_rainfall": Style(
+        "YlOrRd", "Above reviewed threshold (0/1)", "continuous", 0, 1, provisional=True
+    ),
+    "supplemental_mean_temperature": Style(
+        "YlOrRd", "Mean temperature (°C)", "continuous", provisional=True
+    ),
+    "supplemental_temperature_anomaly": Style(
+        "RdBu_r", "Temperature anomaly (°C)", "diverging", provisional=True
+    ),
+    "supplemental_heat_stress": Style(
+        "YlOrRd", "Reviewed heat-stress index", "continuous", provisional=True
+    ),
     # Measured from the reference maps.
     "rmse": Style("YlOrRd", "RMSE (mm/week)", "continuous", vmin=0.0),
     "correlation": Style("viridis", "Pearson r", "continuous"),

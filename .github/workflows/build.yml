@@ -14,9 +14,9 @@ jobs:
       - run: docker compose -f docker-compose.yml -f docker-compose.llm.yml config --quiet
       - run: docker compose build
       - name: Build the PostgreSQL deployment configuration
-        run: docker build -f docker/backend.Dockerfile --build-arg PIP_EXTRAS=postgres,azure --build-arg GIT_COMMIT -t icpac-postgres-check .
+        run: docker build -f docker/backend.Dockerfile --build-arg PIP_EXTRAS=postgres,azure,feeds --build-arg GIT_COMMIT -t icpac-postgres-check .
       - name: Verify PostgreSQL and ECMWF libraries exit cleanly in the deployment image
-        run: docker run --rm --entrypoint python icpac-postgres-check -X faulthandler -c "import netCDF4, eccodes, psycopg; assert psycopg.pq.__impl__ == 'c'; print('Native PostgreSQL and GRIB runtime OK')"
+        run: docker run --rm --entrypoint python icpac-postgres-check -X faulthandler -c "import netCDF4, eccodes, psycopg, cdsapi, ecmwfapi; assert psycopg.pq.__impl__ == 'c'; print('Native PostgreSQL, GRIB and external provider runtimes OK')"
       - run: docker compose up -d --wait
       - run: curl --fail http://localhost:8000/health && curl --fail http://localhost:3000/api/health
       - if: always()

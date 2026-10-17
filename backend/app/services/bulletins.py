@@ -139,6 +139,11 @@ class BulletinService:
         service = ForecastService(self.platform)
         detail = service.get(forecast_id)  # refuses a package that fails its checks
         inputs = BulletinInputs.from_package(service.directory(forecast_id))
+        from backend.app.services.supplemental import SupplementalService
+        from climate_engine.products import supplemental_document
+
+        supplemental_service = SupplementalService(self.platform)
+        extra = supplemental_service.appendix(forecast_id)
         sections = [
             {
                 k: section[k]
@@ -157,6 +162,8 @@ class BulletinService:
             for section in weekly.sections(inputs)
         ]
         title = "Weekly Forecast for " + weekly.valid_period(inputs)
+        if extra:
+            sections.extend(supplemental_document.sections(extra))
         facts = {
             "kind": WEEKLY,
             "format": weekly.FORMAT_VERSION,
@@ -168,6 +175,7 @@ class BulletinService:
             "input": inputs.interpretation["input"],
             "label": weekly.scope_label(inputs),
             "sections": sections,
+            "supplemental": extra,
             "provenance": {
                 key: detail["provenance"].get(key)
                 for key in (
@@ -187,7 +195,14 @@ class BulletinService:
         output.mkdir(parents=True, exist_ok=True)
         image, document = output / "map.png", output / "bulletin.docx"
         image.write_bytes(weekly.rainfall_png(inputs))
-        document.write_bytes(WordTemplateGenerator().render_bytes(inputs))
+        word_bytes = WordTemplateGenerator().render_bytes(inputs)
+        if extra:
+            extra_record = self.repo.get("supplemental_product", extra["record_id"])
+            extra_maps = {
+                name: supplemental_service.map(extra_record, name) for name in extra["summary"]
+            }
+            word_bytes = supplemental_document.append_document(word_bytes, extra, extra_maps)
+        document.write_bytes(word_bytes)
         store = package_store()
         if store is not None:  # hosts without a persistent disk keep both in Blob Storage
             store.put(map_key(identifier), image.read_bytes())

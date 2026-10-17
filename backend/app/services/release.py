@@ -9,6 +9,9 @@ from climate_engine.operational.settings import required, settings
 
 
 def validate_release(platform) -> None:
+    from backend.app.services.automation import scheduler_settings
+
+    scheduler_settings()
     mode = os.getenv("RELEASE_MODE", "evaluation")
     if mode not in {"evaluation", "production"}:
         raise ValueError("RELEASE_MODE must be evaluation or production")

@@ -15,6 +15,7 @@ models = ["lightgbm", "xgboost", "scikit-learn"]
 postgres = ["psycopg[c]==3.3.6; sys_platform == 'linux'", "psycopg[binary]==3.3.6; sys_platform != 'linux'"]
 # Product packages in Azure Blob Storage (PACKAGE_STORE_CONNECTION).
 azure = ["azure-storage-blob>=12.20"]
+feeds = ["cdsapi>=0.7,<1", "ecmwf-api-client>=1.6,<2"]
 
 [tool.setuptools.packages.find]
 include = ["backend*", "climate_engine*", "chatbot*"]

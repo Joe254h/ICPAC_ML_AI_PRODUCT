@@ -58,6 +58,28 @@ def test_open_data_download_keeps_perturbed_tp_members(mirror, tmp_path):
     assert ecmwf_opendata.latest_initialization(date(2026, 10, 7)) == date(2026, 10, 5)
 
 
+def test_partial_ecmwf_publication_is_not_a_ready_week2_run(monkeypatch):
+    from types import SimpleNamespace
+
+    import requests
+
+    monkeypatch.setattr(
+        ecmwf_opendata,
+        "client",
+        lambda mirror: SimpleNamespace(
+            _get_urls=lambda **params: SimpleNamespace(
+                urls=[f"https://example.invalid/{params['step']}.grib2"]
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        requests,
+        "head",
+        lambda url, **kwargs: SimpleNamespace(status_code=404 if "168.index" in url else 200),
+    )
+    assert not ecmwf_opendata.is_published(date(2026, 10, 17), "mock")
+
+
 def test_upper_air_predictors_download_checked_and_averaged(env, tmp_path, monkeypatch):
     """The AI/ML model's upper-air fields: only the needed parameters and levels, every
     member at the seven forecast hours, on the training grid, ready for the features."""

@@ -191,3 +191,14 @@ try { & $deployment -ExpectedCommit $global:DeployTestcommit -AccessMode public 
 catch { if ($_.Exception.Message -ne 'Public access requires an evaluation release.') { throw } }
 if ($global:DeployTestwrites -or $global:DeployTestsecretReads) { throw 'Invalid public production configuration touched Azure' }
 Write-Host 'PowerShell deployment contract tests passed (offline).'
+Reset-DeploymentFixture
+$global:DeployTesthealthChanges['automation_scheduler_enabled'] = $true
+& $deployment -ExpectedCommit $global:DeployTestcommit -EnableAutomation -AutomationHourUtc 11
+$settings = @{}
+foreach ($variable in $global:DeployTestapp.properties.template.containers[0].env) { if ($variable.value) { $settings[$variable.name] = $variable.value } }
+if ($settings['AUTOMATION_SCHEDULER_ENABLED'] -ne 'true' -or $settings['AUTOMATION_DAILY_HOUR_UTC'] -ne '11') { throw 'Reviewed schedule was not configured' }
+Reset-DeploymentFixture
+try { & $deployment -ExpectedCommit $global:DeployTestcommit -EnableAutomation -VerifyOnly; throw 'Verification changed schedule' }
+catch { if ($_.Exception.Message -ne 'Verification cannot change the automation schedule.') { throw } }
+if ($global:DeployTestwrites -or $global:DeployTestsecretReads) { throw 'Conflicting automation options touched Azure' }
+Write-Host 'PowerShell schedule guards passed (offline).'

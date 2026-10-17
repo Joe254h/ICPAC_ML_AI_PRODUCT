@@ -44,6 +44,10 @@ def test_postgres_worker_claim_and_persistent_chat_quota():
     try:
         assert first.lease(owner)
         assert not second.lease("other-" + owner)
+        outbox = "outbox-" + uuid4().hex
+        assert first.insert_once("outbox_test", {"created_by": "first"}, outbox)
+        assert not second.insert_once("outbox_test", {"created_by": "second"}, outbox)
+        assert second.get("outbox_test", outbox)["created_by"] == "first"
         assert first.lease(owner, renew=True)
         for _ in range(10):
             first.chat_allowance(person)

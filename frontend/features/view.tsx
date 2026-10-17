@@ -35,6 +35,7 @@ const PAGES: Record<PageKey, React.ComponentType<PageProps>> = {
   data: view(() => import("@/features/operational/data")),
   source: view(() => import("@/features/operational/source")),
   operations: view(() => import("@/features/operational/operations")),
+  automations: view(() => import("@/features/operational/automations")),
   bulletin: view(() => import("@/features/operational/bulletin")),
   drafts: view(() => import("@/features/bulletins")),
   decision: view(() => import("@/features/bulletin-decision")),
