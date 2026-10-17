@@ -72,3 +72,19 @@ test("staff credentials cover chat and manual actions, while email links use the
   expect(headers[1].Authorization).toBeUndefined();
   expect(headers[2].Authorization).toBe("Bearer private-test-key");
 });
+
+test("public visitors get a stable anonymous history without a staff key", async () => {
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+  vi.stubGlobal("fetch", fetch);
+  await request("/chat/sessions");
+  await mutate("/chat", { message: "Hello" });
+  const first = fetch.mock.calls[0][1].headers["X-Visitor-Id"];
+  expect(first).toMatch(/^[0-9a-f]{32}$/);
+  expect(fetch.mock.calls[1][1].headers["X-Visitor-Id"]).toBe(first);
+  expect(fetch.mock.calls[1][1].headers.Authorization).toBeUndefined();
+  expect(window.localStorage.getItem("icpac-visitor-id")).toBe(first);
+  vi.resetModules();
+  const reloaded = await import("../services/api");
+  await reloaded.request("/chat/sessions");
+  expect(fetch.mock.calls[2][1].headers["X-Visitor-Id"]).toBe(first);
+});

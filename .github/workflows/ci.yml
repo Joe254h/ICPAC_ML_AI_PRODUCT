@@ -64,6 +64,11 @@ jobs:
         working-directory: frontend
       - run: pnpm test:e2e
         working-directory: frontend
+      - name: Verify public evaluation access without staff credentials
+        run: pnpm exec playwright test e2e/public-access.spec.ts --project=app --no-deps
+        working-directory: frontend
+        env:
+          E2E_ACCESS_MODE: public
 
   native-models:
     runs-on: ubuntu-latest

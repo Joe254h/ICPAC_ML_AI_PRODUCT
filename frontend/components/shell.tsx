@@ -414,10 +414,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         )}
       </header>
       <ServiceNotice health={health} />
-      <details className="wrap" style={{ paddingBlock: 12 }}>
-        <summary>Staff access</summary>
-        <BulletinAccess />
-      </details>
+      {health.data && health.data.access_mode !== "public" && (
+        <details className="wrap" style={{ paddingBlock: 12 }}>
+          <summary>Staff access</summary>
+          <BulletinAccess />
+        </details>
+      )}
       <BannerSlot.Provider value={slot}>
         <main id="content" key={accessVersion}>
           {children}

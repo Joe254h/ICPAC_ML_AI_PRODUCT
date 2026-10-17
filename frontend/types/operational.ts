@@ -246,6 +246,7 @@ export type BulletinStatus = {
 };
 
 export type Health = {
+  access_mode?: "staff" | "public";
   status: string;
   mode: string;
   /** The deployed source revision (absent on releases before it was reported). */

@@ -2,7 +2,7 @@
 
 import os
 
-from backend.app.api.access import credentials
+from backend.app.api.access import access_mode, credentials
 from backend.app.services import operational
 from backend.app.services.registry import ModelRegistry
 from climate_engine.operational.settings import required, settings
@@ -12,12 +12,13 @@ def validate_release(platform) -> None:
     mode = os.getenv("RELEASE_MODE", "evaluation")
     if mode not in {"evaluation", "production"}:
         raise ValueError("RELEASE_MODE must be evaluation or production")
+    public_access = access_mode() == "public"
     if os.getenv("CLOUD_DEPLOYMENT") == "true":
         if not platform.repo.url.startswith("postgresql"):
             raise ValueError("Cloud deployment requires persistent PostgreSQL DATABASE_URL")
         if not os.getenv("PACKAGE_STORE_CONNECTION"):
             raise ValueError("Cloud deployment requires PACKAGE_STORE_CONNECTION")
-        if not credentials():
+        if not public_access and not credentials():
             raise ValueError("Cloud deployment requires named staff credentials")
         # Establish a real Blob connection now. A nonempty but invalid connection
         # string must not pass deployment readiness and fail on the first forecast.

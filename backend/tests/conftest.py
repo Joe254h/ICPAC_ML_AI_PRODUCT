@@ -17,5 +17,6 @@ def _no_startup_registration(monkeypatch):
         "STAFF_CREDENTIALS",
         "CLOUD_DEPLOYMENT",
         "RELEASE_MODE",
+        "ACCESS_MODE",
     ):
         monkeypatch.delenv(name, raising=False)

@@ -91,6 +91,26 @@ Invoke-RestMethod 'https://<backend-host>/health' | ConvertTo-Json -Depth 8
 
 ## Access, privacy and recovery
 
+For the temporary public evaluation app, deploy with `-ReleaseMode evaluation -AccessMode public`.
+This sets backend `ACCESS_MODE=public`: visitors can use Copilot and all manual workflows,
+including model administration and bulletin approval/publication, without entering a key.
+Deploy the matching frontend to hide the Staff access panel automatically from `/health.access_mode`.
+No frontend access key or public secret environment variable is needed.
+
+Each browser automatically gets a random anonymous identifier for its own Copilot history.
+Existing staff histories and other visitors' conversations remain separate. Clearing browser
+storage starts a new anonymous history; there is no account recovery for anonymous histories.
+The identifier is a private history capability and should not be shared. Direct API clients
+can retain their own random 32-character lowercase hexadecimal `X-Visitor-Id` header for
+continuity. Calls without one receive an ephemeral identity and cannot recover its history.
+Chat concurrency, per-identity request budgets, review transitions and scientific gates remain
+enabled. Anonymous identifiers can be replaced by visitors, so these budgets are not verified
+per-person quotas. Public mode requires an evaluation release.
+
+Use `-AccessMode public` with `-VerifyOnly` to verify a public deployment. Later, redeploy
+with `-AccessMode staff` to restore staff access. Saved staff credentials are preserved when
+public mode is enabled and become usable again in staff mode. The default is staff mode.
+
 `STAFF_CREDENTIALS` is a backend-only JSON array. Each person gets a distinct random key
 and stable name; never share Joe254h's key. Roles are `operator` (forecast/data work and
 draft creation), `reviewer` (approve/reject), `publisher` (publish), `chat` (assistant and

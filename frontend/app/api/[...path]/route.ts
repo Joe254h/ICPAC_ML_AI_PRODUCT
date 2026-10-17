@@ -29,11 +29,13 @@ async function proxy(request: NextRequest, segments: string[]) {
   );
   try {
     const authorization = request.headers.get("authorization");
+    const visitor = request.headers.get("x-visitor-id");
     const upstream = await fetch(target, {
       method: request.method,
       headers: {
         "Content-Type": "application/json",
         ...(authorization ? { Authorization: authorization } : {}),
+        ...(visitor ? { "X-Visitor-Id": visitor } : {}),
       },
       body: request.method === "GET" ? undefined : await request.text(),
       cache: "no-store",

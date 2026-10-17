@@ -1,7 +1,8 @@
-"""Named, revocable staff credentials; public proxies never supply credentials."""
+"""Named staff access or explicit public evaluation with separate visitor histories."""
 
 import json
 import os
+import re
 import secrets
 import threading
 from dataclasses import dataclass
@@ -13,6 +14,15 @@ from fastapi import Depends, Header, HTTPException
 class Principal:
     name: str
     roles: frozenset[str]
+
+
+def access_mode() -> str:
+    mode = os.getenv("ACCESS_MODE", "staff")
+    if mode not in {"staff", "public"}:
+        raise ValueError("ACCESS_MODE must be staff or public")
+    if mode == "public" and os.getenv("RELEASE_MODE", "evaluation") != "evaluation":
+        raise ValueError("Public access is available only for evaluation releases")
+    return mode
 
 
 def credentials() -> list[dict]:
@@ -53,7 +63,17 @@ def credentials() -> list[dict]:
         raise HTTPException(503, "Staff access is not configured correctly.") from None
 
 
-def principal(authorization: str | None = Header(default=None)) -> Principal:
+def principal(
+    authorization: str | None = Header(default=None),
+    x_visitor_id: str | None = Header(default=None),
+) -> Principal:
+    if access_mode() == "public":
+        # No login in the evaluation app. A random browser capability keeps chat
+        # histories separate; never map a visitor to a named staff member.
+        visitor = x_visitor_id or secrets.token_hex(16)
+        if not re.fullmatch(r"[0-9a-f]{32}", visitor):
+            raise HTTPException(400, "Invalid browser session; reload the page.")
+        return Principal(f"visitor:{visitor}", frozenset({"admin"}))
     records = credentials()
     if not records:
         raise HTTPException(503, "Staff access is not configured; contact the operator.")

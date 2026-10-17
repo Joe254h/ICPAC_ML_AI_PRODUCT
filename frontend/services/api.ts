@@ -13,10 +13,12 @@ export async function request<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
+  const visitor = visitorId();
   const response = await fetch("/api" + path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...(visitor ? { "X-Visitor-Id": visitor } : {}),
       ...(bulletinOperatorKey && path !== "/bulletins/email-action"
         ? { Authorization: `Bearer ${bulletinOperatorKey}` }
         : {}),
@@ -37,6 +39,28 @@ export async function request<T>(
   // 204 (a conversation deleted): nothing to read.
   if (response.status === 204) return undefined as T;
   return response.json();
+}
+
+// Anonymous conversation ownership, created automatically without a login.
+// Clearing browser data starts a new history. Staff credentials stay in memory.
+let browserVisitorId = "";
+function visitorId(): string {
+  if (typeof window === "undefined") return "";
+  if (browserVisitorId) return browserVisitorId;
+  try {
+    const saved = window.localStorage.getItem("icpac-visitor-id");
+    if (saved && /^[0-9a-f]{32}$/.test(saved))
+      return (browserVisitorId = saved);
+  } catch {
+    // Restricted browser storage: retain this tab's history for its lifetime.
+  }
+  browserVisitorId = window.crypto.randomUUID().replaceAll("-", "");
+  try {
+    window.localStorage.setItem("icpac-visitor-id", browserVisitorId);
+  } catch {
+    // The in-memory identifier still works when storage is unavailable.
+  }
+  return browserVisitorId;
 }
 
 // Kept only in this tab's memory, never in browser storage or public environment variables.

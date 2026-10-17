@@ -220,3 +220,124 @@ def test_submitting_a_job_does_not_contact_ecmwf(client, monkeypatch):
     )
     assert response.status_code == 202
     assert response.json()["status"] == "queued"
+
+
+def test_public_evaluation_needs_no_staff_key_and_can_be_switched_back(client, monkeypatch):
+    monkeypatch.setenv("ACCESS_MODE", "public")
+    client.headers["X-Visitor-Id"] = "a" * 32
+    me = client.get("/access/me")
+    assert me.status_code == 200
+    assert me.json()["name"] == "visitor:" + "a" * 32
+    assert me.json()["roles"] == ["admin"]
+    operation = client.post(
+        "/operations", json={"action": "past_weeks", "weeks": 2, "actor": "Visitor"}
+    )
+    assert operation.status_code == 202
+    assert operation.json()["created_by"] == me.json()["name"]
+    assert client.get("/audit").status_code == 200
+    for path in (
+        "/models/missing/validate",
+        "/models/missing/promote",
+        "/bulletins/missing/approve",
+        "/bulletins/missing/publish",
+    ):
+        response = client.post(path, json={"actor": "Visitor"})
+        assert response.status_code in {404, 422}, (path, response.text)
+    health = client.get("/health").json()
+    assert health["access_mode"] == "public"
+    assert health["access_configured"] is True
+    monkeypatch.setenv("ACCESS_MODE", "staff")
+    assert client.get("/access/me").status_code == 401
+    assert (
+        client.get("/access/me", headers={"Authorization": f"Bearer {ALICE}"}).json()["name"]
+        == "Alice"
+    )
+
+
+def test_public_chat_history_is_separate_from_other_visitors_and_staff(client, monkeypatch):
+    monkeypatch.setenv("ACCESS_MODE", "public")
+    repo = client.app.state.platform.repo
+    mine = repo.save(
+        "chat_session", {"owner": "visitor:" + "a" * 32, "messages": [], "created_at": now()}
+    )
+    others = [
+        repo.save("chat_session", {"owner": owner, "messages": [], "created_at": now()})
+        for owner in ("Alice", "visitor:" + "b" * 32)
+    ]
+    client.headers["X-Visitor-Id"] = "a" * 32
+    assert [s["id"] for s in client.get("/chat/sessions").json()] == [mine["id"]]
+    for record in others:
+        path = f"/chat/sessions/{record['id']}"
+        assert client.get(path).status_code == 404
+        assert client.post(path + "/archive").status_code == 404
+        assert client.delete(path).status_code == 404
+        assert (
+            client.post(
+                "/chat", json={"message": "Continue", "session_id": record["id"]}
+            ).status_code
+            == 404
+        )
+    monkeypatch.setattr(agent, "chat_model", lambda: None)
+    answer = client.post("/chat", json={"message": "Hello"})
+    assert answer.status_code == 200
+    assert repo.get("chat_session", answer.json()["session_id"])["owner"] == "visitor:" + "a" * 32
+    assert client.get(f"/chat/sessions/{answer.json()['session_id']}").status_code == 200
+    assert client.post(f"/chat/sessions/{mine['id']}/archive").status_code == 200
+    assert client.delete(f"/chat/sessions/{mine['id']}").status_code == 204
+
+
+def test_public_requests_without_browser_id_never_share_an_identity(client, monkeypatch):
+    monkeypatch.setenv("ACCESS_MODE", "public")
+    first = client.get("/access/me").json()["name"]
+    second = client.get("/access/me").json()["name"]
+    assert first != second
+    assert first.startswith("visitor:") and second.startswith("visitor:")
+    assert client.get("/access/me", headers={"X-Visitor-Id": "Alice"}).status_code == 400
+
+
+def test_public_chat_keeps_the_existing_request_budget(client, monkeypatch):
+    from chatbot.service import Copilot
+
+    monkeypatch.setenv("ACCESS_MODE", "public")
+    monkeypatch.setattr(Copilot, "answer", lambda *args, **kwargs: {"session_id": "test"})
+    client.headers["X-Visitor-Id"] = "c" * 32
+    for _ in range(10):
+        assert client.post("/chat", json={"message": "Hello"}).status_code == 200
+    assert client.post("/chat", json={"message": "Hello"}).status_code == 429
+
+
+def test_public_access_requires_explicit_evaluation_configuration(client, monkeypatch):
+    from backend.app.services.release import validate_release
+
+    monkeypatch.setenv("ACCESS_MODE", "public")
+    monkeypatch.setenv("RELEASE_MODE", "production")
+    with pytest.raises(ValueError, match="only for evaluation"):
+        validate_release(client.app.state.platform)
+    monkeypatch.setenv("ACCESS_MODE", "invalid")
+    with pytest.raises(ValueError, match="ACCESS_MODE"):
+        validate_release(client.app.state.platform)
+
+
+def test_public_cloud_release_preserves_storage_checks_without_needing_staff(monkeypatch):
+    from backend.app.services.registry import ModelRegistry
+    from backend.app.services.release import validate_release
+
+    monkeypatch.setenv("ACCESS_MODE", "public")
+    monkeypatch.setenv("CLOUD_DEPLOYMENT", "true")
+    monkeypatch.setenv("PACKAGE_STORE_CONNECTION", "test-blob")
+    monkeypatch.delenv("BULLETIN_OPERATOR_KEY", raising=False)
+    monkeypatch.setattr("climate_engine.products.store.package_store", lambda: object())
+    monkeypatch.setattr(ModelRegistry, "current", lambda self: {"model": {}})
+    monkeypatch.setattr(
+        "backend.app.services.release.operational.OperationalModel",
+        lambda record: SimpleNamespace(load=lambda: None),
+    )
+    platform = SimpleNamespace(repo=SimpleNamespace(url="postgresql://test", list=lambda kind: []))
+    validate_release(platform)
+    monkeypatch.delenv("PACKAGE_STORE_CONNECTION")
+    with pytest.raises(ValueError, match="PACKAGE_STORE_CONNECTION"):
+        validate_release(platform)
+    monkeypatch.setenv("PACKAGE_STORE_CONNECTION", "test-blob")
+    monkeypatch.setenv("ACCESS_MODE", "staff")
+    with pytest.raises(ValueError, match="named staff"):
+        validate_release(platform)

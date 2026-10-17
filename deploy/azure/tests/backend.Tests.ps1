@@ -173,4 +173,21 @@ Assert-VerificationRejected 'ingress hostname is missing'
 Reset-DeploymentFixture
 try { & $deployment -ExpectedCommit $global:DeployTestcommit -PlanOnly -VerifyOnly; throw 'Conflicting modes accepted' }
 catch { if ($_.Exception.Message -ne 'Choose either -PlanOnly or -VerifyOnly.') { throw } }
+Reset-DeploymentFixture
+$global:DeployTestapp.properties.template.containers[0].env = @($global:DeployTestapp.properties.template.containers[0].env | Where-Object name -NE 'STAFF_CREDENTIALS')
+$global:DeployTesthealthChanges['access_mode'] = 'public'
+& $deployment -ExpectedCommit $global:DeployTestcommit -AccessMode public -PlanOnly
+if ($global:DeployTestwrites) { throw 'Public plan changed Azure' }
+& $deployment -ExpectedCommit $global:DeployTestcommit -AccessMode public
+$configuredMode = @($global:DeployTestapp.properties.template.containers[0].env | Where-Object name -EQ ACCESS_MODE)[0].value
+if ($global:DeployTestwrites -ne 1 -or $configuredMode -ne 'public') { throw 'Public deployment did not set ACCESS_MODE' }
+Reset-DeploymentFixture
+$global:DeployTesthealthChanges['access_mode'] = 'public'
+& $deployment -ExpectedCommit $global:DeployTestcommit -AccessMode public -VerifyOnly
+if ($global:DeployTestwrites -or $global:DeployTestsecretReads) { throw 'Public verification changed Azure' }
+Assert-VerificationRejected 'access mode differs'
+Reset-DeploymentFixture
+try { & $deployment -ExpectedCommit $global:DeployTestcommit -AccessMode public -ReleaseMode production; throw 'Public production accepted' }
+catch { if ($_.Exception.Message -ne 'Public access requires an evaluation release.') { throw } }
+if ($global:DeployTestwrites -or $global:DeployTestsecretReads) { throw 'Invalid public production configuration touched Azure' }
 Write-Host 'PowerShell deployment contract tests passed (offline).'

@@ -14,12 +14,14 @@ param(
     [string]$ResourceGroup = 'icpac',
     [string]$AppName = 'icpac-api',
     [ValidateSet('evaluation', 'production')][string]$ReleaseMode = 'evaluation',
+    [ValidateSet('staff', 'public')][string]$AccessMode = 'staff',
     [switch]$PlanOnly,
     [switch]$VerifyOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($PlanOnly -and $VerifyOnly) { throw 'Choose either -PlanOnly or -VerifyOnly.' }
+if ($AccessMode -eq 'public' -and $ReleaseMode -ne 'evaluation') { throw 'Public access requires an evaluation release.' }
 
 function Invoke-Azure([string[]]$Arguments) {
     $result = & az @Arguments --only-show-errors --output json
@@ -78,6 +80,9 @@ function Confirm-Deployment([switch]$Once) {
             else {
                 if ($health['version'] -ne $ExpectedCommit) { $pending.Add('health source version differs from the expected commit') }
                 if ($health['access_configured'] -ne $true) { $pending.Add('staff access is not configured') }
+                $reportedAccessMode = $health['access_mode']
+                if (-not $reportedAccessMode) { $reportedAccessMode = 'staff' }
+                if ($reportedAccessMode -ne $AccessMode) { $pending.Add('access mode differs from the requested mode') }
                 if ($health['durable_storage'] -ne $true) { $pending.Add('durable storage is not configured') }
                 if ($health['release_mode'] -ne $ReleaseMode) { $pending.Add('release mode differs from the requested mode') }
                 if ($health['components'] -isnot [System.Collections.IDictionary] -or $health['components']['Database'] -ne 'Healthy') { $pending.Add('database is not Healthy') }
@@ -163,29 +168,32 @@ if (-not (Get-Setting 'PACKAGE_STORE_CONNECTION')) {
     Set-Private 'PACKAGE_STORE_CONNECTION' 'package-store' $connection.connectionString
 }
 if (-not (Get-Setting 'PACKAGE_STORE_CONTAINER')) { Set-Value 'PACKAGE_STORE_CONTAINER' 'forecast-packages' }
-if (-not (Get-Setting 'STAFF_CREDENTIALS')) {
-    if ($PlanOnly) { throw 'STAFF_CREDENTIALS is missing; rerun without -PlanOnly to configure Joe254h.' }
-    $staffKey = Read-Private 'Enter a unique staff access key for Joe254h (at least 32 characters; save it in your password manager)'
-    if ($staffKey.Length -lt 32) { throw 'Staff key must contain at least 32 characters.' }
-    $staff = ConvertTo-Json -Compress -InputObject @(@{name = 'Joe254h'; key = $staffKey; roles = @('admin')})
-    Set-Private 'STAFF_CREDENTIALS' 'staff-credentials' $staff
-}
-try {
-    $staffRecords = @(Get-Setting 'STAFF_CREDENTIALS' | ConvertFrom-Json -AsHashtable)
-    if (-not $staffRecords.Count) { throw 'Empty staff list' }
-    $names = @{}
-    $keys = @{}
-    foreach ($person in $staffRecords) {
-        if (-not ($person.name -is [string]) -or $person.name.Trim().Length -lt 2 -or $person.name.Length -gt 80 -or
-            $person.name -ne $person.name.Trim() -or -not ($person.key -is [string]) -or $person.key.Length -lt 32 -or
-            $names.ContainsKey($person.name) -or $keys.ContainsKey($person.key) -or -not ($person.roles -is [array]) -or -not $person.roles.Count -or
-            @($person.roles | Where-Object { $_ -notin @('admin','operator','reviewer','publisher','chat') }).Count) {
-            throw 'Invalid staff entry'
-        }
-        $names[$person.name] = $true
-        $keys[$person.key] = $true
+if ($AccessMode -eq 'staff') {
+    if (-not (Get-Setting 'STAFF_CREDENTIALS')) {
+        if ($PlanOnly) { throw 'STAFF_CREDENTIALS is missing; rerun without -PlanOnly to configure Joe254h.' }
+        $staffKey = Read-Private 'Enter a unique staff access key for Joe254h (at least 32 characters; save it in your password manager)'
+        if ($staffKey.Length -lt 32) { throw 'Staff key must contain at least 32 characters.' }
+        $staff = ConvertTo-Json -Compress -InputObject @(@{name = 'Joe254h'; key = $staffKey; roles = @('admin')})
+        Set-Private 'STAFF_CREDENTIALS' 'staff-credentials' $staff
     }
-} catch { throw 'STAFF_CREDENTIALS must contain distinct named people, strong keys and valid roles.' }
+    try {
+        $staffRecords = @(Get-Setting 'STAFF_CREDENTIALS' | ConvertFrom-Json -AsHashtable)
+        if (-not $staffRecords.Count) { throw 'Empty staff list' }
+        $names = @{}
+        $keys = @{}
+        foreach ($person in $staffRecords) {
+            if (-not ($person.name -is [string]) -or $person.name.Trim().Length -lt 2 -or $person.name.Length -gt 80 -or
+                $person.name -ne $person.name.Trim() -or -not ($person.key -is [string]) -or $person.key.Length -lt 32 -or
+                $names.ContainsKey($person.name) -or $keys.ContainsKey($person.key) -or -not ($person.roles -is [array]) -or -not $person.roles.Count -or
+                @($person.roles | Where-Object { $_ -notin @('admin','operator','reviewer','publisher','chat') }).Count) {
+                throw 'Invalid staff entry'
+            }
+            $names[$person.name] = $true
+            $keys[$person.key] = $true
+        }
+    } catch { throw 'STAFF_CREDENTIALS must contain distinct named people, strong keys and valid roles.' }
+}
+Set-Value 'ACCESS_MODE' $AccessMode
 Set-Value 'RELEASE_MODE' $ReleaseMode
 Set-Value 'CLOUD_DEPLOYMENT' 'true'
 Set-Value 'OPERATION_WORKER_ENABLED' 'true'
@@ -238,7 +246,7 @@ function Remove-NullFields($Object) {
     }
 }
 Remove-NullFields $definition
-Write-Host "App: $AppName | source: $ExpectedCommit | mode: $ReleaseMode | replicas: 1"
+Write-Host "App: $AppName | source: $ExpectedCommit | mode: $ReleaseMode | access: $AccessMode | replicas: 1"
 if ($PlanOnly) { Write-Host 'Preflight passed. No Azure resources were changed.'; return }
 
 $file = [System.IO.Path]::GetTempFileName()

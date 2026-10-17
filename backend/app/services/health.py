@@ -28,10 +28,11 @@ def model_label(model: str) -> str:
 
 def system_health(platform) -> dict:
     components = {"API": "Healthy", "Database": "Healthy"}
-    from backend.app.api.access import credentials
+    from backend.app.api.access import access_mode, credentials
 
+    public_access = access_mode() == "public"
     try:
-        access_ready = bool(credentials())
+        access_ready = public_access or bool(credentials())
     except Exception:
         access_ready = False
     components["Release"] = (
@@ -106,7 +107,9 @@ def system_health(platform) -> dict:
 
     email = email_status()
     components["Bulletin operator access"] = (
-        "Healthy · manual bulletin actions require operator credentials"
+        "Healthy · public evaluation access; no sign-in required"
+        if public_access
+        else "Healthy · manual bulletin actions require operator credentials"
         if access_ready
         else "Warning · manual bulletin access is not configured; email links remain available"
     )
@@ -185,6 +188,7 @@ def system_health(platform) -> dict:
         "mode": "operational",
         "release_mode": os.getenv("RELEASE_MODE", "evaluation"),
         "access_configured": access_ready,
+        "access_mode": "public" if public_access else "staff",
         "durable_storage": platform.repo.url.startswith("postgresql")
         and bool(os.getenv("PACKAGE_STORE_CONNECTION")),
         # The deployed source revision, so a redeploy can confirm the new version is live.
