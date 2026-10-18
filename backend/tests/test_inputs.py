@@ -105,6 +105,12 @@ def test_validated_rainfall_cache_is_reused_and_tampering_forces_retrieval(
     path.write_bytes(path.read_bytes() + b"tampered")
     service.fetch_ecmwf(date(2026, 10, 5), "Operator")
     assert len(calls) == 2
+    cfg = ecmwf_opendata.settings()
+    monkeypatch.setattr(
+        ecmwf_opendata, "settings", lambda: {**cfg, "area": {**cfg["area"], "east": 53.0}}
+    )
+    service.fetch_ecmwf(date(2026, 10, 5), "Operator")
+    assert len(calls) == 3  # A changed crop must never reuse another scientific input.
 
 
 def test_upper_air_predictors_download_checked_and_averaged(env, tmp_path, monkeypatch):

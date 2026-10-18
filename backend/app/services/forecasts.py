@@ -179,7 +179,13 @@ class ForecastService:
         by default) from ECMWF Open Data into FORECAST_INPUT_ROOT."""
         initialization = initialization or ecmwf_opendata.latest_initialization()
         target = input_root() / ecmwf_opendata.file_name(initialization)
-        contract = checksum(ecmwf_opendata.request(initialization))
+        source_settings = ecmwf_opendata.settings()
+        contract = checksum(
+            {
+                "request": ecmwf_opendata.request(initialization),
+                "source": {key: source_settings[key] for key in ("model", "resolution", "area")},
+            }
+        )
         try:
             cached = self.repo.get(INPUT_KIND, f"ecmwf-{initialization.isoformat()}")
         except KeyError:
