@@ -8,7 +8,7 @@ ecmwf_opendata:
   # ECMWF Open Data (CC BY 4.0): the real-time ensemble (ENS), 0.25 degree, 15 days.
   # Mirrors are tried in order; data.ecmwf.int keeps the last few days, the AWS mirror
   # keeps an archive (from 2023), so older initializations come from there.
-  mirrors: [ecmwf, aws]
+  mirrors: [aws, google, ecmwf]
   model: ifs
   resolution: 0p25
   stream: enfo

@@ -112,6 +112,7 @@ class OperationService:
             "result": None,
             "error": None,
             "request": body.model_dump(mode="json"),
+            "selection_mode": "explicit" if body.initialization else "latest",
         }
         if identifier:
             self.repo.insert_once(KIND, payload, identifier)
@@ -245,7 +246,7 @@ class OperationService:
                 initialization = (
                     date.fromisoformat(self.get(operation_id)["created_at"][:10])
                     if body.action == "past_weeks"
-                    else latest_initialization()
+                    else self._latest_retrievable(operation_id, body, latest_initialization())
                 )
                 body = body.model_copy(update={"initialization": initialization})
                 self._log(
@@ -282,6 +283,30 @@ class OperationService:
 
     def _forecasts(self) -> ForecastService:
         return ForecastService(self.platform)
+
+    def _latest_retrievable(self, operation_id: str, body: OperationRequest, newest: date) -> date:
+        """Pin an implicit date only after its complete rainfall has been acquired.
+
+        Explicit dates never enter this path. A provider can lose availability between
+        selection and transfer; a newer missing run must not prevent a usable older run.
+        """
+        from climate_engine.inputs.ecmwf_opendata import ECMWFDataUnavailable, is_published, mirrors
+
+        for offset in range(6):
+            candidate = newest - timedelta(days=offset)
+            if offset and not any(is_published(candidate, mirror) for mirror in mirrors()):
+                continue
+            try:
+                self._forecasts().fetch_ecmwf(candidate, body.actor)
+                return candidate
+            except ECMWFDataUnavailable:
+                self._log(
+                    operation_id,
+                    f"The run of {_day(candidate)} could not be retrieved; checking an earlier published run",
+                )
+        raise ECMWFDataUnavailable(
+            "No complete ECMWF Week-2 ensemble could be retrieved from the recent runs; automatic retry will check again"
+        )
 
     def _fetch_ecmwf(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
         from climate_engine.inputs import ecmwf_opendata

@@ -28,6 +28,7 @@ import { useActor } from "@/lib/actor";
 import { dateTime } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
+import { operationActive, operationLabel } from "@/services/operation-state";
 import type { Operation, OperationAction } from "@/types/operational";
 
 const TONE: Record<Operation["status"], Tone> = {
@@ -95,7 +96,7 @@ function Timeline({ operation }: { operation: Operation }) {
     <ol className="timeline">
       {operation.messages.map((message, index) => (
         <li key={index}>
-          <time>{message.time.slice(11, 19)} UTC</time>
+          <time>{dateTime(message.time)}</time>
           {message.text}
         </li>
       ))}
@@ -127,9 +128,7 @@ export default function Operations() {
 
   // A task started elsewhere (another tab, the scheduler) is followed here too.
   useEffect(() => {
-    const active = history.data?.find(
-      (o) => o.status === "running" || o.status === "queued",
-    );
+    const active = history.data?.find(operationActive);
     if (active && !operation) follow(active);
   }, [history.data, operation, follow]);
 
@@ -221,8 +220,12 @@ export default function Operations() {
             {operation && (
               <>
                 <p style={{ marginTop: 0 }}>
-                  <Status tone={TONE[operation.status]}>
-                    {operation.status}
+                  <Status
+                    tone={
+                      operation.retry_at ? "progress" : TONE[operation.status]
+                    }
+                  >
+                    {operationLabel(operation)}
                   </Status>{" "}
                   <span
                     style={{
@@ -236,7 +239,12 @@ export default function Operations() {
                 </p>
                 <Timeline operation={operation} />
                 {operation.error && (
-                  <Notice tone="red">{operation.error}</Notice>
+                  <Notice tone={operation.retry_at ? "amber" : "red"}>
+                    {operation.error}
+                  </Notice>
+                )}
+                {operation.retry_at && (
+                  <p>Automatic retry: {dateTime(operation.retry_at)}</p>
                 )}
                 {resultLink(operation)}
               </>
@@ -300,11 +308,13 @@ export default function Operations() {
                       <tr>
                         <td className="strong">{row.title}</td>
                         <td>
-                          <Status tone={TONE[row.status]}>
-                            {row.status === "failed" ? (
+                          <Status
+                            tone={row.retry_at ? "progress" : TONE[row.status]}
+                          >
+                            {row.status === "failed" && !row.retry_at ? (
                               <XCircle size={12} />
                             ) : null}
-                            {row.status}
+                            {operationLabel(row)}
                           </Status>
                         </td>
                         <td>{dateTime(row.started_at ?? row.created_at)}</td>

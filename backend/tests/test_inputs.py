@@ -61,23 +61,50 @@ def test_open_data_download_keeps_perturbed_tp_members(mirror, tmp_path):
 def test_partial_ecmwf_publication_is_not_a_ready_week2_run(monkeypatch):
     from types import SimpleNamespace
 
-    import requests
-
     monkeypatch.setattr(
         ecmwf_opendata,
         "client",
         lambda mirror: SimpleNamespace(
-            _get_urls=lambda **params: SimpleNamespace(
-                urls=[f"https://example.invalid/{params['step']}.grib2"]
-            )
+            _get_urls=lambda **params: SimpleNamespace(urls=[("168.grib2", ((0, 100),) * 3)]),
+            session=SimpleNamespace(close=lambda: None),
         ),
     )
-    monkeypatch.setattr(
-        requests,
-        "head",
-        lambda url, **kwargs: SimpleNamespace(status_code=404 if "168.index" in url else 200),
-    )
     assert not ecmwf_opendata.is_published(date(2026, 10, 17), "mock")
+
+
+def test_partial_member_publication_is_not_a_complete_ensemble(mirror, tmp_path):
+    import json
+
+    index = next((tmp_path / "mirror").rglob("*336h*.index"))
+    entries = [json.loads(line) for line in index.read_text().splitlines()]
+    entries = [
+        line
+        for line in entries
+        if not (line["type"] == "pf" and line["param"] == "tp" and line["number"] == "3")
+    ]
+    index.write_text("\n".join(json.dumps(line) for line in entries))
+    assert not ecmwf_opendata.is_published(date(2026, 10, 5), mirror)
+
+
+def test_validated_rainfall_cache_is_reused_and_tampering_forces_retrieval(
+    env, mirror, monkeypatch
+):
+    original = ecmwf_opendata.fetch
+    calls = []
+
+    def fetch(*args):
+        calls.append(args[0])
+        return original(*args)
+
+    monkeypatch.setattr(ecmwf_opendata, "fetch", fetch)
+    service = forecasts.ForecastService(env.platform)
+    first = service.fetch_ecmwf(date(2026, 10, 5), "Operator")
+    assert service.fetch_ecmwf(date(2026, 10, 5), "Operator")["data_sha256"] == first["data_sha256"]
+    assert len(calls) == 1
+    path = forecasts.input_root() / first["file"]
+    path.write_bytes(path.read_bytes() + b"tampered")
+    service.fetch_ecmwf(date(2026, 10, 5), "Operator")
+    assert len(calls) == 2
 
 
 def test_upper_air_predictors_download_checked_and_averaged(env, tmp_path, monkeypatch):

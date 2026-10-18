@@ -28,7 +28,7 @@ from backend.app.schemas import ForecastRunRequest, PackageImportRequest, Verifi
 from backend.app.services import operational
 from backend.app.services.registry import ModelRegistry, status_at
 from climate_engine.cartography import icpac_maps as maps
-from climate_engine.core import ROOT
+from climate_engine.core import ROOT, checksum
 from climate_engine.forecasts import ECMWFS2SForecastProvider
 from climate_engine.inputs import chirps, ecmwf_opendata
 from climate_engine.operational.pipeline import (
@@ -178,6 +178,19 @@ class ForecastService:
         """Download the Week-2 ensemble rainfall of one 00 UTC run (the newest published
         by default) from ECMWF Open Data into FORECAST_INPUT_ROOT."""
         initialization = initialization or ecmwf_opendata.latest_initialization()
+        target = input_root() / ecmwf_opendata.file_name(initialization)
+        contract = checksum(ecmwf_opendata.request(initialization))
+        try:
+            cached = self.repo.get(INPUT_KIND, f"ecmwf-{initialization.isoformat()}")
+        except KeyError:
+            cached = None
+        if (
+            cached
+            and cached.get("input_contract") == contract
+            and target.is_file()
+            and cached.get("data_sha256") == file_checksum(target)
+        ):
+            return cached
         result = ecmwf_opendata.fetch(initialization, input_root())
         store = package_store()
         if store is not None:
@@ -188,6 +201,8 @@ class ForecastService:
             "fetched_at": now(),
             "fetched_by": actor,
             "bytes": result.path.stat().st_size,
+            "data_sha256": file_checksum(result.path),
+            "input_contract": contract,
         }
         saved = self.repo.save(INPUT_KIND, record, f"ecmwf-{initialization.isoformat()}")
         self.repo.audit("ecmwf_fetched", actor, saved["id"], {"mirror": result.mirror})

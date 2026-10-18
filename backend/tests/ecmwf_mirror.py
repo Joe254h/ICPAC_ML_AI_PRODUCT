@@ -348,7 +348,7 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8998)
     parser.add_argument("--date", type=date.fromisoformat, default=None)
-    parser.add_argument("--members", type=int, default=3)
+    parser.add_argument("--members", type=int, default=10)
     args = parser.parse_args()
     day = args.date or datetime.now(timezone.utc).date() - timedelta(days=1)
     shutil.rmtree(args.root, ignore_errors=True)

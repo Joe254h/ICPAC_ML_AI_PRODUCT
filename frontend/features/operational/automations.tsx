@@ -12,6 +12,7 @@ import {
 } from "@/components/ui";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
+import { operationActive, operationLabel } from "@/services/operation-state";
 import { dateTime } from "@/lib/format";
 import type { Operation } from "@/types/operational";
 
@@ -65,6 +66,16 @@ export default function Automations() {
     products.reload();
   }, [workspace.reload, integrations.reload, latest.reload, products.reload]);
   const task = useOperation(reload);
+  useEffect(() => {
+    const current = workspace.data?.last_cycle;
+    if (current && !task.running && current.id !== task.operation?.id)
+      task.follow(current);
+  }, [
+    workspace.data?.last_cycle,
+    task.running,
+    task.operation?.id,
+    task.follow,
+  ]);
   useEffect(() => {
     const timer = window.setInterval(reload, 30000);
     return () => window.clearInterval(timer);
@@ -128,7 +139,7 @@ export default function Automations() {
             <div aria-live="polite">
               <h3>{cycle.title}</h3>
               <p>
-                {cycle.status} · {cycle.attempts ?? 1} attempt(s)
+                {operationLabel(cycle)} · {cycle.attempts ?? 1} attempt(s)
               </p>
               {cycle.retry_at && (
                 <p>Next data-availability retry: {dateTime(cycle.retry_at)}</p>
@@ -138,7 +149,14 @@ export default function Automations() {
                   <li key={`${message.time}-${i}`}>{message.text}</li>
                 ))}
               </ol>
-              {cycle.error && <p role="alert">{cycle.error}</p>}
+              {cycle.error && (
+                <Notice tone={operationActive(cycle) ? "amber" : "red"}>
+                  {cycle.retry_at
+                    ? "The source is temporarily unavailable. This task will retry automatically. "
+                    : ""}
+                  {cycle.error}
+                </Notice>
+              )}
               {typeof cycle.result?.bulletin_id === "string" && (
                 <Link href={`/bulletins?id=${cycle.result.bulletin_id}`}>
                   Open prepared bulletin →
@@ -151,6 +169,11 @@ export default function Automations() {
           title="External source integrations"
           subtitle="Reviewed provider requests and server credentials are configured by the operator. Acquired datasets do not silently replace model inputs."
         >
+          <p>
+            The built-in ECMWF ensemble connector runs the baseline forecast.
+            The profiles below configure additional datasets and do not block
+            that connector.
+          </p>
           {integrations.error && (
             <Notice tone="red">{integrations.error}</Notice>
           )}

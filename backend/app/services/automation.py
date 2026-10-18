@@ -213,14 +213,36 @@ class AutomationService:
                     "message": "No real forecast has been issued.",
                 }
             )
+        forecast_actions = {"fetch_ecmwf", "run_forecast", "cycle", "end_to_end"}
+        recovered = max(
+            (
+                datetime.fromisoformat(r["created_at"])
+                for r in records
+                if r["status"] == "complete" and r["action"] in {"cycle", "end_to_end"}
+            ),
+            default=None,
+        )
+        seen = set()
         for record in records[:10]:
+            if record["action"] in seen:
+                continue
+            seen.add(record["action"])
+            if (
+                recovered
+                and record["action"] in forecast_actions
+                and datetime.fromisoformat(record["created_at"]) < recovered
+            ):
+                continue
             if record["status"] in {"failed", "interrupted"}:
+                retrying = bool(record.get("retry_at"))
                 alerts.append(
                     {
-                        "severity": "error",
-                        "code": "operation_failed",
+                        "severity": "warning" if retrying else "error",
+                        "code": "operation_retry" if retrying else "operation_failed",
                         "operation_id": record["id"],
-                        "message": f"{record['title']} failed. Open its task log for details.",
+                        "message": f"{record['title']} is waiting for an automatic source retry."
+                        if retrying
+                        else f"{record['title']} failed. Open its task log for details.",
                         "retry_at": record.get("retry_at"),
                     }
                 )

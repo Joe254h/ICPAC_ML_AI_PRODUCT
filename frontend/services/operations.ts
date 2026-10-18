@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mutate, request } from "@/services/api";
 import type { Operation, OperationAction } from "@/types/operational";
-
-const FINISHED = new Set(["complete", "failed", "interrupted"]);
+import { operationActive } from "@/services/operation-state";
 
 export function useOperation(onFinished?: (operation: Operation) => void) {
   const [operation, setOperation] = useState<Operation | null>(null);
@@ -17,8 +16,12 @@ export function useOperation(onFinished?: (operation: Operation) => void) {
     request<Operation>("/operations/" + id)
       .then((record) => {
         setOperation(record);
-        if (FINISHED.has(record.status)) done.current?.(record);
-        else timer.current = setTimeout(() => poll(id), 2000);
+        if (!operationActive(record)) done.current?.(record);
+        else
+          timer.current = setTimeout(
+            () => poll(id),
+            record.retry_at ? 15000 : 2000,
+          );
       })
       .catch((e: Error) => setError(e.message));
   }, []);
@@ -41,6 +44,7 @@ export function useOperation(onFinished?: (operation: Operation) => void) {
       } = {},
     ) => {
       setError(null);
+      if (timer.current) clearTimeout(timer.current);
       try {
         const record = await mutate<Operation>("/operations", {
           action,
@@ -59,11 +63,12 @@ export function useOperation(onFinished?: (operation: Operation) => void) {
   const follow = useCallback(
     (record: Operation) => {
       setOperation(record);
-      if (!FINISHED.has(record.status)) poll(record.id);
+      if (timer.current) clearTimeout(timer.current);
+      if (operationActive(record)) poll(record.id);
     },
     [poll],
   );
 
-  const running = operation !== null && !FINISHED.has(operation.status);
+  const running = operation !== null && operationActive(operation);
   return { operation, error, running, start, follow };
 }

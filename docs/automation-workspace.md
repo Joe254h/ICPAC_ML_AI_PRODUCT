@@ -22,6 +22,22 @@ requested dates never change on retry. Scientific validation failures are not re
 SDK retries are bounded; both 168 h and 336 h indices must be published. Operations
 survive restarts, and each retry reuses the original persisted scientific request.
 
+Availability reads the actual indexes and requires every configured perturbed member
+at both endpoints; HTTP HEAD success alone is insufficient. AWS, Google and ECMWF
+mirrors are tried in that order by default. The shared HTTP transport bounds connection
+and read inactivity, retries 429/500/502/503/504 twice with backoff, honors Retry-After
+and moves to another mirror when a long cooldown is requested. Exhausted providers
+cool down before another date is probed. Successful index reads are reused briefly.
+
+Automatic date selection pins the initialization only after a complete input download.
+If transfer fails after discovery, recent earlier published runs may be checked, with
+the selected date recorded explicitly. An operator-specified date never falls back.
+Checksum-validated inputs with the same request contract are reused; changed or missing
+files are fetched again. The browser keeps following scheduled retries, including after
+a page reload, and prevents a duplicate start while the followed task is active.
+Old failures remain in task history; a subsequent successful connected cycle clears
+their obsolete current-workspace alerts.
+
 ## Daily scheduling
 
 Keep the API operation worker enabled and one replica running. The default is disabled:

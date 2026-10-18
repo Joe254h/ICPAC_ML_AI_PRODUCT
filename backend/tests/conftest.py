@@ -5,6 +5,9 @@ import pytest
 def _no_startup_registration(monkeypatch):
     """Apps built in tests skip startup descriptor registration unless a test opts in."""
     monkeypatch.setenv("AUTO_REGISTER_MODELS", "false")
+    # Unit/API mirrors deliberately contain three members. Production requests ten;
+    # browser mirrors use the actual production member count.
+    monkeypatch.setattr("climate_engine.inputs.ecmwf_opendata.member_numbers", lambda: [1, 2, 3])
     # Tests may write an outbox explicitly, but never inherit a live mail configuration.
     for name in (
         "SMTP_HOST",

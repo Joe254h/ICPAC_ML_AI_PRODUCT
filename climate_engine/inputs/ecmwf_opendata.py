@@ -94,10 +94,19 @@ def client(mirror: str):
     """The ECMWF Open Data client for one mirror name (ecmwf, aws, ...) or base URL."""
     from ecmwf.opendata import Client
 
+    from climate_engine.inputs.ecmwf_http import Session
+
     cfg = settings()
-    return Client(
-        source=mirror, model=cfg["model"], resol=cfg["resolution"], maximum_retries=2, retry_after=5
+    result = Client(
+        source=mirror,
+        model=cfg["model"],
+        resol=cfg["resolution"],
+        maximum_retries=1,
+        use_server_retry_after=False,
     )
+    result.session.close()
+    result.session = Session()
+    return result
 
 
 def member_numbers() -> list[int]:
@@ -122,26 +131,32 @@ def request(initialization: date) -> dict[str, Any]:
 def mirrors() -> list[str]:
     """Mirrors in the order they are tried; ECMWF_OPENDATA_MIRRORS overrides the config."""
     override = os.getenv("ECMWF_OPENDATA_MIRRORS")
-    return override.split(",") if override else list(settings()["mirrors"])
+    return (
+        [value.strip() for value in override.split(",") if value.strip()]
+        if override
+        else list(settings()["mirrors"])
+    )
+
+
+def _complete_index(session_client, initialization: date) -> bool:
+    """Read/filter actual indexes: HEAD 200 alone does not prove a usable ensemble."""
+    urls = session_client._get_urls(use_index=True, **request(initialization)).urls
+    return len(urls) == len(STEPS_HOURS) and all(
+        isinstance(item, tuple) and len(item[1]) == len(member_numbers()) for item in urls
+    )
 
 
 def is_published(initialization: date, mirror: str) -> bool:
-    """Both accumulation endpoints must exist; a partially published run is not ready."""
+    """Every requested member at both accumulation endpoints must be indexed."""
     import requests
 
     session_client = client(mirror)
     try:
-        for step in STEPS_HOURS:
-            params = {**request(initialization), "step": step}
-            urls = session_client._get_urls(use_index=False, **params).urls
-            if not urls:
-                return False
-            index = os.path.splitext(urls[0])[0] + ".index"
-            if requests.head(index, timeout=20, allow_redirects=True).status_code != 200:
-                return False
-        return True
+        return _complete_index(session_client, initialization)
     except (requests.RequestException, ValueError):
         return False
+    finally:
+        session_client.session.close()
 
 
 def latest_initialization(today: date | None = None, lookback_days: int = 5) -> date:
@@ -239,6 +254,8 @@ def to_dataset(messages: list[Message], initialization: date, metadata: dict) ->
         raise ValueError("The download holds no tp message")
     latitude, longitude = messages[0].latitude, messages[0].longitude
     members = sorted({m.number for m in messages})
+    if members != member_numbers():
+        raise ValueError("The downloaded ensemble does not contain every requested member")
     if len(members) < 2:
         raise ValueError("At least two perturbed members are needed")
     index = {(m.number, m.step): m for m in messages}
@@ -303,16 +320,19 @@ def fetch(initialization: date, directory: Path) -> FetchResult:
     directory.mkdir(parents=True, exist_ok=True)
     failures = []
     for mirror in mirrors():
-        if not is_published(initialization, mirror):
-            failures.append(f"{mirror}: accumulation endpoints are not both published yet")
-            continue
         with tempfile.TemporaryDirectory(prefix="ecmwf-") as scratch:
             grib = Path(scratch) / "tp.grib2"
+            session_client = client(mirror)
             try:
-                result = client(mirror).retrieve(target=str(grib), **request(initialization))
+                if not _complete_index(session_client, initialization):
+                    failures.append(f"{mirror}: incomplete Week-2 ensemble index")
+                    continue
+                result = session_client.retrieve(target=str(grib), **request(initialization))
             except Exception as exc:  # network errors and "no index entries" alike
-                failures.append(f"{mirror}: {type(exc).__name__}: {exc}")
+                failures.append(f"{mirror}: {type(exc).__name__}; source unavailable or throttled")
                 continue
+            finally:
+                session_client.session.close()
             urls = [str(url[0] if isinstance(url, tuple) else url) for url in result.urls]
             sha256, size = _sha256(grib), grib.stat().st_size
             dataset = to_dataset(

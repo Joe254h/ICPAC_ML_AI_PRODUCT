@@ -105,6 +105,75 @@ def test_scientific_errors_are_not_retried(platform, monkeypatch):
     assert not service.run_pending()
 
 
+def test_implicit_selection_falls_back_before_pinning_but_explicit_dates_do_not(
+    platform, monkeypatch
+):
+    from backend.app.services.forecasts import ForecastService
+    from climate_engine.inputs import ecmwf_opendata
+
+    fetched = []
+
+    def fetch(self, initialization, actor):
+        fetched.append(initialization)
+        if initialization == date(2026, 10, 18):
+            raise ECMWFDataUnavailable("503 Slow Down")
+        return {}
+
+    monkeypatch.setattr(ecmwf_opendata, "latest_initialization", lambda: date(2026, 10, 18))
+    monkeypatch.setattr(ecmwf_opendata, "is_published", lambda *args: True)
+    monkeypatch.setattr(ForecastService, "fetch_ecmwf", fetch)
+    monkeypatch.setattr(
+        OperationService,
+        "_run_forecast",
+        lambda self, identifier, body: {"initialization": body.initialization.isoformat()},
+    )
+    service = OperationService(platform)
+    record = service.start(
+        OperationRequest(action="run_forecast", actor="Operator"), background=False
+    )
+    assert record["status"] == "complete"
+    assert record["request"]["initialization"] == "2026-10-17"
+    assert fetched == [date(2026, 10, 18), date(2026, 10, 17)]
+    fetched.clear()
+    record = service.start(
+        OperationRequest(
+            action="run_forecast", initialization=date(2026, 10, 18), actor="Operator"
+        ),
+        background=False,
+    )
+    assert record["request"]["initialization"] == "2026-10-18"
+    assert fetched == []
+
+
+def test_retry_alert_is_waiting_and_recovered_failures_stay_only_in_history(platform):
+    platform.repo.save(
+        "operation",
+        {
+            "action": "fetch_ecmwf",
+            "status": "failed",
+            "title": "Acquisition",
+            "created_at": "2026-10-18T09:00:00Z",
+            "retry_at": "2026-10-18T09:15:00Z",
+        },
+    )
+    alerts = AutomationService(platform).status()["alerts"]
+    retry = next(a for a in alerts if a["code"] == "operation_retry")
+    assert retry["severity"] == "warning"
+    platform.repo.save(
+        "operation",
+        {
+            "action": "end_to_end",
+            "status": "complete",
+            "title": "Connected cycle",
+            "created_at": "2026-10-18T10:00:00Z",
+        },
+    )
+    assert not any(
+        a["code"].startswith("operation_") for a in AutomationService(platform).status()["alerts"]
+    )
+    assert len(platform.repo.list("operation")) == 2
+
+
 def test_scheduler_failure_never_starves_the_existing_queue(platform, monkeypatch):
     stopped = Event()
     drained = []

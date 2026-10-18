@@ -1,5 +1,60 @@
 import { expect, test } from "@playwright/test";
 
+test("a restored source retry is followed to completion without another submission", async ({
+  page,
+}) => {
+  const workspace = await page.request
+    .get("/api/automations")
+    .then((response) => response.json());
+  const waiting = {
+    id: "recovery-check",
+    action: "end_to_end",
+    title: "Source recovery check",
+    status: "failed",
+    initialization: "2026-10-18",
+    created_at: "2026-10-18T09:00:00Z",
+    created_by: "QA",
+    messages: [],
+    result: null,
+    error: "Temporary provider throttling",
+    attempts: 1,
+    retry_at: "2099-01-01T00:00:00Z",
+  };
+  await page.route("**/api/automations", (route) =>
+    route.fulfill({ json: { ...workspace, last_cycle: waiting } }),
+  );
+  let polls = 0;
+  await page.route("**/api/operations/recovery-check", (route) => {
+    polls += 1;
+    return route.fulfill({
+      json:
+        polls === 1
+          ? waiting
+          : {
+              ...waiting,
+              status: "complete",
+              retry_at: null,
+              error: null,
+              result: { bulletin_id: "prepared-test-bulletin" },
+            },
+    });
+  });
+  let submissions = 0;
+  await page.route("**/api/operations", (route) => {
+    submissions += 1;
+    return route.abort();
+  });
+  await page.goto("/automations");
+  await expect(page.getByText(/Waiting for retry · 1 attempt/)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Workflow running…" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("link", { name: "Open prepared bulletin →" }),
+  ).toBeVisible({ timeout: 30000 });
+  expect(submissions).toBe(0);
+});
+
 test("the 20-capability workspace runs a connected workflow without publishing", async ({
   page,
 }) => {
