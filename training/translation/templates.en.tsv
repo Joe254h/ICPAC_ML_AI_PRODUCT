@@ -1,0 +1,74 @@
+id	english	note
+title.map	Total Rainfall (mm) for {period}	Map title; {period} is a date range such as 06-13 October 2026
+lead.heavy	Heavy rainfall (above 200 mm)	Regional bullet lead
+lead.moderate	Moderate rainfall (50-200 mm)	Regional bullet lead
+lead.light	Light rainfall (less than 50 mm)	Regional bullet lead
+lead.country.heavy	Heavy rainfall of above 200mm	Country section lead
+lead.country.moderate	Moderate rainfall	Country section lead
+lead.country.light	Light rainfall	Country section lead
+class.heavy	heavy rainfall (above 200 mm)	Inside a sentence
+class.moderate	moderate rainfall (50-200 mm)	Inside a sentence
+class.light	light rainfall (1-50 mm)	Inside a sentence
+phrase.expected	{lead} expected over {places}.	{places} is built from the place phrases below
+phrase.not_expected	{lead} not expected over {where}.	{where} is "the region" or a country
+phrase.region	the region
+phrase.most	most parts of {countries}	{countries} is a list joined by "and"
+phrase.parts	{direction} parts of {country}
+phrase.parts_plain	parts of {country}
+phrase.isolated	isolated areas in {places}
+phrase.isolated_both	isolated areas in both {place1} and {place2}
+phrase.and	{a} and {b}	List joining; translators give the word for "and"
+direction.northern	northern	Agrees with "parts" in the phrase above
+direction.southern	southern
+direction.eastern	eastern
+direction.western	western
+direction.central	central
+direction.northeastern	northeastern
+direction.northwestern	northwestern
+direction.southeastern	southeastern
+direction.southwestern	southwestern
+direction.central_to	central to {direction}	e.g. central to northern
+focus.why	{country} is this week's country focus: {percent} of its area is expected to receive {class}, the largest share of the {count} member states where it occurs (across the region: {region_percent}).
+focus.why_only	{country} is this week's country focus: {percent} of its area is expected to receive {class}, the only member state where it occurs over a wide area (across the region: {region_percent}).
+focus.title	Country Focus: {country}	Section title
+percent.under_one	under 1%
+about.forecast	Forecast: total rainfall from {start} to {end} (days 8 to 14), from the ECMWF ensemble of {run}, 00 UTC.	{start}, {end}, {run} are dates
+about.method_mbc	Method: the ensemble-mean rainfall corrected for ECMWF's known biases, cell by cell, with ICPAC's multiplicative bias correction (MBC), on a 0.05 degree (about 5 km) grid.
+about.method_hybrid	Method: ICPAC's bias-corrected ECMWF ensemble rainfall, further corrected by a machine-learning model of what the bias correction still gets wrong.
+about.verification	Verification: each week is compared with CHIRPS observed rainfall once the week has passed.
+about.issued	Issued by: the IGAD Climate Prediction and Applications Centre (ICPAC), www.icpac.net.	Keep the organisation name as officially translated
+note.decision	Users are advised to make decisions based on the rainfall forecast together with the latest observed rainfall and local knowledge. The Total Rainfall forecast gives the amount of rain expected over the week, eight to fourteen days ahead, so that preparedness and response can be planned early across agriculture, pastoralism, disaster risk management, water resources and other climate-sensitive sectors. Rainfall varies within each area: the maps and figures describe the expected pattern, not amounts at a single place.
+note.draft	Draft, not approved: forecaster review required.
+note.machine	This text was translated by machine from the approved English bulletin.	Shown under machine-translated chatbot answers
+country.Burundi	Burundi	Official name in the language
+country.Djibouti	Djibouti
+country.Eritrea	Eritrea
+country.Ethiopia	Ethiopia
+country.Kenya	Kenya
+country.Rwanda	Rwanda
+country.Somalia	Somalia
+country.South Sudan	South Sudan
+country.Sudan	Sudan
+country.Tanzania	Tanzania
+country.Uganda	Uganda
+month.1	January
+month.2	February
+month.3	March
+month.4	April
+month.5	May
+month.6	June
+month.7	July
+month.8	August
+month.9	September
+month.10	October
+month.11	November
+month.12	December
+term.week2	Week 2 (days 8 to 14)	Glossary
+term.rainfall_total	total rainfall	Glossary
+term.forecast	forecast	Glossary
+term.bias_correction	bias correction	Glossary
+term.ensemble	ensemble forecast	Glossary
+term.dry_spell	dry spell	Glossary
+term.onset	onset of the rains	Glossary
+term.above_normal	above normal	Glossary
+term.below_normal	below normal	Glossary
