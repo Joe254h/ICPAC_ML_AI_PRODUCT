@@ -79,6 +79,13 @@ def install(app: FastAPI, dependency) -> None:
     def ecmwf_inputs(platform=Depends(dependency)) -> list[dict]:
         return ForecastService(platform).ecmwf_inputs()
 
+    @app.get("/data/ecmwf/readiness")
+    def ecmwf_readiness(platform=Depends(dependency)) -> dict:
+        """Recorded ECMWF input states for the model in use (no network call)."""
+        from backend.app.services.readiness import readiness
+
+        return readiness(platform)
+
     @app.get("/data/chirps")
     def chirps_inputs(platform=Depends(dependency)) -> list[dict]:
         return ForecastService(platform).chirps_inputs()
@@ -287,3 +294,17 @@ def install(app: FastAPI, dependency) -> None:
             metric, variant, model_id, include_protected
         )
         return Response(png, media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/verification/experimental")
+    def experimental_verification() -> dict:
+        """Frozen pre-refit verification (independent 2022-2024 reforecast test)."""
+        from backend.app.services import evidence
+
+        return evidence.summary()
+
+    @app.get("/verification/experimental/maps/{name}")
+    def experimental_map(name: str = Path(pattern=r"^[a-z][a-z_-]{1,40}$")):
+        from backend.app.services import evidence
+
+        png = evidence.map_file(name).read_bytes()
+        return Response(png, media_type="image/png", headers=IMMUTABLE)

@@ -18,6 +18,7 @@ import { SERIES, day, num, signed, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
 import type {
+  ExperimentalEvidence,
   ForecastDetail,
   ForecastRun,
   Metrics,
@@ -65,6 +66,68 @@ function LatestVerified({ run }: { run: ForecastRun }) {
           establish skill.
         </p>
       )}
+    </Card>
+  );
+}
+
+/** The frozen 551-case evaluation, kept apart from the live verification above. */
+function ExperimentalSummary() {
+  const evidence = useApi<ExperimentalEvidence>("/verification/experimental");
+  return (
+    <Card
+      title="Experimental evidence: the independent 2022–2024 test"
+      subtitle="The frozen pre-refit models on 551 reforecast cases. These are not the scores of the forecasts above, and they do not transfer to a refitted model."
+      action={
+        <LinkButton
+          href="/verification/experimental"
+          variant="outline"
+          size="sm"
+        >
+          Full verification
+        </LinkButton>
+      }
+    >
+      {evidence.error && (
+        <ErrorState message={evidence.error} retry={evidence.reload} />
+      )}
+      {!evidence.data && !evidence.error && <Skeleton height={200} />}
+      {evidence.data && (
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th className="num">RMSE (mm/week)</th>
+                <th className="num">MAE</th>
+                <th className="num">Bias</th>
+                <th className="num">r</th>
+                <th className="num">RMSE skill vs raw</th>
+              </tr>
+            </thead>
+            <tbody>
+              {evidence.data.regional.map((s) => (
+                <tr key={s.model}>
+                  <td className="strong">{s.label}</td>
+                  <td className="num">{num(s.rmse, 3)}</td>
+                  <td className="num">{num(s.mae, 3)}</td>
+                  <td className="num">{signed(s.bias, 3)}</td>
+                  <td className="num">{num(s.pearson_r, 3)}</td>
+                  <td className="num">
+                    {s.model === "RawECMWF"
+                      ? "—"
+                      : `${num((s.skill_vs_raw ?? 0) * 100, 2)}%`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 0 }}>
+        The full CatBoost correction had the lowest RMSE; the MAM-protected
+        policy, preselected on 2020–2021 validation, did not beat it on the
+        independent period.
+      </p>
     </Card>
   );
 }
@@ -259,54 +322,7 @@ export default function Verification() {
             </div>
           </Card>
         )}
-        <Card title="Reference: the independent evaluation">
-          <p style={{ marginTop: 0 }}>
-            Before operational use the methods were evaluated on 537 independent
-            Week-2 cases (2022–2024) over the full domain:
-          </p>
-          <div className="table-wrap">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>Method</th>
-                  <th className="num">MAE (mm)</th>
-                  <th className="num">RMSE (mm)</th>
-                  <th className="num">Bias (mm)</th>
-                  <th className="num">r</th>
-                  <th className="num">RMSE skill vs raw</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  ["Raw ECMWF", "9.055", "17.207", "+1.682", "0.718", "—"],
-                  ["MBC", "7.578", "15.289", "−0.203", "0.775", "11.15%"],
-                  [
-                    "MBC + AI/ML (study model)",
-                    "7.420",
-                    "14.993",
-                    "−0.361",
-                    "0.785",
-                    "12.87%",
-                  ],
-                ].map(([name, ...values]) => (
-                  <tr key={name}>
-                    <td className="strong">{name}</td>
-                    {values.map((value, i) => (
-                      <td key={i} className="num">
-                        {value}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 0 }}>
-            From the ICPAC Week-2 AI/ML study (locked 2022–2024 test). The
-            operational MBC + AI/ML model has not yet been tested on that
-            period.
-          </p>
-        </Card>
+        <ExperimentalSummary />
       </div>
     </div>
   );

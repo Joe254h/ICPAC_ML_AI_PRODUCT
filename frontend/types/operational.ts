@@ -31,19 +31,69 @@ export type OperationalModel = Model & {
   deployment_date?: string | null;
   created_at?: string;
   registered_by?: string;
-  descriptor?: { path: string; sha256: string; declared_by?: string };
+  descriptor?: {
+    path: string;
+    sha256: string;
+    declared_by?: string;
+    declared_status?: string;
+  };
   notes?: string;
+  /** Frozen bundle models: the policy the hybrid layer follows. */
+  policy?: string;
+  pressure_steps_hours?: number[];
+  model_info?: Record<string, unknown>;
+  bundle?: {
+    bundle_id?: string;
+    bundle_status?: string;
+    bundle_warnings?: string[];
+    trained_rows?: number;
+    independent_report?: {
+      rows: number;
+      cases: number;
+      period: string;
+      rmse: number;
+      mae: number;
+      bias: number;
+      pearson_r: number;
+      anomaly_correlation?: number;
+      source: string;
+      selection_note: string;
+    };
+  };
+  realtime_reviews?: Record<
+    string,
+    { actor: string; timestamp: string; comment: string; forecast_id: string }
+  >;
+  lifecycle?: Lifecycle | null;
+};
+
+export type Activation = {
+  model_id: string;
+  since: string;
+  actor: string;
+  comment: string;
+  history: { model_id: string; since: string; until: string; actor?: string }[];
 };
 
 export type CurrentModel = {
-  role: "production" | "candidate";
+  role: "production" | "candidate" | "experimental";
   model: OperationalModel;
-  note?: string;
+  activation?: Activation | null;
+  note?: string | null;
 };
 
 export type ProductStatus = {
-  status: "available" | "in_progress";
+  /** in_progress: waiting for an input or a review; blocked: an input failed a check;
+   * not_produced: the model's policy issues MBC alone. */
+  status: "available" | "in_progress" | "blocked" | "not_produced";
   reason?: string;
+};
+
+/** One check of a forecast input against the frozen model's training data. */
+export type InputCheck = {
+  check: string;
+  status: "passed" | "note" | "failed";
+  detail: string;
 };
 
 export type ForecastRun = {
@@ -315,7 +365,8 @@ export type OperationAction =
   | "update_chirps"
   | "cycle"
   | "end_to_end"
-  | "past_weeks";
+  | "past_weeks"
+  | "check_ecmwf";
 
 export type Operation = {
   id: string;
@@ -366,4 +417,209 @@ export type Dekad = {
   fetched_by: string;
   overlays?: { total: string; percent?: string };
   overlay_bounds?: [number, number, number, number];
+};
+
+/** Recorded ECMWF input states for the model in use (GET /data/ecmwf/readiness). */
+export type EcmwfReadiness = {
+  checked_at: string;
+  model: {
+    model_id: string;
+    model_name?: string;
+    version?: string;
+    family?: string;
+    policy?: string | null;
+    status?: string;
+    role?: string | null;
+    training_members?: number | null;
+    pressure_steps_hours?: number[] | null;
+    needs_upper_air: boolean;
+    realtime_gate_from?: string | null;
+  } | null;
+  availability: {
+    checked_at: string;
+    checked_by: string;
+    status: "published" | "unavailable";
+    initialization: string | null;
+    mirrors: string[];
+    rainfall_members?: number;
+    upper_air_steps_hours?: number[];
+    upper_air_listed?: boolean;
+    summary: string;
+    error?: string;
+  } | null;
+  rainfall: {
+    status: "available" | "incomplete" | "missing";
+    initialization?: string;
+    members?: number;
+    steps_hours?: number[];
+    week2_complete?: boolean;
+    mirror?: string;
+    bytes?: number;
+    fetched_at?: string;
+    fetched_by?: string;
+    type?: string;
+  };
+  upper_air: {
+    status:
+      | "available"
+      | "missing"
+      | "incompatible"
+      | "not_needed"
+      | "not_configured";
+    initialization?: string;
+    members?: number;
+    steps_hours?: number[];
+    variables?: Record<string, number[]>;
+    fetched_at?: string;
+    bytes?: number;
+  };
+  last_run: {
+    forecast_id: string;
+    initialization: string;
+    created_at?: string;
+    primary_layer?: Variant;
+    hybrid?: ProductStatus | null;
+    input_checks: InputCheck[];
+    input_source?: string;
+    realtime_gate_required: boolean;
+  } | null;
+  failures: {
+    action: string;
+    title: string;
+    error: string | null;
+    finished_at?: string;
+    retry_at?: string | null;
+  }[];
+  realtime_review: {
+    actor: string;
+    timestamp: string;
+    comment: string;
+    checks: number;
+  } | null;
+  compatibility: {
+    status:
+      | "compatible"
+      | "waiting"
+      | "unchecked"
+      | "incompatible"
+      | "awaiting_review"
+      | "unknown";
+    detail: string;
+  };
+  generation: {
+    raw_mbc: { allowed: boolean; reason: string | null };
+    ml: { allowed: boolean; reason: string | null };
+  };
+};
+
+export type Lifecycle = {
+  stage:
+    | "uploaded"
+    | "integrity_verified"
+    | "scientifically_validated"
+    | "operationally_approved"
+    | "active"
+    | "retired";
+  states: Record<
+    | "uploaded"
+    | "integrity_verified"
+    | "scientifically_validated"
+    | "operationally_approved"
+    | "active"
+    | "retired",
+    boolean
+  >;
+};
+
+/** Scores of one model in one group of the frozen experimental verification. */
+export type EvidenceScore = {
+  model: string;
+  label: string;
+  rows?: number;
+  cases?: number;
+  rmse: number;
+  mae: number;
+  bias: number;
+  pearson_r?: number | null;
+  anomaly_correlation?: number | null;
+  skill_vs_raw?: number;
+  skill_vs_mbc?: number;
+  skill_vs_climatology?: number;
+};
+
+export type RocCurve = {
+  model: string;
+  label: string;
+  event_mmweek: number;
+  auc: number;
+  curve: [number, number][];
+};
+
+/** GET /verification/experimental: the frozen pre-refit independent verification. */
+export type ExperimentalEvidence = {
+  scope: Record<string, string | number>;
+  regional: EvidenceScore[];
+  foundational: {
+    model: string;
+    label: string;
+    training_period: string;
+    validation_period: string;
+    validation_rmse: number;
+    validation_mae: number;
+    independent_period: string;
+    independent_rmse: number;
+    independent_mae: number;
+    independent_anomaly_correlation: number;
+  }[];
+  annual: Record<string, EvidenceScore[]>;
+  seasonal: Record<string, EvidenceScore[]>;
+  monthly: Record<string, EvidenceScore[]>;
+  year_season: Record<string, EvidenceScore[]>;
+  countries: Record<string, EvidenceScore[]>;
+  intensity: Record<string, EvidenceScore[]>;
+  contingency: {
+    model: string;
+    label: string;
+    threshold_mmweek: number;
+    pod: number;
+    far: number;
+    false_positive_rate: number;
+    csi: number;
+    ets: number;
+    frequency_bias: number;
+    hss: number;
+  }[];
+  thresholds_mmweek: number[];
+  deterministic_roc: RocCurve[];
+  ensemble: {
+    label: string;
+    crps: { group: string; id: string; crps_mmweek: number }[];
+    brier: {
+      group: string;
+      id: string;
+      event_mmweek: number;
+      brier_score: number;
+      mean_probability: number;
+    }[];
+    reliability: Record<
+      string,
+      { probability: number; observed: number; weight: number }[]
+    >;
+    roc: RocCurve[];
+    note: string;
+  };
+  bootstrap: {
+    method: string;
+    items: {
+      primary: string;
+      comparator: string;
+      delta_rmse: number;
+      low: number;
+      high: number;
+    }[];
+  };
+  deterministic_note: string;
+  maps: { id: string; title: string }[];
+  country_maps: string[];
+  sudan: { cells_outside_vector: number; note: string };
 };

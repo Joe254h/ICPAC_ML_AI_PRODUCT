@@ -31,7 +31,9 @@ from climate_engine.cartography import icpac_maps as maps
 from climate_engine.core import ROOT, checksum
 from climate_engine.forecasts import ECMWFS2SForecastProvider
 from climate_engine.inputs import chirps, ecmwf_opendata
+from climate_engine.operational.ecmwf import PRESSURE_INPUTS
 from climate_engine.operational.pipeline import (
+    OPEN_DATA_LABEL,
     ForecastRun,
     check_domain,
     default_run_root,
@@ -51,6 +53,7 @@ from climate_engine.verification import CELL_METRICS, CellStatistics, pooled_met
 
 KIND = "forecast_run"
 INPUT_KIND = "ecmwf_input"
+UPPER_AIR_KIND = "ecmwf_upper_air"
 CHIRPS_KIND = "chirps_week2"
 MEDIA_TYPES = {
     ".json": "application/json",
@@ -217,7 +220,62 @@ class ForecastService:
     def ecmwf_inputs(self) -> list[dict[str, Any]]:
         return sorted(self.repo.list(INPUT_KIND), key=lambda r: r["initialization"], reverse=True)
 
-    def run(self, body: ForecastRunRequest) -> dict[str, Any]:
+    def fetch_upper_air(
+        self, initialization: date, actor: str, steps: list[int], progress=None
+    ) -> dict[str, Any]:
+        """Download, check and keep the upper-air predictors of one 00 UTC run: q, u, v,
+        t and gh at the model's seven training leads, the same perturbed members, averaged
+        to the 1.5 degree grid of the training forecasts."""
+        target = input_root() / ecmwf_opendata.file_name(initialization, "pl")
+        source_settings = ecmwf_opendata.settings()
+        contract = checksum(
+            {
+                "steps": [int(h) for h in steps],
+                "members": ecmwf_opendata.member_numbers(),
+                "degrees": 1.5,
+                "source": {key: source_settings[key] for key in ("model", "resolution", "area")},
+            }
+        )
+        key = f"ecmwf-pl-{initialization.isoformat()}"
+        try:
+            cached = self.repo.get(UPPER_AIR_KIND, key)
+        except KeyError:
+            cached = None
+        if (
+            cached
+            and cached.get("input_contract") == contract
+            and target.is_file()
+            and cached.get("data_sha256") == file_checksum(target)
+        ):
+            return cached
+        result = ecmwf_opendata.fetch_pressure(initialization, input_root(), steps, 1.5, progress)
+        store = package_store()
+        if store is not None:
+            store.put(f"inputs/ecmwf/{result.path.name}", result.path.read_bytes())
+        record = {
+            **result.record(),
+            "source": "ecmwf_opendata",
+            "fetched_at": now(),
+            "fetched_by": actor,
+            "bytes": result.path.stat().st_size,
+            "data_sha256": file_checksum(result.path),
+            "input_contract": contract,
+            "variables": {name: list(levels) for name, levels in PRESSURE_INPUTS.items()},
+        }
+        saved = self.repo.save(UPPER_AIR_KIND, record, key)
+        self.repo.audit("ecmwf_upper_air_fetched", actor, saved["id"], {"mirror": result.mirror})
+        return saved
+
+    def upper_air_inputs(self) -> list[dict[str, Any]]:
+        return sorted(
+            self.repo.list(UPPER_AIR_KIND), key=lambda r: r["initialization"], reverse=True
+        )
+
+    def run(
+        self, body: ForecastRunRequest, upper_air: bool = False, progress=None
+    ) -> dict[str, Any]:
+        """One forecast run. ``upper_air`` (background operations only) also downloads the
+        model's upper-air predictors from ECMWF Open Data when they are not held yet."""
         if not RUN_LOCK.acquire(blocking=False):
             raise RunInProgress("Another forecast run is in progress; retry when it finishes")
         try:
@@ -234,9 +292,36 @@ class ForecastService:
             model = operational.OperationalModel(record).load()
             grid = operational.authoritative_grid()
             cfg = settings()
+            steps = model.pressure_steps(cfg)
+            wanted = upper_air and body.source == "ecmwf_opendata" and model.produces_hybrid
+            if (
+                wanted
+                and model.needs_pressure()
+                and steps
+                and input_files(initialization)[1] is None
+            ):
+                try:
+                    self.fetch_upper_air(initialization, body.actor, list(steps), progress)
+                except ecmwf_opendata.ECMWFDataUnavailable as exc:
+                    # The run goes ahead with raw and MBC; the AI/ML layer waits for them.
+                    self.repo.audit(
+                        "ecmwf_upper_air_unavailable",
+                        body.actor,
+                        initialization.isoformat(),
+                        {"error": str(exc)[:300]},
+                    )
             rainfall, pressure = input_files(initialization)
             provider = ECMWFS2SForecastProvider(rainfall, pressure, cfg)
-            run = run_forecast(provider, initialization.isoformat(), model, grid, cfg, record)
+            review = (record.get("realtime_reviews") or {}).get(body.source)
+            run = run_forecast(
+                provider,
+                initialization.isoformat(),
+                model,
+                grid,
+                cfg,
+                record,
+                realtime_review=review,
+            )
             directory = packages.write_package(run, package_root(), grid, record)
             self._publish(directory)
             return self._save(run, record, body.actor, "run")
@@ -305,6 +390,12 @@ class ForecastService:
             "primary_layer": primary_layer(p),
             "layers": p.get("layers", list(packages.MAP_LAYERS)),
             "products": p.get("products", {}),
+            "input_source": "ecmwf_opendata"
+            if p["input_label"] == OPEN_DATA_LABEL
+            else ("synthetic" if is_synthetic(p) else "ecmwf_files"),
+            "input_checks": p.get("input_checks") or [],
+            "hybrid_policy": p.get("hybrid_policy"),
+            "realtime_gate_required": bool((p.get("realtime_gate") or {}).get("required")),
             "protected_test_period": p["protected_test_period"],
             "verification_status": (run.verification or packages.NO_VERIFICATION)["status"],
             "created_at": now(),

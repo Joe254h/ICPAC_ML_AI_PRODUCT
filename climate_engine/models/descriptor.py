@@ -18,6 +18,12 @@ from typing import Any
 import yaml
 
 from climate_engine.core import ROOT
+from climate_engine.models.hybrid7_pc17 import (
+    MBCHybrid7PC17CatBoost,
+    independent_summary,
+    verify_bundle,
+)
+from climate_engine.models.hybrid7_pc17 import validation_scores as bundle_scores
 from climate_engine.models.mbc_atmos37_catboost import MBCAtmos37CatBoost
 from climate_engine.models.residual import ResidualMBCModel
 from climate_engine.models.runtime import MODEL_FORMATS
@@ -34,6 +40,28 @@ ARTIFACT_KINDS = {
     "matrix_manifest": {".json"},
     "domain": {".npz"},
 }
+# The frozen 2026-10-25 bundle: its manifest pins every file; the descriptor pins these.
+BUNDLE_KINDS = {
+    "manifest": {".json"},
+    "model": None,
+    "metrics": {".json"},
+    "policy_manifest": {".json"},
+    "policies": {".json"},
+    "feature_schema": {".json"},
+    "mbc": {".npz"},
+    "pca": {".npz"},
+    "domain": {".npz"},
+    "independent_summary": {".csv"},
+}
+FAMILY_KINDS = {"hybrid7_pc17": BUNDLE_KINDS}
+# Fields a bundle descriptor must state: the frozen training contract of the model.
+BUNDLE_REQUIRED = (
+    "policy",
+    "pressure_steps_hours",
+    "ensemble_members",
+    "mbc_factor_bounds",
+    "realtime_gate_from",
+)
 REQUIRED = (
     "model_id",
     "model_name",
@@ -86,6 +114,14 @@ class ModelDescriptor:
     def model_id(self) -> str:
         return str(self.data["model_id"])
 
+    @property
+    def kinds(self) -> dict[str, set[str] | None]:
+        return FAMILY_KINDS.get(str(self.data["family"]), ARTIFACT_KINDS)
+
+    @property
+    def bundle(self) -> bool:
+        return str(self.data["family"]) in FAMILY_KINDS
+
     def artifact(self, kind: str) -> Path:
         root = artifact_root()
         path = (root / self.data["artifacts"][kind]).resolve()
@@ -93,19 +129,84 @@ class ModelDescriptor:
             raise ValueError(f"{kind} artifact must lie inside ARTIFACT_ROOT")
         if not path.is_file():
             raise FileNotFoundError(f"{kind} artifact missing: {self.data['artifacts'][kind]}")
-        allowed = ARTIFACT_KINDS[kind] or MODEL_FORMATS[self.data["algorithm"]]
+        allowed = self.kinds[kind] or MODEL_FORMATS[self.data["algorithm"]]
         if path.suffix.lower() not in allowed:
             raise ValueError(f"{kind} artifact must be one of {sorted(allowed)}")
         return path
 
     def verify_checksums(self) -> dict[str, str]:
         actual = {}
-        for kind in ARTIFACT_KINDS:
+        for kind in self.kinds:
             digest = file_checksum(self.artifact(kind))
             if digest != self.data["checksums"][kind]:
                 raise ValueError(f"{kind} artifact checksum does not match the descriptor")
             actual[kind] = digest
+        if self.bundle:
+            # Every file of the bundle, through its own manifest, before anything loads.
+            listed = verify_bundle(self.artifact("manifest"), actual["manifest"])
+            root = self.artifact("manifest").parent
+            for kind in self.kinds:
+                path = self.artifact(kind)
+                if kind == "manifest" or not path.is_relative_to(root):
+                    continue
+                name = path.relative_to(root).as_posix()
+                if listed.get(name) != actual[kind]:
+                    raise ValueError(f"{kind} artifact is not the file the bundle manifest pins")
         return actual
+
+    def check_bundle_metadata(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Training contract and validation scores of a frozen bundle; never test data."""
+        d = self.data
+        metrics = json.loads(self.artifact("metrics").read_text(encoding="utf-8"))
+        manifest = json.loads(self.artifact("manifest").read_text(encoding="utf-8"))
+        policy = json.loads(self.artifact("policy_manifest").read_text(encoding="utf-8"))
+        first, last = (int(y) for y in str(d["training_period"]).split("-"))
+        v_first, v_last = (int(y) for y in str(d["validation_period"]).split("-"))
+        t_first, t_last = (int(y) for y in str(d["test_period"]).split("-"))
+        checks = {
+            "metrics algorithm": str(metrics.get("model", "")).lower() == d["algorithm"],
+            "metrics training period": metrics.get("training_period")
+            == list(range(first, last + 1)),
+            "metrics validation period": metrics.get("validation_period") == [v_first, v_last],
+            "test period unread in training": set(range(t_first, t_last + 1))
+            <= set(metrics.get("test_period_unread", [])),
+            "manifest training years": manifest.get("training_years") == [first, last],
+            "manifest validation years": manifest.get("validation_years") == [v_first, v_last],
+            "manifest cells": manifest.get("domain_cell_count") == 205999,
+            "manifest units": manifest.get("rain_units") == "mm/week",
+            "manifest model checksum": manifest.get("original_catboost_sha256")
+            == d["checksums"]["model"],
+            "manifest MBC checksum": manifest.get("original_mbc_sha256") == d["checksums"]["mbc"],
+            "policy validation years": policy.get("validation_years") == d["validation_period"],
+            "feature count": d["feature_count"] == 24,
+        }
+        failed = [name for name, ok in checks.items() if not ok]
+        if failed:
+            raise ValueError(f"Bundle metadata disagrees with the descriptor: {failed}")
+        scores = bundle_scores(metrics, policy, str(d["policy"]))
+        summary = {
+            "validation_rows": int(metrics.get("exact_rows", 0)),
+            **scores,
+        }
+        evidence = {
+            "experiment": d["experiment"],
+            "target": "CHIRPS - MBC_forecast",
+            "bundle_id": manifest.get("bundle_id"),
+            "bundle_status": manifest.get("status"),
+            "bundle_warnings": list(manifest.get("warnings", [])),
+            "trained_rows": manifest.get("trained_rows"),
+            "independent_report": {
+                **independent_summary(self.artifact("independent_summary"), str(d["policy"])),
+                "cases": 551,
+                "period": d["test_period"],
+                "source": "HPC independent verification, frozen before the web integration",
+                "selection_note": "The full CatBoost correction was chosen as the web default "
+                "after the 2022-2024 scores were seen (a descriptive choice, not an independent "
+                "selection); the MAM-protected policy was the one preselected on 2020-2021 "
+                "validation",
+            },
+        }
+        return summary, evidence
 
     def check_metadata(self) -> tuple[dict[str, Any], dict[str, Any]]:
         metrics = json.loads(self.artifact("metrics").read_text(encoding="utf-8"))
@@ -134,6 +235,8 @@ class ModelDescriptor:
         """Load the model with its MBC artifact on the platform's authoritative grid."""
         if file_checksum(self.artifact("domain")) != grid.checksum:
             raise ValueError("The model's domain artifact is not the platform's authoritative mask")
+        if self.bundle:
+            return MBCHybrid7PC17CatBoost.load(self, grid, cfg)
         mbc = load_mbc(self.artifact("mbc"), grid, cfg["mbc"])
         locked = schema(cfg, self.data["feature_schema"])
         if len(locked) != self.data["feature_count"]:
@@ -157,7 +260,7 @@ class ModelDescriptor:
     def verified(self, grid: DomainGrid, cfg: dict) -> tuple[dict[str, Any], ResidualMBCModel]:
         """Every registration check; returns the registry fields and the loaded model."""
         checksums = self.verify_checksums()
-        metrics, manifest = self.check_metadata()
+        metrics, manifest = self.check_bundle_metadata() if self.bundle else self.check_metadata()
         model = self.load_model(grid, cfg)
         d = self.data
         root = artifact_root()
@@ -179,7 +282,7 @@ class ModelDescriptor:
             "test_period": d["test_period"],
             "test_status": d["test_status"],
             "artifact_paths": {
-                k: self.artifact(k).relative_to(root).as_posix() for k in ARTIFACT_KINDS
+                k: self.artifact(k).relative_to(root).as_posix() for k in self.kinds
             },
             "artifact_path": str(self.artifact("model")),
             "mbc_artifact_path": self.artifact("mbc").relative_to(root).as_posix(),
@@ -201,6 +304,14 @@ class ModelDescriptor:
             },
             "matrix_manifest": {k: manifest[k] for k in ("experiment", "target") if k in manifest},
         }
+        if self.bundle:
+            fields["policy"] = d["policy"]
+            fields["bundle"] = manifest
+            fields["pressure_steps_hours"] = [int(h) for h in d["pressure_steps_hours"]]
+            fields["metrics_scope"] = (
+                f"validation period {d['validation_period']} of the {d['policy']} policy "
+                "(from the bundle's validation files)"
+            )
         return fields, model
 
 
@@ -229,9 +340,14 @@ def load_descriptor(path: str | Path) -> ModelDescriptor:
     for key in ("training_period", "validation_period", "test_period"):
         if not PERIOD.match(str(data[key])):
             raise ValueError(f"{key} must look like 2008-2019")
-    for kind in ARTIFACT_KINDS:
+    kinds = FAMILY_KINDS.get(str(data["family"]), ARTIFACT_KINDS)
+    for kind in kinds:
         if kind not in data["artifacts"] or kind not in data["checksums"]:
             raise ValueError(f"Descriptor must list the {kind} artifact and its checksum")
+    if str(data["family"]) in FAMILY_KINDS:
+        missing = [key for key in BUNDLE_REQUIRED if key not in data]
+        if missing:
+            raise ValueError(f"A bundle descriptor must state {missing}")
     return ModelDescriptor(path, data)
 
 

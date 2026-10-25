@@ -1,0 +1,70 @@
+{
+  "bundle_id": "ICPAC_WEEK2_WEB_MODEL_20261025",
+  "created_utc": "2026-10-25T11:08:12.065637+00:00",
+  "status": "PORTABLE_FROZEN_INFERENCE_ARTIFACTS_FEED_ADAPTER_QC_REQUIRED",
+  "model_type": "CatBoost 24-feature residual hybrid with monthly MBC and 17 train-only PCs",
+  "models": {
+    "catboost_full": "validation endpoint alpha=1",
+    "global_alpha075": "alpha=0.75",
+    "mam_protected": "initialization MAM alpha=0; else alpha=0.75"
+  },
+  "training_years": [
+    2005,
+    2019
+  ],
+  "validation_years": [
+    2020,
+    2021
+  ],
+  "reforecast_test_years": [
+    2022,
+    2024
+  ],
+  "trained_rows": 572184800,
+  "validation_rows": 75044000,
+  "reforecast_test_rows": 113285600,
+  "country_count": 11,
+  "domain_cell_count": 205999,
+  "rain_units": "mm/week",
+  "catboost_train_version": "1.2.10",
+  "package_catboost_version": "1.2.10",
+  "original_catboost_sha256": "19a17b2c9cafcdcbb624c89fe9eb2a147ad10662f7a1d42144656cbd5aec0763",
+  "original_mbc_sha256": "7205ec7579b6f4832660613e504f6dbe2940e2041bf0dbf099e2a347ad6e95a5",
+  "source_paths": {
+    "artifacts/catboost_residual_fullrows.cbm": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CATBOOST_VALIDATION_SELECTION_20261023/CatBoost_17PC_LOYO_RESIDUAL_FULLROWS.cbm",
+    "artifacts/mbc_monthly_prior500_cap3.npz": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CATBOOST_VALIDATION_SELECTION_20261023/MBC_OPERATIONAL_MONTHLY_PRIOR500_CAP3_FULLGRID.npz",
+    "artifacts/pca_atmos30_train2005_2019.npz": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/PCA_TRAIN_2005_2019/ATMOS30_PCA_TRAIN_2005_2019.npz",
+    "artifacts/authoritative_icpac11_mask.npz": "/scratch/njoel/ICPAC_DATA_HUB/DOMAIN/authoritative_icpac11_mask.npz",
+    "config/HYBRID_POLICY_MANIFEST.json": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/HYBRID_POLICY_SELECTION_20261023/HYBRID_POLICY_MANIFEST.json",
+    "verification/CATBOOST_VALIDATION_FULLGRID.json": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/ML_HYBRID7_PCS_FULLROWS_V1/models/CATBOOST_VALIDATION_FULLGRID.json",
+    "verification/global_skill_summary.csv": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/INDEPENDENT_VERIFICATION_2022_2024_FROZEN_V1/global_skill_summary.csv",
+    "verification/INDEPENDENT_VERIFICATION_REPORT.json": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/INDEPENDENT_VERIFICATION_2022_2024_FROZEN_V1/INDEPENDENT_VERIFICATION_REPORT.json",
+    "provenance/fullgrid_stats_mbc.py": "/scratch/njoel/code/s2s_unified_raw_20261018/FULLGRID_STATS_MBC_20261022/fullgrid_stats_mbc.py",
+    "provenance/prepare_fullgrid_ml.py": "/scratch/njoel/code/s2s_unified_raw_20261018/ML_FULLGRID_ALLROWS_STAGE1_20261022/prepare_fullgrid_ml.py",
+    "provenance/train_fullgrid_ml.py": "/scratch/njoel/code/s2s_unified_raw_20261018/ML_FULLGRID_ALLROWS_STAGE1_20261022/train_fullgrid_ml.py"
+  },
+  "files_sha256": {
+    "README.md": "4b1035ed15b6deab5414ac13d8c1f8691fd6dc7967a797081ac4535a0be1996d",
+    "artifacts/authoritative_icpac11_mask.npz": "3906541fd4bbd368095340c43e649acd9e319aea3936144192fe921d9f786ed9",
+    "artifacts/catboost_residual_fullrows.cbm": "19a17b2c9cafcdcbb624c89fe9eb2a147ad10662f7a1d42144656cbd5aec0763",
+    "artifacts/mbc_monthly_prior500_cap3.npz": "7205ec7579b6f4832660613e504f6dbe2940e2041bf0dbf099e2a347ad6e95a5",
+    "artifacts/pca_atmos30_train2005_2019.npz": "798403ccf36c73bfdee095f1dfb17c4b4c537c8dac586e898b8cbe1a54378bf9",
+    "artifacts/train_only_monthly_climatology.npz": "bd68e8fd5a4586a3d50431829c25b06810d971a6092a0f51a266420d4fd4a2c7",
+    "config/HYBRID_POLICY_MANIFEST.json": "782aa642593b357cffe1e8621c895b429415d9f043f0e367211bcc8ac2a9c3ba",
+    "config/deployment_policies.json": "42fc35afe7b80b5bf8df3d71e2d1d3d398a8e49a7e41d69f4b1aca95f9f6dd13",
+    "config/feature_schema.json": "05ee63bfcf331ccdc28a196bce47b64ee58d4d73c4a6e6c247c0c9d4d559a57f",
+    "provenance/fullgrid_stats_mbc.py": "e7fd4fb5ed8507d2eb9511b1e48165b782347516997fed14a85fb945b3e963cd",
+    "provenance/prepare_fullgrid_ml.py": "baa21530840556bb9326e7f542317f21409ac7bea8fd8c589b40308687cc6f33",
+    "provenance/train_fullgrid_ml.py": "202edced83ce94ec2f868fc2e90319151819264e190750a9b6adec7f7ebd7862",
+    "requirements-inference.txt": "8a447f9996d88ed08c9c7306d63ae4776de7541de5b7e5159ff5b3af389a941f",
+    "runtime/icpac_week2_inference.py": "d848e7d1248fa939cda63280672bb941e162d02b3a46305d861ded48a087ebc0",
+    "verification/CATBOOST_VALIDATION_FULLGRID.json": "23f2ab4a5ee7c35747debcff671a5f71331fb3859b070777be30780a6aed374c",
+    "verification/INDEPENDENT_VERIFICATION_REPORT.json": "0c3105b9d34de13333a5205990e5ecea0f74c104d203038e630f4a84f40f7be9",
+    "verification/global_skill_summary.csv": "4244448292708c027c7d7e6713e6d940d1b4e85936357a3824dbc930b34b04ff"
+  },
+  "warnings": [
+    "Operational ECMWF 2025+ compatibility not verified",
+    "Post-test choice of catboost_full is descriptive, not an independent selection",
+    "No training, verification, or real-time forecast feeds inside this archive"
+  ]
+}

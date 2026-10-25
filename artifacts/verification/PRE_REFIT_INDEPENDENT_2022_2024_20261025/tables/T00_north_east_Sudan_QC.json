@@ -1,0 +1,19 @@
+{
+  "sudan_northeast_vector_cells": 11963,
+  "sudan_northeast_authoritative_cells": 11867,
+  "sudan_northeast_geometry_coverage_fraction": 0.9919752570425479,
+  "sudan_vector_bounds_wgs84": [
+    21.825293,
+    8.665625,
+    38.609473,
+    22.202441
+  ],
+  "sudan_valid_mask_cells": 63284,
+  "sudan_northeast_cells_lat_ge15_lon_ge33": 12538,
+  "sudan_mask_northmost_lat": 23.125,
+  "sudan_mask_eastmost_lon": 38.57499694824219,
+  "note": "No extrapolation beyond recorded domain cells; zero-value arid-region fields retained.",
+  "sudan_northeast_CHIRPS_verified_cells": 12538,
+  "sudan_northeast_CHIRPS_authoritative_cells": 12538,
+  "sudan_northeast_CHIRPS_coverage_fraction": 1.0
+}

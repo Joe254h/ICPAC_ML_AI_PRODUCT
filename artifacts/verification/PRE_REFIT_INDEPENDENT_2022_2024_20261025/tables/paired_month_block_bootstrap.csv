@@ -1,0 +1,6 @@
+primary,comparator,delta_rmse_mmweek,ci95_lower,ci95_upper,interpretation
+MAMProtected,MBC,-0.14482472144581315,-0.23581010970276045,-0.06372147884279178,negative delta favors MAMProtected; exploratory monthly block bootstrap
+MAMProtected,CatBoost,0.06690615509994657,0.004351392238372043,0.1390443333812412,negative delta favors MAMProtected; exploratory monthly block bootstrap
+MAMProtected,GlobalAlpha075,0.06111826468955428,0.013268953519243088,0.12268811943033352,negative delta favors MAMProtected; exploratory monthly block bootstrap
+MAMProtected,RawECMWF,-1.9980916641592525,-2.4855523555417234,-1.5499000895514872,negative delta favors MAMProtected; exploratory monthly block bootstrap
+MAMProtected,LightGBM,0.03263735985882299,-0.07782410675465382,0.12860440807200518,negative delta favors MAMProtected; exploratory monthly block bootstrap

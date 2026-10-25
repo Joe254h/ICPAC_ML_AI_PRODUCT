@@ -3054,3 +3054,18 @@ table.data .strong {
     white-space: normal;
   }
 }
+
+/* Model lifecycle: the separate states a model has reached, in order. */
+ol.lifecycle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+}
+ol.lifecycle li:not(:last-child)::after {
+  content: "→";
+  color: var(--muted);
+  margin-left: 10px;
+}

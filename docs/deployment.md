@@ -203,6 +203,25 @@ approvals, audit); gridded fields stay in NetCDF packages in file or object stor
 record store is a prototype schema: add migrations and uniqueness constraints before
 multi-team use.
 
+## Models on a deployment
+
+The backend image carries the committed artifacts, including the frozen pre-refit bundle
+(about 20 MB more) and its verification evidence. At start-up every descriptor in
+`config/model_registry/` is checked and registered; the four pre-refit policies arrive
+**experimental** and the model in use does not change. No new environment variable is
+needed. To use the pre-refit model on the live site, after deploying:
+
+1. Models › *MBC + CatBoost residual (full correction)* (or another policy) › **Record
+   independent test**, if the reviewers accept the HPC report.
+2. **Approve for operational use**, then **Make this the model in use**.
+3. Operations › run the weekly cycle. The background run downloads the upper-air fields.
+4. Data & Tools › ECMWF ensemble shows every input check. For runs from 2025, review them
+   and **Confirm the real-time input** on the Models page; the next run adds the AI/ML layer.
+
+To go back, open Models and reactivate the earlier model from the activation history.
+`RELEASE_MODE=production` additionally requires a production model (passed independent
+test); its seven upper-air leads come from the model's descriptor.
+
 ## HPC to platform
 
 ```bash
@@ -226,6 +245,6 @@ an API request. Email decisions use separate single-use signed links.
 See [configuration, privacy, quotas and recovery](deployment-powershell.md#access-privacy-and-recovery).
 
 `RELEASE_MODE=evaluation` is the default. A production release requires an independently
-tested production model and the frozen seven upper-air steps; startup refuses missing
-requirements. See [scientific release requirements](deployment-powershell.md#scientific-release-remains-evaluation).
+tested production model and its seven frozen upper-air steps (from its descriptor, or the
+setting for models that do not state them); startup refuses missing requirements. See [scientific release requirements](deployment-powershell.md#scientific-release-remains-evaluation).
 Keep database and package backups. Never commit keys or real `.env` files.

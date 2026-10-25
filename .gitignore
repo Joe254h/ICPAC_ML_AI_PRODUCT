@@ -22,6 +22,8 @@ artifacts/*
 !artifacts/mbc/
 !artifacts/schema/
 !artifacts/domain/
+!artifacts/bundles/
+!artifacts/verification/
 observations/*
 forecasts/*
 !forecasts/README.md

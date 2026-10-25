@@ -21,6 +21,7 @@ import type {
   ForecastDetail,
   ForecastRun,
   Metrics,
+  ProductStatus,
   Variant,
 } from "@/types/operational";
 
@@ -43,6 +44,28 @@ export const LAYER_TEXT: Record<Variant, { title: string; method: string }> = {
       "The MBC forecast plus a CatBoost correction learned from 37 predictors (ensemble rainfall and atmospheric fields at 850, 700, 500 and 200 hPa), added to MBC and kept at or above zero.",
   },
 };
+
+/** Layer descriptions of the frozen pre-refit model (Hybrid7 + 17 PCs). */
+const PREREFIT_TEXT: Record<Variant, { title: string; method: string }> = {
+  raw: LAYER_TEXT.raw,
+  mbc: {
+    title: "MBC",
+    method:
+      "Multiplicative bias correction: the ECMWF ensemble mean times the frozen monthly factor (prior 500, cap 3, estimated on 2005–2019) for the initialization month and grid cell. On the independent 2022–2024 reforecast test it reduced RMSE by 10.7% against raw ECMWF.",
+  },
+  hybrid: {
+    title: "MBC + AI/ML",
+    method:
+      "The MBC forecast corrected by a CatBoost model (300 trees) from 24 predictors: ensemble rainfall, location, season, MBC and 17 principal components of 30 atmospheric fields at 850, 700, 500 and 200 hPa; kept at or above zero.",
+  },
+};
+
+/** How each layer of a forecast was made, for the model family that produced it. */
+export function layerText(
+  family?: string | null,
+): Record<Variant, { title: string; method: string }> {
+  return family === "hybrid7_pc17" ? PREREFIT_TEXT : LAYER_TEXT;
+}
 
 /** The forecast named in the URL (?id=), else the latest one. */
 export function useForecast(id?: string) {
@@ -97,6 +120,14 @@ export function forecastFacts(detail: ForecastRun): string[] {
   ];
 }
 
+/** Why a layer is not in a forecast, in words. */
+export function productReason(product?: ProductStatus): string {
+  if (!product?.reason) return "Its inputs are not available yet.";
+  if (product.status === "blocked") return `Not produced: ${product.reason}.`;
+  if (product.status === "not_produced") return `${product.reason}.`;
+  return `Waiting for ${product.reason}.`;
+}
+
 export function ProductStatusList({ detail }: { detail: ForecastRun }) {
   const products = detail.products ?? {};
   return (
@@ -117,9 +148,7 @@ export function ProductStatusList({ detail }: { detail: ForecastRun }) {
           </div>
         ) : (
           <InProgress key={variant} title={LAYER_TEXT[variant].title}>
-            {products[variant]?.reason
-              ? `Waiting for ${products[variant]?.reason}.`
-              : "Its inputs are not available yet."}
+            {productReason(products[variant])}
           </InProgress>
         );
       })}
@@ -432,7 +461,9 @@ export function ProvenanceList({ detail }: { detail: ForecastDetail }) {
         ],
         [
           "Bias correction",
-          `Ratios for ${MONTHS[(p.mbc_month ?? 1) - 1]}, from 2005–2021 CHIRPS and ECMWF rainfall`,
+          detail.family === "hybrid7_pc17"
+            ? `Frozen factors for ${MONTHS[(p.mbc_month ?? 1) - 1]} (prior 500, cap 3), from 2005–2019 CHIRPS and ECMWF reforecasts`
+            : `Ratios for ${MONTHS[(p.mbc_month ?? 1) - 1]}, from 2005–2021 CHIRPS and ECMWF rainfall`,
         ],
         ["Input", detail.input_label],
       ]}

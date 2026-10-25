@@ -26,7 +26,7 @@ from climate_engine.operational.settings import (
     touches_protected_test,
     valid_window,
 )
-from climate_engine.preprocessing.atmos37 import build_features, build_rainfall, needs_pressure
+from climate_engine.preprocessing.hybrid7_pc17 import InputContractError
 from climate_engine.provenance import code_version, configuration_checksum
 from climate_engine.verification import continuous_metrics, season_of, sufficient_statistics
 
@@ -60,9 +60,9 @@ def is_synthetic(provenance: dict[str, Any]) -> bool:
 
 def hybrid_blocker(model: ResidualMBCModel, cfg: dict) -> str | None:
     """Why the model's AI/ML (hybrid) layer cannot be produced yet, or None when it can."""
-    if not needs_pressure(model.names):
+    if not model.needs_pressure():
         return None
-    if cfg["ecmwf"]["pressure"].get("week2_steps_hours") is None:
+    if model.pressure_steps(cfg) is None:
         # Shown to forecasters ("Waiting for ..."): the setting is
         # ecmwf.pressure.week2_steps_hours in config/operational.yaml.
         return (
@@ -70,6 +70,12 @@ def hybrid_blocker(model: ResidualMBCModel, cfg: dict) -> str | None:
             "(pressure-level) fields"
         )
     return None
+
+
+REALTIME_REVIEW = (
+    "a reviewer to confirm that this real-time ECMWF input is compatible with the frozen "
+    "model (the model was trained and tested on reforecasts; required for runs from 2025)"
+)
 
 
 def grid_from_config(cfg: dict) -> DomainGrid:
@@ -100,9 +106,12 @@ class ForecastRun:
 def build_dataset(result: InferenceResult, grid: DomainGrid) -> xr.Dataset:
     dims = ("latitude", "longitude")
     fields = result.to_grid(grid)
+    labels = dict(FIELDS)
+    if result.metadata.get("hybrid_definition"):
+        labels["hybrid"] = str(result.metadata["hybrid_definition"])
     data = {
         name: (dims, fields[name].astype(np.float32), {"units": "mm", "long_name": label})
-        for name, label in FIELDS.items()
+        for name, label in labels.items()
         if name in fields
     }
     data["domain_mask"] = (dims, grid.mask.astype(np.int8), {"long_name": "ICPAC-11 domain"})
@@ -143,26 +152,46 @@ def run_forecast(
     cfg: dict,
     model_record: dict[str, Any] | None = None,
     overrides: dict[str, Any] | None = None,
+    realtime_review: dict[str, Any] | None = None,
 ) -> ForecastRun:
-    """One forecast; ``overrides`` records any configuration a caller replaced (provenance)."""
+    """One forecast; ``overrides`` records any configuration a caller replaced (provenance);
+    ``realtime_review`` is a reviewer's recorded confirmation that this real-time input
+    source is compatible with the model, for models that require one."""
     initialization = date.fromisoformat(cycle)
     rainfall = provider.load(cycle)
-    blocker = hybrid_blocker(model, cfg)
-    pressure = provider.load_pressure(cycle) if blocker is None else None
-    if blocker is None and needs_pressure(model.names) and pressure is None:
-        blocker = (
+    status, blocker = "available", None
+    if not model.produces_hybrid:
+        status = "not_produced"
+        blocker = "The model's policy issues MBC alone (the fallback); no AI/ML correction"
+    elif (blocker := hybrid_blocker(model, cfg)) is not None:
+        status = "in_progress"
+    needs = model.needs_pressure() and model.produces_hybrid
+    pressure = provider.load_pressure(cycle) if blocker is None and needs else None
+    if blocker is None and needs and pressure is None:
+        status, blocker = (
+            "in_progress",
             "the upper-air (pressure-level) ECMWF fields of the "
-            f"{initialization.day} {initialization:%B %Y} run"
+            f"{initialization.day} {initialization:%B %Y} run",
         )
+    result: InferenceResult | None = None
+    checks: list[dict[str, str]] = []
+    gated = model.realtime_gated(initialization)
     if blocker is None:
-        features = build_features(
-            model.names, rainfall, initialization, grid, model.mbc, cfg, pressure
-        )
-        result = model.run(features)
-    else:
+        try:
+            features = model.build_features(rainfall, initialization, grid, cfg, pressure)
+        except InputContractError as exc:
+            checks = exc.checks
+            status, blocker = "blocked", f"an input failed the frozen model's checks: {exc}"
+        else:
+            checks = features.checks
+            if gated and not realtime_review:
+                status, blocker = "in_progress", REALTIME_REVIEW
+            else:
+                result = model.run(features)
+    if result is None:
         # Rainfall alone gives the raw ensemble mean and the MBC forecast; the residual
         # (AI/ML) layer is left out, never approximated.
-        rain = build_rainfall(rainfall, initialization, grid, model.mbc, cfg)
+        rain = model.build_rainfall(rainfall, initialization, grid, cfg)
         result = InferenceResult(
             raw=rain.columns["X_mean"],
             mbc=rain.columns["MBC_forecast"],
@@ -179,6 +208,7 @@ def run_forecast(
                 "notes": rain.notes,
             },
         )
+        checks = checks or rain.checks
     dataset = build_dataset(result, grid)
     start, end = valid_window(cfg, initialization)
     record = model_record or {}
@@ -191,17 +221,19 @@ def run_forecast(
         "mbc": {"status": "available"},
         "hybrid": {"status": "available"}
         if blocker is None
-        else {"status": "in_progress", "reason": blocker},
+        else {"status": status, "reason": blocker},
     }
     provenance = {
         "forecast_id": forecast_id,
         "model_id": record.get("model_id"),
+        "model_name": record.get("model_name"),
         "model_version": record.get("version"),
         "model_status": record.get("status"),
         "model_checksum": record.get("checksum"),
         "mbc_artifact_checksum": record.get("artifact_checksums", {}).get("mbc"),
         "feature_schema": record.get("feature_schema", model.family),
-        "feature_schema_checksum": record.get("artifact_checksums", {}).get("feature_names"),
+        "feature_schema_checksum": record.get("artifact_checksums", {}).get("feature_names")
+        or record.get("artifact_checksums", {}).get("feature_schema"),
         "artifact_checksums": dict(record.get("artifact_checksums", {})),
         "forecast_initialization": cycle,
         "forecast_valid_start": start.isoformat(),
@@ -233,9 +265,20 @@ def run_forecast(
         # The scientific settings actually used, overrides included.
         "operational_config_checksum": checksum(cfg),
         "configuration_overrides": overrides or {},
-        "pressure_steps_hours": cfg["ecmwf"]["pressure"].get("week2_steps_hours")
-        if pressure is not None
+        "pressure_steps_hours": model.pressure_steps(cfg) if pressure is not None else None,
+        # Every input check the model's builder ran, passed or failed, in order.
+        "input_checks": checks,
+        "hybrid_policy": {
+            "policy": model.info["policy"],
+            "definition": model.info["policy_definition"],
+            "scientific_preselected_policy": model.info.get("scientific_preselected_policy"),
+        }
+        if "policy" in model.info
         else None,
+        "realtime_gate": {
+            "required": gated,
+            "review": realtime_review,
+        },
         "ensemble_members": result.metadata["members"],
         "mbc_month": result.metadata["mbc_month"],
         "doy_date": result.metadata["doy_date"],
@@ -251,8 +294,18 @@ def run_forecast(
         input_label=provenance["input_label"],
     )
     notes = list(result.metadata["notes"])
-    if blocker is not None:
+    if status == "in_progress":
         notes.append(f"The MBC + AI/ML forecast is in progress: it is waiting for {blocker}")
+    elif status == "blocked":
+        notes.append(f"The MBC + AI/ML forecast was not produced: {blocker}")
+    elif status == "not_produced":
+        notes.append(str(blocker))
+    if gated and realtime_review and result.hybrid is not None:
+        notes.append(
+            "Real-time ECMWF input: every automated input check passed and a reviewer "
+            "confirmed compatibility; the 2022–2024 test scores describe reforecasts, not "
+            "this real-time skill"
+        )
     if open_data:
         notes.append(
             "ECMWF Open Data rainfall (0.25°) is averaged to the 1.5° grid the model was "

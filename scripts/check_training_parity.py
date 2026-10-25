@@ -18,7 +18,6 @@ from climate_engine.models.descriptor import load_descriptor
 from climate_engine.operational.parity import compare
 from climate_engine.operational.pipeline import grid_from_config
 from climate_engine.operational.settings import settings
-from climate_engine.preprocessing.atmos37 import build_features
 from climate_engine.provenance import file_checksum
 
 
@@ -38,14 +37,9 @@ def main() -> None:
     fields, model = load_descriptor(args.descriptor).verified(grid, cfg)
     provider = ECMWFS2SForecastProvider(args.rainfall, args.pressure, cfg)
     cycle = args.initialization.isoformat()
-    features = build_features(
-        model.names,
-        provider.load(cycle),
-        args.initialization,
-        grid,
-        model.mbc,
-        cfg,
-        provider.load_pressure(cycle),
+    # The model's own preprocessing (Atmos37, or the frozen bundle's training order).
+    features = model.build_features(
+        provider.load(cycle), args.initialization, grid, cfg, provider.load_pressure(cycle)
     )
     prediction = model.run(features)
     if prediction.residual is None or prediction.hybrid is None:

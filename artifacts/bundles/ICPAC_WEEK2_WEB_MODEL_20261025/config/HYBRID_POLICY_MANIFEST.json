@@ -1,0 +1,42 @@
+{
+  "status": "VALIDATION_POLICY_SELECTED_NOT_HOLDOUT_VERIFIED",
+  "training_years": "2005-2019",
+  "validation_years": "2020-2021",
+  "holdout_years": "2022-2025",
+  "validation_rows": 75044000,
+  "primary_metric": "area_weighted_rmse",
+  "primary_candidate": {
+    "name": "seasonally_gated_mbc_catboost",
+    "rule": "MAM: alpha=0; otherwise alpha=0.75",
+    "mbc_weight_non_MAM": 0.25,
+    "catboost_hybrid_weight_non_MAM": 0.75,
+    "rmse": 14.227651419946486,
+    "mae": 7.092909987102415,
+    "bias": -0.40900446178719496
+  },
+  "comparator": {
+    "name": "global_mbc_catboost",
+    "alpha": 0.75,
+    "metrics": {
+      "alpha": 0.75,
+      "rmse": 14.264625547334711,
+      "mae": 7.096699368226976,
+      "bias": -0.4098053036941172,
+      "pearson_r": 0.7863233139407803,
+      "rows": 75044000
+    }
+  },
+  "artifacts": {
+    "catboost": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CATBOOST_VALIDATION_SELECTION_20261023/CatBoost_17PC_LOYO_RESIDUAL_FULLROWS.cbm",
+    "catboost_sha256": "19a17b2c9cafcdcbb624c89fe9eb2a147ad10662f7a1d42144656cbd5aec0763",
+    "mbc": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CATBOOST_VALIDATION_SELECTION_20261023/MBC_OPERATIONAL_MONTHLY_PRIOR500_CAP3_FULLGRID.npz",
+    "mbc_sha256": "7205ec7579b6f4832660613e504f6dbe2940e2041bf0dbf099e2a347ad6e95a5"
+  },
+  "notes": [
+    "Both policies selected using 2020-2021 validation",
+    "Season labels must match the validation pipeline",
+    "Country and extreme-rainfall verification pending",
+    "Full preprocessing and PCA artifacts still require locking",
+    "2022-2025 holdout not accessed"
+  ]
+}

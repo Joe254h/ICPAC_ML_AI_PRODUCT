@@ -7,9 +7,18 @@ demonstration (task ``week2_precipitation``) may remain in older databases; they
 listed, used or changed.
 
 Production is per task: promoting a model retires only that task's production model.
+
+Lifecycle: a registered model has passed every integrity check (uploaded ->
+integrity_verified). A reviewer records its independent test (scientifically_validated),
+approves it for operational use (operationally_approved, status candidate) and activates
+it (active). Only an explicit, reviewed activation changes the model forecasts use; the
+activation history makes every earlier active model one click away (rollback). Before the
+first activation the earlier rule applies (production, else the newest candidate), and the
+first registry change pins that model so that no approval or registration switches it.
 """
 
 import json
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
@@ -27,6 +36,40 @@ from climate_engine.models.descriptor import VALIDATION_SCORES, validation_score
 from climate_engine.provenance import code_version
 
 DEMO_TASK = "week2_precipitation"
+ACTIVE_KIND = "active_model"
+ACTIVE_ID = f"active-{operational.TASK}"
+REVIEW_SOURCES = {"ecmwf_opendata", "ecmwf_files"}
+LIFECYCLE = (
+    "uploaded",
+    "integrity_verified",
+    "scientifically_validated",
+    "operationally_approved",
+    "active",
+    "retired",
+)
+
+
+def artifact_claim(checksum: str, policy: str | None) -> str:
+    """One registration per model file and policy (a bundle registers each policy)."""
+    return f"model-artifact-{checksum}" + (f"-{policy}" if policy else "")
+
+
+def lifecycle(record: dict[str, Any], active_id: str | None) -> dict[str, Any]:
+    """The separate lifecycle states of a registered model, and the furthest reached."""
+    states = {
+        "uploaded": True,
+        "integrity_verified": bool(record.get("validated")),
+        "scientifically_validated": record.get("test_status") == "passed",
+        "operationally_approved": record.get("status") in {"candidate", "production"},
+        "active": record.get("model_id") == active_id,
+        "retired": record.get("status") == "retired",
+    }
+    stage = (
+        "retired"
+        if states["retired"]
+        else next(name for name in reversed(LIFECYCLE[:-1]) if states[name])
+    )
+    return {"stage": stage, "states": states}
 
 
 def task_of(record: dict[str, Any]) -> str:
@@ -79,7 +122,8 @@ class ModelRegistry:
         """Register an operational model only after every artifact check passes."""
         descriptor, fields = operational.describe(descriptor_path)
         self._require_new_id(descriptor.model_id)
-        self._require_unused_artifact(fields["checksum"])
+        policy = fields.get("policy")
+        self._require_unused_artifact(fields["checksum"], policy)
         declared = descriptor.data["declared_status"]
         stamp = now()
         model_id = descriptor.model_id
@@ -113,21 +157,28 @@ class ModelRegistry:
         with self._write_lock() as session:
             if session.get(Record, model_id) is not None:
                 raise ValueError("Model IDs are immutable; register a new version ID")
-            for row in session.scalars(select(Record).where(Record.kind == "model")):
-                other = json.loads(row.payload)
+            others = [
+                json.loads(row.payload)
+                for row in session.scalars(select(Record).where(Record.kind == "model"))
+            ]
+            for other in others:
                 if (
                     operational.is_operational(other)
                     and other.get("checksum") == fields["checksum"]
+                    and other.get("policy") == policy
                 ):
                     raise ValueError(
                         f"This model artifact is already registered as {other['model_id']}"
                     )
+            if declared == "candidate":
+                # A new candidate must not become the model in use by being the newest.
+                self._pin(session, others)
             session.add(Record(id=model_id, kind="model", payload=json.dumps(record)))
             session.add(
                 self._record(
                     "model_artifact",
                     {"model_id": model_id, "checksum": fields["checksum"], "timestamp": stamp},
-                    f"model-artifact-{fields['checksum']}",
+                    artifact_claim(fields["checksum"], policy),
                 )
             )
             session.add(
@@ -158,9 +209,13 @@ class ModelRegistry:
             return
         raise ValueError("Model IDs are immutable; register a new version ID")
 
-    def _require_unused_artifact(self, checksum: str) -> None:
+    def _require_unused_artifact(self, checksum: str, policy: str | None = None) -> None:
         for record in self.repo.list("model"):
-            if operational.is_operational(record) and record.get("checksum") == checksum:
+            if (
+                operational.is_operational(record)
+                and record.get("checksum") == checksum
+                and record.get("policy") == policy
+            ):
                 raise ValueError(
                     f"This model artifact is already registered as {record['model_id']}"
                 )
@@ -227,34 +282,188 @@ class ModelRegistry:
     # ------------------------------------------------------------------ transitions
 
     def current(self) -> dict[str, Any]:
-        """The operational model in use: production if one exists, else the newest candidate."""
-        models = [m for m in self.repo.list("model") if operational.is_operational(m)]
+        """The operational model forecasts use: the explicitly activated model; before any
+        activation, production if one exists, else the newest candidate."""
+        models = {
+            m["model_id"]: m for m in self.repo.list("model") if operational.is_operational(m)
+        }
+        pointer = self.activation()
+        if pointer and pointer["model_id"] in models:
+            model = models[pointer["model_id"]]
+            return {
+                "role": model["status"],
+                "model": model,
+                "activation": pointer,
+                "note": None
+                if model["status"] == "production"
+                else "No production model yet: forecasts use the model a reviewer activated "
+                "for evaluation.",
+            }
+        legacy = self._legacy(list(models.values()))
+        if legacy is None:
+            raise KeyError("no operational model registered")
+        if legacy["status"] == "production":
+            return {"role": "production", "model": legacy, "activation": None}
+        return {
+            "role": "candidate",
+            "model": legacy,
+            "activation": None,
+            "note": "No production model yet: forecasts use the candidate under evaluation.",
+        }
+
+    @staticmethod
+    def _legacy(models: list[dict[str, Any]]) -> dict[str, Any] | None:
         production = [m for m in models if m["status"] == "production"]
         if production:
-            return {"role": "production", "model": production[0]}
+            return production[0]
         candidates = sorted(
             (m for m in models if m["status"] == "candidate"), key=lambda m: m["created_at"]
         )
-        if candidates:
-            return {
-                "role": "candidate",
-                "model": candidates[-1],
-                "note": "No production model yet: forecasts use the candidate under evaluation.",
-            }
-        raise KeyError("no operational model registered")
+        return candidates[-1] if candidates else None
+
+    def activation(self) -> dict[str, Any] | None:
+        try:
+            return self.repo.get(ACTIVE_KIND, ACTIVE_ID)
+        except KeyError:
+            return None
+
+    def _pin(self, session: Session, models: list[dict[str, Any]]) -> None:
+        """Record the model in use as explicitly active, once, before a change that the
+        earlier rule would let switch it."""
+        if session.get(Record, ACTIVE_ID) is not None:
+            return
+        legacy = self._legacy([m for m in models if operational.is_operational(m)])
+        if legacy is None:
+            return
+        stamp = now()
+        pointer = {
+            "id": ACTIVE_ID,
+            "model_id": legacy["model_id"],
+            "since": stamp,
+            "actor": "registry",
+            "comment": "The model in use when explicit activation began; kept unchanged.",
+            "history": [],
+        }
+        session.add(Record(id=ACTIVE_ID, kind=ACTIVE_KIND, payload=json.dumps(pointer)))
+        session.add(
+            self._audit_record("model_pinned", "registry", legacy["model_id"], {"since": stamp})
+        )
+
+    def _activate(
+        self, session: Session, target: dict[str, Any], actor: str, comment: str, stamp: str
+    ) -> None:
+        row = session.get(Record, ACTIVE_ID)
+        previous = json.loads(row.payload) if row is not None else None
+        history = list(previous.get("history", [])) if previous else []
+        if previous and previous["model_id"] != target["model_id"]:
+            history.insert(
+                0,
+                {
+                    "model_id": previous["model_id"],
+                    "since": previous["since"],
+                    "until": stamp,
+                    "actor": previous.get("actor"),
+                },
+            )
+        pointer = {
+            "id": ACTIVE_ID,
+            "model_id": target["model_id"],
+            "since": stamp,
+            "actor": actor,
+            "comment": comment,
+            "history": history[:50],
+        }
+        if row is None:
+            session.add(Record(id=ACTIVE_ID, kind=ACTIVE_KIND, payload=json.dumps(pointer)))
+        else:
+            row.payload = json.dumps(pointer)
+
+    def lifecycles(self) -> dict[str, dict[str, Any]]:
+        try:
+            active = self.current()["model"]["model_id"]
+        except KeyError:
+            active = None
+        return {
+            m["model_id"]: lifecycle(m, active)
+            for m in self.repo.list("model")
+            if operational.is_operational(m)
+        }
+
+    def review_realtime_feed(self, model_id: str, body) -> dict:
+        """A reviewer's confirmation (or withdrawal) that a real-time input source matches
+        the frozen model's training data, after a run whose input checks all passed."""
+        if not body.confirmed or not body.comment.strip():
+            raise ValueError("Explicit confirmation, reviewer name and justification are required")
+        if body.source not in REVIEW_SOURCES:
+            raise ValueError(f"Unknown input source; known: {sorted(REVIEW_SOURCES)}")
+        with self._write_lock() as session:
+            row = session.get(Record, model_id)
+            if row is None or row.kind != "model":
+                raise KeyError(model_id)
+            metadata = json.loads(row.payload)
+            if not operational.is_operational(metadata):
+                raise KeyError(model_id)
+            reviews = dict(metadata.get("realtime_reviews") or {})
+            stamp = now()
+            if body.withdraw:
+                if body.source not in reviews:
+                    raise ValueError("No confirmation is recorded for this input source")
+                reviews.pop(body.source)
+                action = "realtime_review_withdrawn"
+            else:
+                evidence = session.get(Record, body.forecast_id)
+                if evidence is None or evidence.kind != "forecast":
+                    raise ValueError("Name a forecast run of this model as the evidence")
+                run = json.loads(evidence.payload)
+                checks = list(run.get("input_checks") or [])
+                problems = []
+                if run.get("model_id") != model_id:
+                    problems.append("it was produced by another model")
+                if run.get("input_source") != body.source:
+                    problems.append("it read another input source")
+                if not run.get("realtime_gate_required"):
+                    problems.append("it is not a real-time run")
+                if not checks or any(c.get("status") == "failed" for c in checks):
+                    problems.append("not every input check passed")
+                if problems:
+                    raise ValueError("That forecast cannot be the evidence: " + "; ".join(problems))
+                reviews[body.source] = {
+                    "source": body.source,
+                    "actor": body.actor,
+                    "comment": body.comment,
+                    "timestamp": stamp,
+                    "forecast_id": body.forecast_id,
+                    "checks": len(checks),
+                }
+                action = "realtime_review_confirmed"
+            metadata["realtime_reviews"] = reviews
+            row.payload = json.dumps(metadata)
+            session.add(
+                self._approval_record(action, model_id, body.actor, body.comment, body.source)
+            )
+            session.add(
+                self._audit_record(
+                    f"model_{action}",
+                    body.actor,
+                    model_id,
+                    {"source": body.source, "forecast_id": body.forecast_id},
+                )
+            )
+        return metadata
 
     def transition(self, model_id: str, action: str, review: ReviewRequest) -> dict:
         if not review.confirmed or not review.comment.strip():
             raise ValueError("Explicit confirmation, reviewer name and justification are required")
-        if action not in {"candidate", "promote", "rollback", "retire"}:
+        if action not in {"candidate", "activate", "promote", "rollback", "retire"}:
             raise ValueError("Unknown model action")
         record = self.repo.get("model", model_id)
         if not operational.is_operational(record):
             raise KeyError(model_id)
-        if action == "promote":
+        production_release = os.getenv("RELEASE_MODE", "evaluation") == "production"
+        if action == "promote" or (action == "activate" and production_release):
             self._check_production_gate(record)
-        # Check artifact integrity and runtime before production changes.
-        if action in {"promote", "rollback"}:
+        # Check artifact integrity and runtime before the model in use changes.
+        if action in {"activate", "promote", "rollback"}:
             operational.OperationalModel(record).load()
         with self._write_lock() as session:
             records = list(
@@ -263,6 +472,11 @@ class ModelRegistry:
             models = {record.id: json.loads(record.payload) for record in records}
             if model_id not in models:
                 raise KeyError(model_id)
+            # From the first change on, only an explicit activation switches the model.
+            self._pin(session, list(models.values()))
+            session.flush()
+            pointer = session.get(Record, ACTIVE_ID)
+            active = json.loads(pointer.payload)["model_id"] if pointer is not None else None
             target = models[model_id]
             old = target["status"]
             stamp = now()
@@ -273,7 +487,17 @@ class ModelRegistry:
             elif action == "retire":
                 if old == "production":
                     raise ValueError("Promote a replacement before retiring production")
+                if model_id == active:
+                    raise ValueError("Activate another model before retiring the one in use")
                 set_status(target, "retired", stamp)
+            elif action == "activate":
+                if old not in {"candidate", "production"}:
+                    raise ValueError("Approve the model for operational use before activating it")
+                if production_release and old != "production":
+                    raise ValueError("Production releases activate the production model only")
+                if model_id == active:
+                    raise ValueError("This model is already the one in use")
+                self._activate(session, target, review.actor, review.comment, stamp)
             else:
                 allowed = (
                     old == "candidate"
@@ -290,6 +514,7 @@ class ModelRegistry:
                         set_status(metadata, "retired", stamp)
                 set_status(target, "production", stamp)
                 target["deployment_date"] = stamp
+                self._activate(session, target, review.actor, review.comment, stamp)
             for record in records:
                 record.payload = json.dumps(models[record.id])
             session.add(self._approval_record(action, model_id, review.actor, review.comment, old))
@@ -298,7 +523,7 @@ class ModelRegistry:
                     f"model_{action}",
                     review.actor,
                     model_id,
-                    {"comment": review.comment, "previous_status": old},
+                    {"comment": review.comment, "previous_status": old, "previous_active": active},
                 )
             )
         return target

@@ -14,10 +14,18 @@ import {
   PageBanner,
   Skeleton,
   Status,
+  type Tone,
 } from "@/components/ui";
 import type { PageProps } from "@/features/view";
 import { useActor } from "@/lib/actor";
-import { dateTime, day, num, period, validDays } from "@/lib/format";
+import {
+  dateTime,
+  day,
+  num,
+  period,
+  validDays,
+  versionLabel,
+} from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
 import type {
@@ -25,6 +33,7 @@ import type {
   DataSource,
   Dekad,
   EcmwfInput,
+  EcmwfReadiness,
   Operation,
 } from "@/types/operational";
 
@@ -54,16 +63,366 @@ function mirrorName(mirror: string): string {
   if (mirror === "ecmwf" || mirror.includes("data.ecmwf.int")) return "ECMWF";
   if (mirror === "aws" || mirror.includes("amazonaws"))
     return "ECMWF archive (AWS)";
+  if (mirror === "google" || mirror.includes("googleapis"))
+    return "ECMWF archive (Google Cloud)";
   return "Local copy";
+}
+
+const POLICY: Record<string, string> = {
+  catboost_full: "full CatBoost correction",
+  global_alpha075: "75% CatBoost correction",
+  mam_protected: "MAM-protected correction",
+  mbc_only: "MBC only (fallback)",
+};
+
+const COMPATIBILITY: Record<
+  EcmwfReadiness["compatibility"]["status"],
+  [Tone, string]
+> = {
+  compatible: ["ok", "Compatible"],
+  waiting: ["progress", "Waiting for an input"],
+  unchecked: ["info", "Not checked yet"],
+  incompatible: ["bad", "Incompatible input"],
+  awaiting_review: ["progress", "Checks passed, review needed"],
+  unknown: ["bad", "Model not loaded"],
+};
+
+function Yes({ ok, children }: { ok: boolean; children: React.ReactNode }) {
+  return <Status tone={ok ? "ok" : "bad"}>{children}</Status>;
+}
+
+function hours(values?: number[] | null): string {
+  return values?.length ? values.map((h) => `${h} h`).join(", ") : "—";
+}
+
+function Readiness({
+  ready,
+  changed,
+}: {
+  ready: EcmwfReadiness;
+  changed: () => void;
+}) {
+  const [actor] = useActor();
+  const { operation, error, running, start } = useOperation(changed);
+  const model = ready.model;
+  const availability = ready.availability;
+  const rain = ready.rainfall;
+  const upper = ready.upper_air;
+  const [tone, label] = COMPATIBILITY[ready.compatibility.status];
+  const checks = ready.last_run?.input_checks ?? [];
+  const failed = checks.filter((c) => c.status === "failed").length;
+  return (
+    <>
+      <div className="grid-2">
+        <Card
+          title="Forecast generation"
+          subtitle="Decided from the inputs held and their checks, for the model in use."
+        >
+          <KeyValues
+            items={[
+              [
+                "Raw ECMWF and MBC",
+                <span key="raw">
+                  <Yes ok={ready.generation.raw_mbc.allowed}>
+                    {ready.generation.raw_mbc.allowed ? "Allowed" : "Not yet"}
+                  </Yes>{" "}
+                  {ready.generation.raw_mbc.reason}
+                </span>,
+              ],
+              [
+                "MBC + AI/ML",
+                <span key="ml">
+                  <Yes ok={ready.generation.ml.allowed}>
+                    {ready.generation.ml.allowed ? "Allowed" : "Not yet"}
+                  </Yes>{" "}
+                  {ready.generation.ml.reason}
+                </span>,
+              ],
+              [
+                "Compatibility",
+                <span key="compat">
+                  <Status tone={tone}>{label}</Status>{" "}
+                  {ready.compatibility.detail}
+                </span>,
+              ],
+              [
+                "Real-time review",
+                ready.realtime_review
+                  ? `Confirmed by ${ready.realtime_review.actor}, ${dateTime(ready.realtime_review.timestamp)}`
+                  : model?.realtime_gate_from
+                    ? "Not confirmed: runs from 2025 produce the AI/ML layer only after a reviewer confirms the real-time input"
+                    : "Not required for this model",
+              ],
+            ]}
+          />
+        </Card>
+        <Card
+          title="Model in use"
+          subtitle="Inputs are checked against what this model was trained on."
+          action={
+            <LinkButton href="/models" variant="outline" size="sm">
+              Models
+            </LinkButton>
+          }
+        >
+          {model ? (
+            <KeyValues
+              items={[
+                [
+                  "Model",
+                  `${model.model_name ?? "—"} · version ${versionLabel(model.version ?? "")}`,
+                ],
+                [
+                  "Policy",
+                  model.policy ? (POLICY[model.policy] ?? model.policy) : "—",
+                ],
+                [
+                  "Ensemble",
+                  model.training_members
+                    ? `${model.training_members} perturbed members (control excluded)`
+                    : "Perturbed members 1–10",
+                ],
+                [
+                  "Upper-air leads",
+                  model.needs_upper_air
+                    ? hours(model.pressure_steps_hours)
+                    : "Not needed",
+                ],
+              ]}
+            />
+          ) : (
+            <p style={{ margin: 0 }}>No operational model is registered.</p>
+          )}
+        </Card>
+      </div>
+      <Card
+        title="Readiness"
+        subtitle={`Recorded states, as of ${dateTime(ready.checked_at)}. Nothing here is assumed from a server answering: each item was checked or downloaded.`}
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={running}
+            onClick={() => start("check_ecmwf", actor || "Forecaster")}
+          >
+            <RefreshCw size={16} className={running ? "spin" : undefined} />
+            {running ? "Checking…" : "Check ECMWF now"}
+          </Button>
+        }
+      >
+        <OperationNotice operation={operation} error={error} />
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Status</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="strong">Latest published run</td>
+                <td>
+                  {availability ? (
+                    <Yes ok={availability.status === "published"}>
+                      {availability.initialization
+                        ? `${day(availability.initialization)}, 00 UTC`
+                        : "None found"}
+                    </Yes>
+                  ) : (
+                    <Status tone="planned">Not checked yet</Status>
+                  )}
+                </td>
+                <td>
+                  {availability
+                    ? `${availability.summary}. Indexes read ${dateTime(availability.checked_at)}${availability.mirrors.length ? ` from ${availability.mirrors.map(mirrorName).join(", ")}` : ""}.`
+                    : "Use “Check ECMWF now” to read the ECMWF Open Data indexes."}
+                </td>
+              </tr>
+              <tr>
+                <td className="strong">Total precipitation</td>
+                <td>
+                  <Yes ok={rain.status === "available"}>
+                    {rain.status === "available"
+                      ? "Downloaded"
+                      : rain.status === "incomplete"
+                        ? "Incomplete"
+                        : "Not downloaded"}
+                  </Yes>
+                </td>
+                <td>
+                  {rain.initialization
+                    ? `Run of ${day(rain.initialization)} · ${rain.members ?? "?"} members · steps ${hours(rain.steps_hours)} · ${rain.type ?? ""}`
+                    : "No run downloaded yet."}
+                </td>
+              </tr>
+              <tr>
+                <td className="strong">Days 8–14 (Week 2)</td>
+                <td>
+                  <Yes ok={Boolean(rain.week2_complete)}>
+                    {rain.week2_complete ? "Complete" : "Not complete"}
+                  </Yes>
+                </td>
+                <td>
+                  Week-2 rainfall is the accumulation between 168 h and 336 h,
+                  per member.
+                </td>
+              </tr>
+              <tr>
+                <td className="strong">Upper-air predictors</td>
+                <td>
+                  {upper.status === "not_needed" ||
+                  upper.status === "not_configured" ? (
+                    <Status tone="planned">
+                      {upper.status === "not_needed"
+                        ? "Not needed"
+                        : "Not configured"}
+                    </Status>
+                  ) : (
+                    <Yes ok={upper.status === "available"}>
+                      {upper.status === "available"
+                        ? "Downloaded"
+                        : upper.status === "incompatible"
+                          ? "Wrong forecast hours"
+                          : "Not downloaded"}
+                    </Yes>
+                  )}
+                </td>
+                <td>
+                  {upper.status === "available"
+                    ? `q, u, v, t and gh at ${hours(upper.steps_hours)}${upper.members ? ` · ${upper.members} members` : ""}${upper.fetched_at ? ` · ${dateTime(upper.fetched_at)}` : ""}`
+                    : upper.status === "not_needed"
+                      ? "The model in use reads rainfall only."
+                      : upper.status === "not_configured"
+                        ? "The forecast hours at which this model's training read the upper-air fields are not supplied, so they are not downloaded."
+                        : availability?.upper_air_listed === false
+                          ? "Not listed in the ECMWF index for this run."
+                          : "Downloaded with the next background forecast run."}
+                </td>
+              </tr>
+              <tr>
+                <td className="strong">Acquisition</td>
+                <td>
+                  {rain.fetched_at ? (
+                    <Status tone="ok">Recorded</Status>
+                  ) : (
+                    <Status tone="planned">None</Status>
+                  )}
+                </td>
+                <td>
+                  {rain.fetched_at
+                    ? `${dateTime(rain.fetched_at)} · ${rain.fetched_by ?? ""} · ${rain.mirror ? mirrorName(rain.mirror) : ""}${rain.bytes ? ` · ${(rain.bytes / 1e6).toFixed(1)} MB` : ""}`
+                    : "—"}
+                </td>
+              </tr>
+              <tr>
+                <td className="strong">Input checks (last run)</td>
+                <td>
+                  {checks.length ? (
+                    <Yes ok={!failed}>
+                      {failed ? `${failed} failed` : `${checks.length} passed`}
+                    </Yes>
+                  ) : (
+                    <Status tone="planned">Not run yet</Status>
+                  )}
+                </td>
+                <td>
+                  {ready.last_run
+                    ? `Forecast from the run of ${day(ready.last_run.initialization)}`
+                    : "Run the forecast to check every input."}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      {checks.length > 0 && (
+        <Card
+          title="Input checks of the last run"
+          subtitle="Each input compared with the frozen model's training data. A failed check stops the AI/ML layer; nothing is filled in."
+        >
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Check</th>
+                  <th>Result</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {checks.map((c, i) => (
+                  <tr key={`${c.check}-${i}`}>
+                    <td className="strong">{c.check}</td>
+                    <td>
+                      <Status
+                        tone={
+                          c.status === "passed"
+                            ? "ok"
+                            : c.status === "note"
+                              ? "info"
+                              : "bad"
+                        }
+                      >
+                        {c.status === "note" ? "noted" : c.status}
+                      </Status>
+                    </td>
+                    <td>{c.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+      {ready.failures.length > 0 && (
+        <Card
+          title="Recent failures"
+          subtitle="Download and processing tasks that did not finish."
+        >
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Task</th>
+                  <th>What happened</th>
+                  <th>When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ready.failures.map((f, i) => (
+                  <tr key={i}>
+                    <td className="strong">{f.title}</td>
+                    <td>
+                      {f.error ?? "Stopped"}
+                      {f.retry_at
+                        ? ` · retried automatically ${dateTime(f.retry_at)}`
+                        : ""}
+                    </td>
+                    <td style={{ color: "var(--muted)" }}>
+                      {f.finished_at ? dateTime(f.finished_at) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </>
+  );
 }
 
 function Ecmwf({ source }: { source?: DataSource }) {
   const inputs = useApi<EcmwfInput[]>("/data/ecmwf");
+  const ready = useApi<EcmwfReadiness>("/data/ecmwf/readiness");
   const [actor] = useActor();
   const [date, setDate] = useState("");
-  const { operation, error, running, start } = useOperation(() =>
-    inputs.reload(),
-  );
+  const { operation, error, running, start } = useOperation(() => {
+    inputs.reload();
+    ready.reload();
+  });
   return (
     <>
       <PageBanner
@@ -72,13 +431,16 @@ function Ecmwf({ source }: { source?: DataSource }) {
           { label: "Data & Tools", href: "/data" },
           { label: "ECMWF ensemble" },
         ]}
-        subtitle="The forecast input: the real-time ECMWF ensemble from ECMWF Open Data, 00 UTC run, 0.25°, 15-day range. Only the Week-2 rainfall is downloaded."
+        subtitle="The forecast input: the real-time ECMWF ensemble from ECMWF Open Data, 00 UTC run, 0.25°, 15-day range. Only the fields the model reads are downloaded."
         facts={[
-          "10 ensemble members, as in training",
+          "10 perturbed members, as in training",
           "Days 8–14",
           "Open licence (CC BY 4.0)",
         ]}
       />
+      {ready.loading && <Skeleton height={220} />}
+      {ready.error && <ErrorState message={ready.error} retry={ready.reload} />}
+      {ready.data && <Readiness ready={ready.data} changed={ready.reload} />}
       <div className="grid-2">
         <Card
           title="Download a run"
@@ -121,22 +483,23 @@ function Ecmwf({ source }: { source?: DataSource }) {
         <Card title="How it is processed">
           <ol style={{ margin: 0, paddingLeft: 22, display: "grid", gap: 8 }}>
             <li>
-              Only the total rainfall of ensemble members 1–10 (the size of the
-              ensemble the model was trained on) at days 7 and 14 is downloaded,
-              as the model was trained; nothing else is fetched.
+              Total rainfall of perturbed members 1–10 (the ensemble size the
+              model was trained on) at 168 h and 336 h; for the AI/ML layer,
+              humidity, winds, temperature and geopotential at the model&apos;s
+              seven upper-air leads.
             </li>
             <li>
               Each field is checked: the right variable, date, run, member,
               forecast hour and units.
             </li>
             <li>
-              The global field is cut to Eastern Africa and kept as the forecast
-              input.
+              The global field is cut to Eastern Africa, averaged to the 1.5°
+              grid the model was trained on and interpolated to the 0.05° ICPAC
+              grid (see <Link href="/forecasts/raw">Raw ECMWF</Link>).
             </li>
             <li>
-              The forecast averages it to the 1.5° grid the model was trained
-              on, then interpolates it to the 0.05° ICPAC grid (see{" "}
-              <Link href="/forecasts/raw">Raw ECMWF</Link>).
+              Before the AI/ML layer, every input is compared with the training
+              data; a failed check stops it and the forecast is issued from MBC.
             </li>
           </ol>
         </Card>
@@ -145,7 +508,7 @@ function Ecmwf({ source }: { source?: DataSource }) {
         title="Downloaded runs"
         subtitle={
           source
-            ? `${source.provider}: ECMWF's own server first, then its archive on Amazon Web Services`
+            ? `${source.provider}: ECMWF's own server first, then its archives`
             : undefined
         }
       >

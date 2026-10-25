@@ -11,6 +11,7 @@ export type PageKey =
   | "country"
   | "countries"
   | "verification"
+  | "evidence"
   | "monitoring"
   | "models"
   | "data"
@@ -178,6 +179,12 @@ export const ROUTES: Route[] = [
     title: "Verification",
     menu: "Verification",
     page: "verification",
+  },
+  {
+    path: "verification/experimental",
+    title: "Experimental verification 2022–2024",
+    menu: "Verification",
+    page: "evidence",
   },
   {
     path: "bulletin",

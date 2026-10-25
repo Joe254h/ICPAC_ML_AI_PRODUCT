@@ -1,4 +1,4 @@
-# Operational Week-2 forecasting: MBC + Atmos37 CatBoost
+# Operational Week-2 forecasting: MBC + CatBoost residual models
 
 This path reproduces the validated HPC inference chain on the authoritative ICPAC-11
 domain. The weekly operations that feed it (ECMWF Open Data download, CHIRPS
@@ -78,6 +78,33 @@ every status change are single database transactions, so concurrent requests can
 register a model twice or leave a test result without its approval. Each model keeps a
 status history (`status_history`), the basis for checking imported packages.
 
+### Lifecycle: approval and activation are separate decisions
+
+A registered model has passed every integrity check. The registry then keeps these states
+apart, shown on the Models page as a checklist:
+
+| State | Reached by | Recorded as |
+|---|---|---|
+| uploaded | descriptor and files on the server | a registration issue if a check fails |
+| integrity verified | registration (all checks above) | the model record, `validated` |
+| scientifically validated | **Record independent test** (HPC report, once) | `test_status: passed` |
+| operationally approved | **Approve for operational use** (named reviewer) | status `candidate` |
+| active | **Make this the model in use** (named reviewer) | the activation record and its history |
+| retired | **Retire** (never the active model) | status `retired` |
+
+**No registration, approval or promotion of another model switches the model in use by
+itself.** Before the first activation, forecasts use the earlier rule (production, else the
+newest candidate); the first registry change pins that model, so a newly declared
+candidate never takes over by being the newest. Activating re-verifies the model's files and
+runs a test prediction first; in `RELEASE_MODE=production` only a production model (passed
+independent test) can be activated. The activation history lists each earlier model with
+its dates: reactivating one is the rollback. Every step is an approval and audit record.
+
+API: `POST /models/{id}/candidate`, `POST /models/{id}/activate`, `POST /models/{id}/promote`
+(production, also activates), `POST /models/{id}/retire`, each with `{"actor", "confirmed":
+true, "comment"}`; `GET /models` returns `lifecycle` for each model and `GET /models/current`
+the activation and its history.
+
 ### Candidate and production
 
 * `mbc_atmos37_catboost_candidate_v1` (378 trees, training 2008–2019, validation
@@ -103,6 +130,98 @@ status history (`status_history`), the basis for checking imported packages.
 5. Record the HPC independent-test result for it (Models › Record independent test).
 6. Promote it with a named reviewer. The candidate stays registered; retire it when the
    reviewers agree. Its past forecasts keep their own model labels.
+
+## The frozen pre-refit model (ICPAC_WEEK2_WEB_MODEL_20261025)
+
+The bundle is committed unchanged under
+`artifacts/bundles/ICPAC_WEEK2_WEB_MODEL_20261025/`: the CatBoost residual model (300
+trees, 24 inputs, CatBoost 1.2.10), the monthly MBC factors (prior 500, cap 3), the
+2005–2019 PCA of the 30 atmospheric predictors, the authoritative mask, the training-only
+climatology, the policy files, the training code (`provenance/`), the bundle's own
+inference code (`runtime/`) and its verification summaries. Its `manifest.json` pins every
+file; each descriptor pins the manifest and the files it loads, and registration checks
+both before anything is loaded. `python -m scripts.verify_artifacts` (CI) checks them too.
+The model files are read on the server only; no URL serves them.
+
+Training 2005–2019 (572,184,800 rows), validation 2020–2021, independent test 2022–2024
+(551 cases, 113,285,600 cell observations, run once on the HPC). Four descriptors register
+the bundle's policies, each **experimental** (never in use until approved and activated):
+
+| Model | Policy | Final rainfall |
+|---|---|---|
+| `icpac_week2_catboost_prerefit_v1` | `catboost_full` | max(MBC + residual, 0) |
+| `icpac_week2_alpha075_prerefit_v1` | `global_alpha075` | 0.25 × MBC + 0.75 × max(MBC + residual, 0) |
+| `icpac_week2_mam_protected_prerefit_v1` | `mam_protected` | MBC for March–May initializations, else the 75% blend |
+| `icpac_week2_mbc_only_prerefit_v1` | `mbc_only` | max(MBC, 0): the fallback, no upper air |
+
+`mam_protected` was preselected on 2020–2021 validation. On the independent period the full
+correction had the lowest aggregate RMSE (15.204 against 15.271 mm/week); the bundle names
+it the web default **after** those scores were seen, a descriptive choice. No second
+independent test is reported. These scores belong to the frozen models on reforecasts;
+they are not assigned to live forecasts or to the 2005–2021 refit.
+
+### Preprocessing, exactly as in training
+
+`climate_engine/preprocessing/hybrid7_pc17.py` follows `provenance/fullgrid_stats_mbc.py`
+and `prepare_fullgrid_ml.py`: per perturbed member tp(336 h) − tp(168 h) in mm, floored at
+zero (negative totals beyond 0.10 mm or 10% of values are refused), ensemble mean and
+population spread **on the 1.5° grid, then** bilinear to the 205,999 cells; MBC = X_mean ×
+factor[initialization month]; the 15 derived upper-air variables at the seven leads
+192–336 h, their mean per member, ensemble mean and spread (30 values) on the 1.5° grid,
+bilinear to the cells, standardised and projected on 17 components; latitude, longitude
+and the initialization day of year over 365.2425 days. ECMWF Open Data (0.25°) is first
+averaged to the 1.5° grid: an operational choice recorded with every run, since training
+read ECMWF's own 1.5° S2S fields.
+
+`backend/tests/test_prerefit_bundle.py` checks the service's 24 inputs and all four
+policies against the bundle's own runtime and the training code's sparse bilinear matrix
+on the full grid (largest difference about 1e-6 mm), for a July and an April case.
+
+### Input checks: fail closed
+
+Before the AI/ML layer every input is checked and the result stored with the run
+(`input_checks` in provenance, listed on the ECMWF page): run and initialization; rainfall
+units; the Days 8–14 window (168–336 h); accumulated or daily encoding; coordinates and
+coverage of the domain; source grid and interpolation; perturbed members only (control
+excluded) and exactly the ten training members; the same members in rainfall and upper air;
+upper-air variables, units and the seven leads; missing or non-finite values (never
+filled); the 30 predictors in training order; the PCA (checksummed, 2005–2019, feature
+order); the MBC month and factors; the 24 inputs in the frozen order; non-negative
+rainfall; mask cell order; day of year. A failed check withholds the AI/ML layer (the run
+is issued from raw ECMWF and MBC, with the reason); invalid rainfall stops the run.
+Missing observations, invalid inputs and zero rainfall stay distinct: CHIRPS no-data cells
+are left out of scores; zero rainfall is a value.
+
+### Real-time gate (runs from 2025)
+
+The bundle refuses real-time inputs until their compatibility with the reforecasts is
+confirmed. For initializations from 2025-01-01 the service runs every check, then withholds
+the AI/ML layer until a reviewer confirms the input source on the Models page (**Confirm
+the real-time input**), naming a run of that model whose checks all passed
+(`POST /models/{id}/realtime-review`). The confirmation can be withdrawn. Confirmed runs
+say that the 2022–2024 scores describe reforecasts, not this real-time skill.
+
+### Using it
+
+1. Models › the chosen policy › **Record independent test** (the HPC report,
+   `verification/INDEPENDENT_VERIFICATION_REPORT.json`, 551 cases) if the reviewers accept it.
+2. **Approve for operational use**, then **Make this the model in use**.
+3. Run the weekly cycle (Operations). Background runs download the upper-air fields at the
+   seven leads from ECMWF Open Data; the ECMWF page then shows every input check.
+4. For a run from 2025 on, review the checks and **Confirm the real-time input**; the next
+   run produces the AI/ML layer. Rollback: reactivate the earlier model from the history.
+
+`scripts/run_operational.py --descriptor config/model_registry/icpac_week2_..._v1.yaml`
+runs the same chain on the HPC with S2S files; it has no reviewer identity, so real-time
+runs from 2025 come out as raw and MBC there.
+
+### The 2005–2021 refit
+
+The refit submitted on the HPC is not part of this bundle. When it has finished and passed
+its own independent test, copy its bundle unchanged to a new directory under
+`artifacts/bundles/`, copy one of the descriptors above with a new `model_id`, `version`,
+paths, checksums and periods, and register it: it arrives experimental and goes through the
+same review. None of the scores above apply to it.
 
 ## Running a forecast
 
@@ -155,7 +274,7 @@ unavailable: no climatology or thresholds are among the artifacts.
 
 | Setting or artifact | Needed for | Status |
 |---|---|---|
-| `ecmwf.pressure.week2_steps_hours` | real Atmos37 runs | null: the seven training steps are not supplied |
+| `ecmwf.pressure.week2_steps_hours` | real Atmos37 runs | null: the seven training steps are not supplied (the pre-refit bundle states its own: 192–336 h) |
 | `ecmwf.rainfall.regrid` | rainfall input not on the 0.05° grid | null: only needed for other grids |
 | Raw ECMWF and MBC validation metrics | the comparison on the overview | not in the artifacts |
 | Week-2 climatology, tercile thresholds | anomaly and category | not in the artifacts |

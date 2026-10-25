@@ -144,6 +144,7 @@ test("no page shows code, identifiers or checksums", async ({ page }) => {
     "/monitoring",
     "/monitoring?source=tamsat",
     "/verification",
+    "/verification/experimental",
     "/bulletin",
     "/bulletins",
     "/models",
@@ -215,8 +216,13 @@ test("data sources: ECMWF, CHIRPS and TAMSAT are fetched, the others come later"
   await expect(
     page.getByRole("heading", { name: "Downloaded runs" }),
   ).toBeVisible();
-  await expect(page.locator("tbody tr").first()).toContainText("00 UTC");
-  await expect(page.locator("tbody tr").first()).toContainText("Local copy");
+  const downloaded = page
+    .locator("section.card")
+    .filter({ has: page.getByRole("heading", { name: "Downloaded runs" }) })
+    .locator("tbody tr")
+    .first();
+  await expect(downloaded).toContainText("00 UTC");
+  await expect(downloaded).toContainText("Local copy");
   await page.goto("/data/tamsat");
   await expect(
     page.getByRole("heading", { name: "Downloaded dekads" }),

@@ -3,8 +3,11 @@
 The package's own SHA256SUMS.txt (artifacts/hpc_package/) lists paths relative to the
 package root: ./artifacts/..., ./cartography/..., ./fixtures/... map onto the repository
 root, and package-root files (README_PACKAGE.txt, UPLOAD_MAP.txt) live beside the list.
+Frozen model bundles (artifacts/bundles/*) are checked against their own manifest.json,
+and the frozen verification evidence (artifacts/verification/*) against its SHA256SUMS.
 """
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -79,3 +82,36 @@ def expected_checksum(repo_path: str, root: Path = ROOT) -> str:
     if repo_path not in sums:
         raise KeyError(f"{repo_path} is not listed in the HPC checksum file")
     return sums[repo_path]
+
+
+def _check(name: str, path: Path, expected: str) -> ArtifactCheck:
+    exists = path.is_file()
+    return ArtifactCheck(
+        name,
+        path,
+        expected,
+        file_checksum(path) if exists else None,
+        path.stat().st_size if exists else None,
+    )
+
+
+def verify_bundles(root: Path = ROOT) -> list[ArtifactCheck]:
+    """Every file of every frozen bundle, against the bundle's manifest.json."""
+    checks = []
+    for manifest in sorted((root / "artifacts" / "bundles").glob("*/manifest.json")):
+        listed = json.loads(manifest.read_text(encoding="utf-8"))["files_sha256"]
+        base = manifest.parent
+        for name, digest in sorted(listed.items()):
+            label = f"artifacts/bundles/{base.name}/{name}"
+            checks.append(_check(label, base / name, digest))
+    return checks
+
+
+def verify_evidence(root: Path = ROOT) -> list[ArtifactCheck]:
+    """The frozen verification tables and maps, against their SHA256SUMS.txt."""
+    checks = []
+    for sums in sorted((root / "artifacts" / "verification").glob("*/SHA256SUMS.txt")):
+        base = sums.parent
+        for name, digest in expected_checksums(sums).items():
+            checks.append(_check(f"artifacts/verification/{base.name}/{name}", base / name, digest))
+    return checks

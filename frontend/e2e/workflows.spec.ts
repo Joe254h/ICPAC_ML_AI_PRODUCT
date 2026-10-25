@@ -153,3 +153,65 @@ test("operations lists the weekly cycle with who ran it", async ({ page }) => {
     page.getByRole("link", { name: "Open forecast →" }).first(),
   ).toBeVisible();
 });
+
+test("the frozen pre-refit models are registered but not put in use", async ({
+  page,
+}) => {
+  await page.goto("/models");
+  const name = "MBC + CatBoost residual (full correction)";
+  const card = page
+    .locator("section.card")
+    .filter({ has: page.getByRole("heading", { name, exact: true }) });
+  await expect(card).toBeVisible();
+  await expect(card.getByText("Integrity verified")).toBeVisible();
+  await expect(card.getByText("In use for forecasts")).toHaveCount(0);
+  await expect(
+    card.getByRole("button", { name: "Approve for operational use" }),
+  ).toBeVisible();
+  await expect(
+    card.getByRole("button", { name: "Make this the model in use" }),
+  ).toHaveCount(0);
+  await expect(card.getByText(/RMSE 15\.204 mm\/week/)).toBeVisible();
+  // The model in use stays the Atmos37 candidate.
+  const inUse = page
+    .locator("section.card")
+    .filter({ hasText: "In use for forecasts" });
+  await expect(inUse).toHaveCount(1);
+  await expect(inUse).toContainText("MBC + Atmos37 CatBoost");
+});
+
+test("the experimental verification keeps the frozen results apart", async ({
+  page,
+}) => {
+  await page.goto("/verification/experimental");
+  await expect(page.getByText("What these scores are.")).toBeVisible();
+  await expect(
+    page.getByRole("cell", { name: "15.204" }).first(),
+  ).toBeVisible();
+  const tabs = page.getByRole("group", { name: "Section" });
+  await tabs.getByRole("button", { name: "ECMWF ensemble" }).click();
+  await expect(page.getByText("6.773 mm/week")).toBeVisible();
+  await expect(page.getByText(/No Brier skill score is given/)).toBeVisible();
+  await tabs.getByRole("button", { name: "Rainfall events" }).click();
+  await expect(page.getByRole("columnheader", { name: "POD" })).toBeVisible();
+  await page.goto("/verification");
+  await expect(
+    page.getByText("Experimental evidence: the independent 2022–2024 test"),
+  ).toBeVisible();
+});
+
+test("the ECMWF page reports recorded readiness", async ({ page }) => {
+  await page.goto("/data/ecmwf");
+  await expect(
+    page.getByRole("heading", { name: "Forecast generation" }),
+  ).toBeVisible();
+  const rain = page.locator("tr").filter({ hasText: "Total precipitation" });
+  await expect(rain).toContainText("Downloaded");
+  await expect(
+    page.locator("tr").filter({ hasText: "Days 8–14 (Week 2)" }),
+  ).toContainText("Complete");
+  await page.getByRole("button", { name: "Check ECMWF now" }).click();
+  await expect(
+    page.locator("tr").filter({ hasText: "Latest published run" }),
+  ).toContainText("00 UTC", { timeout: 60_000 });
+});

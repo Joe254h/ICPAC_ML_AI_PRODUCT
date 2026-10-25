@@ -30,6 +30,7 @@ const PAGES: Record<PageKey, React.ComponentType<PageProps>> = {
   country: view(() => import("@/features/operational/country")),
   countries: view(() => import("@/features/operational/countries")),
   verification: view(() => import("@/features/operational/verification")),
+  evidence: view(() => import("@/features/operational/evidence")),
   monitoring: view(() => import("@/features/operational/monitoring")),
   models: view(() => import("@/features/operational/models")),
   data: view(() => import("@/features/operational/data")),

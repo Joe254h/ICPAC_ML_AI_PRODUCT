@@ -19,6 +19,7 @@ import type { ForecastDetail, Variant } from "@/types/operational";
 import {
   LAYER_TEXT,
   NoForecast,
+  layerText,
   forecastFacts,
   layersOf,
   mapUrl,
@@ -44,6 +45,22 @@ const STEPS: Record<Variant, string[]> = {
   ],
 };
 
+const PREREFIT_STEPS: Record<Variant, string[]> = {
+  raw: STEPS.raw,
+  mbc: [
+    "Start from the raw ECMWF ensemble mean.",
+    "Multiply each cell by its frozen factor for the initialization month (prior 500, cap 3; estimated on 2005–2019; between 0.2 and 3).",
+    "Keep the result at or above zero.",
+  ],
+  hybrid: [
+    "Per member, 15 atmospheric variables (humidity, winds, moisture transport, temperature, geopotential, shear) at 850, 700, 500 and 200 hPa, averaged over the seven forecast hours 192–336 h; their ensemble mean and spread on the 1.5° training grid, interpolated to the cells.",
+    "Standardise the 30 values with the 2005–2019 mean and scale and keep their first 17 principal components.",
+    "A CatBoost model (300 trees) predicts what MBC still gets wrong, the residual CHIRPS − MBC, from those components, rainfall mean and spread, location, season and MBC.",
+    "Every input is checked against the training data first; a failed check stops this layer.",
+    "Final rainfall = MBC + predicted residual, kept at or above zero.",
+  ],
+};
+
 function Body({
   detail,
   variant,
@@ -52,7 +69,10 @@ function Body({
   variant: Variant;
 }) {
   const { config } = useApp();
-  const text = LAYER_TEXT[variant];
+  const text = layerText(detail.family)[variant];
+  const steps = (detail.family === "hybrid7_pc17" ? PREREFIT_STEPS : STEPS)[
+    variant
+  ];
   const available = layersOf(detail).includes(variant);
   const reason =
     detail.products?.hybrid?.reason ??
@@ -139,7 +159,7 @@ function Body({
               <ol
                 style={{ margin: 0, paddingLeft: 22, display: "grid", gap: 12 }}
               >
-                {STEPS[variant].map((step) => (
+                {steps.map((step) => (
                   <li key={step}>{step}</li>
                 ))}
               </ol>

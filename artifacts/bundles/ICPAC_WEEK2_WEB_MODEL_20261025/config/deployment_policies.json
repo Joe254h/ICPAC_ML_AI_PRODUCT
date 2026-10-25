@@ -1,0 +1,13 @@
+{
+  "default_web_demo": "catboost_full",
+  "default_basis": "lowest descriptive 2022-2024 independent-test aggregate RMSE; decision made after viewing holdout",
+  "scientific_preselected_primary": "mam_protected",
+  "policies": {
+    "catboost_full": "clip(MBC + residual, 0); alpha=1",
+    "global_alpha075": "0.25*clip(MBC,0) + 0.75*clip(MBC+residual,0)",
+    "mam_protected": "initialization month Mar-May uses MBC; otherwise global_alpha075",
+    "mbc_only": "clip(MBC,0)"
+  },
+  "independent_test_reuse_warning": "Do not report a second independent test after choosing the default from 2022-2024 scores.",
+  "2025_realtime_ecmwf": "NOT independently verified; harmonize source lead, units, ensemble, pressure and grid first"
+}

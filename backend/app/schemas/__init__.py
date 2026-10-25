@@ -37,6 +37,26 @@ class ReviewRequest(BaseModel):
         return value
 
 
+class RealtimeReviewRequest(BaseModel):
+    """A reviewer confirms (or withdraws) that a real-time ECMWF input source is compatible
+    with a frozen model, naming a run of that model whose input checks all passed."""
+
+    source: Literal["ecmwf_opendata", "ecmwf_files"]
+    forecast_id: str | None = Field(default=None, pattern=r"^w2-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}$")
+    withdraw: bool = False
+    actor: str = Field(min_length=2, max_length=80)
+    confirmed: bool = False
+    comment: str = Field(default="", max_length=1000)
+
+    @field_validator("actor")
+    @classmethod
+    def named_reviewer(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("A named reviewer is required")
+        return value
+
+
 class DescriptorRegisterRequest(BaseModel):
     """Register a model version from its reviewed descriptor (config/model_registry/*.yaml)."""
 
@@ -103,6 +123,7 @@ class OperationRequest(BaseModel):
         "cycle",
         "end_to_end",
         "past_weeks",
+        "check_ecmwf",
     ]
     initialization: date | None = None
     forecast_id: str | None = Field(default=None, pattern=FORECAST_ID)

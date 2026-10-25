@@ -38,7 +38,9 @@ def validate_release(platform) -> None:
         if current["role"] != "production":
             raise ValueError("Production release requires an independently tested production model")
         registry._check_production_gate(current["model"])
-        operational.OperationalModel(current["model"]).load()
-        steps = required(settings(), "ecmwf.pressure.week2_steps_hours")
+        model = operational.OperationalModel(current["model"]).load()
+        # The model's own training leads (a frozen bundle states them), else the setting.
+        own = getattr(model, "pressure_steps", lambda cfg: None)(settings())
+        steps = own or required(settings(), "ecmwf.pressure.week2_steps_hours")
         if len(steps) != 7:
             raise ValueError("Production release requires the seven frozen upper-air steps")

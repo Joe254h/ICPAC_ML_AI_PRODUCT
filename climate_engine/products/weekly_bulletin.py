@@ -485,18 +485,27 @@ METHOD_NOTES = {"MBC": "ECMWF ensemble + MBC", "RAW": "ECMWF ensemble, raw"}
 
 
 def map_label(
-    model_id: str, status: str | None, synthetic: bool, forecast_id: str, method: str | None = None
+    model_id: str,
+    status: str | None,
+    synthetic: bool,
+    forecast_id: str,
+    method: str | None = None,
+    model_name: str | None = None,
+    version: str | None = None,
 ) -> str:
-    """The one-line note under a map: what it shows, in words. The review state and the
-    forecast's record belong to the bulletin and the service, not to the picture."""
+    """The one-line note under a map: what it shows, in words, with the model's name and
+    version. The review state and the forecast's record belong to the bulletin and the
+    service, not to the picture."""
     parts = []
     if synthetic:
         parts.append("SYNTHETIC TEST INPUT - NOT REAL WEATHER")
     note = METHOD_NOTES.get((method or "").upper())
     if note is None:
-        note = "ECMWF ensemble + MBC + AI/ML" + (
-            "" if status == "production" else " (candidate model)"
-        )
+        role = "" if status == "production" else " (candidate model)"
+        if status == "experimental":
+            role = " (experimental model)"
+        named = f"{model_name} {version}".strip() if model_name else "MBC + AI/ML"
+        note = f"ECMWF ensemble + {named}{role}"
     parts.append(note)
     return " · ".join(parts)
 
@@ -509,6 +518,8 @@ def map_note(inputs: BulletinInputs, method: str | None = None) -> str:
         facts["input"]["synthetic"],
         inputs.forecast_id,
         method,
+        facts["model"].get("model_name"),
+        facts["model"].get("version"),
     )
 
 

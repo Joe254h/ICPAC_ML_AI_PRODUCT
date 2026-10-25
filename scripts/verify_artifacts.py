@@ -1,15 +1,22 @@
-"""Verify the committed HPC artifacts against the HPC-generated SHA256SUMS.txt.
+"""Verify the committed HPC artifacts against the HPC-generated SHA256SUMS.txt, the frozen
+model bundles against their manifests and the frozen verification evidence.
 
 python -m scripts.verify_artifacts      # exit status 1 on any missing or changed file
 """
 
 import sys
 
-from climate_engine.artifacts import GITHUB_LIMIT_BYTES, GITHUB_WARN_BYTES, verify_package
+from climate_engine.artifacts import (
+    GITHUB_LIMIT_BYTES,
+    GITHUB_WARN_BYTES,
+    verify_bundles,
+    verify_evidence,
+    verify_package,
+)
 
 if __name__ == "__main__":
     failures = 0
-    for check in verify_package():
+    for check in [*verify_package(), *verify_bundles(), *verify_evidence()]:
         size = f"{check.size / 1e6:9.3f} MB" if check.size is not None else "        -   "
         note = ""
         if check.size and check.size > GITHUB_LIMIT_BYTES:

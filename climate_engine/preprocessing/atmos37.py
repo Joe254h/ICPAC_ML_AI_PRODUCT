@@ -42,6 +42,8 @@ class FeatureSet:
     doy_date: date
     members: int
     notes: list[str] = field(default_factory=list)
+    # Input checks a model's builder recorded (the Hybrid7 + 17 PC model), in order.
+    checks: list[dict[str, str]] = field(default_factory=list)
 
     def column(self, name: str) -> np.ndarray:
         return self.matrix[:, self.names.index(name)].astype(np.float64)
@@ -105,6 +107,7 @@ class RainfallSet:
     doy_date: date
     members: int
     notes: list[str] = field(default_factory=list)
+    checks: list[dict[str, str]] = field(default_factory=list)
 
 
 def build_rainfall(

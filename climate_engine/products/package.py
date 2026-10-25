@@ -133,12 +133,56 @@ def model_role(status: str | None) -> str:
     }.get(str(status), f"{status} (not production)")
 
 
+FAMILY_LABELS = {"hybrid7_pc17": "17-COMPONENT"}
+# The policies in words, for text people read (the formulas stay in provenance).
+POLICY_WORDS = {
+    "catboost_full": "MBC plus the full CatBoost correction, never below zero",
+    "global_alpha075": "a quarter MBC and three quarters the full correction",
+    "mam_protected": "MBC alone for March-May initializations, otherwise a quarter MBC "
+    "and three quarters the full correction",
+}
+
+
 def method_label(provenance: dict[str, Any]) -> str:
     if primary_layer(provenance) == "mbc":
         return "MBC"
     model = provenance.get("model", {})
-    family = str(model.get("family", "")).upper()
+    family = str(model.get("family", ""))
+    family = FAMILY_LABELS.get(family, family.upper())
     return f"MBC + {family} {str(model.get('algorithm', '')).upper()}".strip()
+
+
+def method_description(provenance: dict[str, Any], primary: str) -> str:
+    """The issued layer's method in words, for the bulletin and the Copilot."""
+    family = provenance.get("model", {}).get("family")
+    policy = provenance.get("hybrid_policy") or {}
+    version = provenance.get("model_version") or ""
+    if family == "hybrid7_pc17" or provenance.get("hybrid_policy"):
+        if primary == "hybrid":
+            return (
+                "Hybrid residual-corrected forecast: ICPAC's monthly MBC (prior 500, cap 3, "
+                "factors estimated on 2005-2019) corrected by a CatBoost model of what MBC "
+                "still gets wrong, from 24 inputs (ensemble rainfall, location, season, MBC "
+                "and 17 atmospheric components); the forecast is "
+                f"{POLICY_WORDS.get(str(policy.get('policy')), POLICY_WORDS['catboost_full'])}. "
+                f"Pre-refit model {version}: its 2022-2024 test scores describe reforecasts, "
+                "not the skill of this live forecast"
+            )
+        return (
+            "Multiplicative bias correction (MBC): the ECMWF ensemble-mean Week-2 rainfall "
+            "times the frozen monthly factor (prior 500, cap 3, estimated on 2005-2019) of the "
+            "initialization month, cell by cell"
+        )
+    if primary == "hybrid":
+        return (
+            "Hybrid residual-corrected forecast: the CatBoost model predicts the residual "
+            "CHIRPS - MBC from the 37 Atmos37 features and hybrid = max(MBC + residual, 0)"
+        )
+    return (
+        "Multiplicative bias correction (MBC): the ECMWF ensemble-mean Week-2 "
+        "rainfall times the locked 2005-2021 CHIRPS/ECMWF ratio of the "
+        "initialization month, cell by cell"
+    )
 
 
 def countries_csv(countries: list[dict[str, Any]]) -> str:
@@ -219,21 +263,16 @@ def interpretation_inputs(
         "generation_time": p["generation_time"],
         "method": {
             "label": method_label(p),
-            "description": (
-                "Hybrid residual-corrected forecast: the CatBoost model predicts the residual "
-                "CHIRPS - MBC from the 37 Atmos37 features and hybrid = max(MBC + residual, 0)"
-                if primary == "hybrid"
-                else "Multiplicative bias correction (MBC): the ECMWF ensemble-mean Week-2 "
-                "rainfall times the locked 2005-2021 CHIRPS/ECMWF ratio of the "
-                "initialization month, cell by cell"
-            ),
+            "description": method_description(p, primary),
             "baseline": p["model"].get("baseline"),
+            "policy": (p.get("hybrid_policy") or {}).get("policy"),
         },
         "primary_layer": primary,
         "layers": run_layers(run),
         "products": p.get("products", {}),
         "model": {
             "model_id": p["model_id"],
+            "model_name": p.get("model_name"),
             "version": p["model_version"],
             "status": model.get("status"),
             "role": model_role(model.get("status")),
@@ -266,7 +305,8 @@ def map_figures(run: ForecastRun, model: dict[str, Any]) -> dict[str, maps.Figur
         f"Initialised {p['forecast_initialization']} 00 UTC | valid "
         f"{p['forecast_valid_start'][:16].replace('T', ' ')} to "
         f"{p['forecast_valid_end'][:16].replace('T', ' ')} UTC (Days 8-14)",
-        f"Model {p['model_id']} {p['model_version']}: {model_role(model.get('status'))}",
+        f"Model {p.get('model_name') or p['model_id']} {p['model_version']}: "
+        f"{model_role(model.get('status'))}",
     ]
     if is_synthetic(p):
         lines.append("SYNTHETIC TEST INPUT - NOT A FORECAST OF REAL WEATHER")
@@ -302,6 +342,10 @@ def rainfall_maps(run: ForecastRun, grid: DomainGrid, model: dict[str, Any]) -> 
     lat = run.dataset["latitude"].values
     lon = run.dataset["longitude"].values
     note_args = (p["model_id"], model.get("status"), is_synthetic(p), run.forecast_id)
+    named: dict[str, str | None] = {
+        "model_name": p.get("model_name"),
+        "version": p.get("model_version"),
+    }
     result = {}
     for name in present(run.dataset):
         values = run.dataset[name].values.astype(float)
@@ -313,7 +357,9 @@ def rainfall_maps(run: ForecastRun, grid: DomainGrid, model: dict[str, Any]) -> 
             p["forecast_valid_start"],
             p["forecast_valid_end"],
             name,
-            weekly.map_label(*note_args, method),
+            weekly.map_label(
+                *note_args, method, model_name=named["model_name"], version=named["version"]
+            ),
             primary=name == primary_layer(p),
         )
     return result

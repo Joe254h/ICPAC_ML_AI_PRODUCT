@@ -92,7 +92,11 @@ export function relativeDay(iso: string | null | undefined): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "Earlier";
   const days = Math.floor(
-    (Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()) -
+    (Date.UTC(
+      new Date().getUTCFullYear(),
+      new Date().getUTCMonth(),
+      new Date().getUTCDate(),
+    ) -
       Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())) /
       86_400_000,
   );
@@ -130,3 +134,9 @@ export const SERIES = {
 } as const;
 
 export type SeriesKey = keyof typeof SERIES;
+
+/** "1.0.0-candidate.1" as "1.0.0 (candidate 1)". */
+export function versionLabel(version: string): string {
+  const match = /^(\d+\.\d+\.\d+)-([a-z]+)\.(\d+)$/.exec(version);
+  return match ? `${match[1]} (${match[2]} ${match[3]})` : version;
+}

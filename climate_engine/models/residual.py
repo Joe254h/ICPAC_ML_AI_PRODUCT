@@ -22,7 +22,13 @@ from climate_engine.models.runtime import (
 from climate_engine.operational.corrections import MBCParameters
 from climate_engine.operational.features import check_names, validate_feature_matrix
 from climate_engine.operational.grid import DomainGrid
-from climate_engine.preprocessing.atmos37 import FeatureSet
+from climate_engine.preprocessing.atmos37 import (
+    FeatureSet,
+    RainfallSet,
+    build_features,
+    build_rainfall,
+    needs_pressure,
+)
 
 RESIDUAL_TARGET = "CHIRPS - MBC_forecast"
 T = TypeVar("T", bound="ResidualMBCModel")
@@ -99,6 +105,32 @@ class ResidualMBCModel:
     @property
     def n_features(self) -> int:
         return len(self.names)
+
+    # ------------------------------------------------------------------ pipeline hooks
+    # A model family with its own preprocessing (climate_engine.models.hybrid7_pc17)
+    # overrides these; the defaults are the Atmos37 / Hybrid7 path.
+
+    def pressure_steps(self, cfg: dict) -> list[int] | None:
+        """The seven upper-air forecast hours of this model's training, if known."""
+        return cfg["ecmwf"]["pressure"].get("week2_steps_hours")
+
+    def needs_pressure(self) -> bool:
+        return needs_pressure(self.names)
+
+    @property
+    def produces_hybrid(self) -> bool:
+        return True
+
+    def realtime_gated(self, initialization) -> bool:
+        """Whether a run needs a reviewer's confirmation that the real-time feed matches
+        the model's training data (the frozen 2026-10-25 bundle: runs from 2025)."""
+        return False
+
+    def build_features(self, rainfall, initialization, grid, cfg, pressure=None) -> FeatureSet:
+        return build_features(self.names, rainfall, initialization, grid, self.mbc, cfg, pressure)
+
+    def build_rainfall(self, rainfall, initialization, grid, cfg) -> RainfallSet:
+        return build_rainfall(rainfall, initialization, grid, self.mbc, cfg)
 
     @classmethod
     def from_artifacts(

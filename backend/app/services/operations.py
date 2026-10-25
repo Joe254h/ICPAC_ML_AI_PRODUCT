@@ -23,6 +23,7 @@ from uuid import uuid4
 from backend.app.db import now
 from backend.app.schemas import ForecastRunRequest, OperationRequest
 from backend.app.services.forecasts import ForecastService, RunInProgress, Unavailable
+from backend.app.services.registry import ModelRegistry
 
 KIND = "operation"
 
@@ -57,6 +58,7 @@ ACTIONS = {
     "cycle": "Weekly cycle: download ECMWF, run the forecast, verify against CHIRPS",
     "end_to_end": "Connected forecast workflow: acquire, forecast, verify, map and prepare bulletin",
     "past_weeks": "Forecast and verify past weeks (ECMWF archive and CHIRPS)",
+    "check_ecmwf": "Check which ECMWF ensemble run is published",
 }
 #: Weeks tried beyond those asked for, when CHIRPS does not cover the newest ones yet.
 SPARE_WEEKS = 3
@@ -284,6 +286,20 @@ class OperationService:
     def _forecasts(self) -> ForecastService:
         return ForecastService(self.platform)
 
+    def _issued(self, initialization: date) -> Sequence[dict[str, Any]]:
+        """Forecasts already issued from this run by the model in use: a retry or a second
+        cycle reuses them; a newly activated model issues its own."""
+        try:
+            model_id = ModelRegistry(self.platform).current()["model"]["model_id"]
+        except KeyError:
+            model_id = None
+        return [
+            r
+            for r in self._forecasts().runs()
+            if r["initialization"][:10] == initialization.isoformat()
+            and (model_id is None or r.get("model_id") == model_id)
+        ]
+
     def _latest_retrievable(self, operation_id: str, body: OperationRequest, newest: date) -> date:
         """Pin an implicit date only after its complete rainfall has been acquired.
 
@@ -308,6 +324,15 @@ class OperationService:
             "No complete ECMWF Week-2 ensemble could be retrieved from the recent runs; automatic retry will check again"
         )
 
+    def _check_ecmwf(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
+        """Record the newest published run and whether its upper-air fields are listed."""
+        from backend.app.services.readiness import check_availability
+
+        self._log(operation_id, "Reading the ECMWF Open Data indexes")
+        record = check_availability(self.platform, body.actor, body.initialization)
+        self._log(operation_id, record["summary"])
+        return {"availability": record["id"]}
+
     def _fetch_ecmwf(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
         from climate_engine.inputs import ecmwf_opendata
 
@@ -325,18 +350,16 @@ class OperationService:
         from climate_engine.inputs import ecmwf_opendata
 
         initialization: date = body.initialization or ecmwf_opendata.latest_initialization()
-        existing = [
-            r
-            for r in self._forecasts().runs()
-            if r["initialization"][:10] == initialization.isoformat()
-        ]
+        existing = self._issued(initialization)
         if existing:
             return {"forecast_id": existing[0]["forecast_id"], "method": existing[0]["method"]}
         self._log(operation_id, f"Running the forecast from the run of {_day(initialization)}")
         run = self._forecasts().run(
             ForecastRunRequest(
                 initialization=initialization, source="ecmwf_opendata", actor=body.actor
-            )
+            ),
+            upper_air=True,
+            progress=lambda text: self._log(operation_id, text),
         )
         self._log(
             operation_id,
@@ -562,11 +585,8 @@ class OperationService:
     def _cycle(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
         from climate_engine.inputs import ecmwf_opendata
 
-        forecasts = self._forecasts()
         initialization = body.initialization or ecmwf_opendata.latest_initialization()
-        existing = [
-            r for r in forecasts.runs() if r["initialization"] == initialization.isoformat()
-        ]
+        existing = self._issued(initialization)
         result: dict[str, Any] = {"initialization": initialization.isoformat()}
         if existing:
             self._log(

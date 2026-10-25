@@ -1,0 +1,145 @@
+{
+  "status": "COMPLETE_REFERENCE_STYLE_DERIVED_FROM_FROZEN_INDEPENDENT",
+  "source_style": "ICPAC_ATMOSPHERIC37_FINAL_EXPERIMENT_OUTPUT_20260925 supplied images; 2x2 regional and 2x3 country panels",
+  "training": "2005\u20132019",
+  "validation": "2020\u20132021",
+  "independent": "2022\u20132024",
+  "cases": 551,
+  "matched_rows": 113285600,
+  "official_cells": 205999,
+  "no_model_training": true,
+  "no_hyperparameter_tuning": true,
+  "no_policy_reselection": true,
+  "2025_excluded": true,
+  "boundary_path": "/scratch/njoel/ICPAC_ML_AI_PRODUCT_HPC_ARTIFACTS_20261007/cartography/east_africa_11_adm0.geojson",
+  "boundary_sha256": "c9fa87bd29b0e6259f46b77be801b5b1d60b112e5f43f077d6dc94d0520e00d4",
+  "logo_sha256": "c67246049500ca71cd7a6a88c375747ea93d536b5387f4ab4084b71346220c81",
+  "spatial_metrics_sha256": "6800968c2781ba427ec7582f85b141fb9159c1d4600785b3d35c492a2300f95c",
+  "north_east_sudan": {
+    "sudan_northeast_vector_cells": 11963,
+    "sudan_northeast_authoritative_cells": 11867,
+    "sudan_northeast_geometry_coverage_fraction": 0.9919752570425479,
+    "sudan_vector_bounds_wgs84": [
+      21.825293,
+      8.665625,
+      38.609473,
+      22.202441
+    ],
+    "sudan_valid_mask_cells": 63284,
+    "sudan_northeast_cells_lat_ge15_lon_ge33": 12538,
+    "sudan_mask_northmost_lat": 23.125,
+    "sudan_mask_eastmost_lon": 38.57499694824219,
+    "note": "No extrapolation beyond recorded domain cells; zero-value arid-region fields retained.",
+    "sudan_northeast_CHIRPS_verified_cells": 12538,
+    "sudan_northeast_CHIRPS_authoritative_cells": 12538,
+    "sudan_northeast_CHIRPS_coverage_fraction": 1.0
+  },
+  "countries": [
+    {
+      "country_id": 1,
+      "identified_name": "Kenya",
+      "official_cells": 19249,
+      "center_points_inside_vector": 19249,
+      "match_fraction": 1.0
+    },
+    {
+      "country_id": 2,
+      "identified_name": "Ethiopia",
+      "official_cells": 37069,
+      "center_points_inside_vector": 37069,
+      "match_fraction": 1.0
+    },
+    {
+      "country_id": 3,
+      "identified_name": "Uganda",
+      "official_cells": 7836,
+      "center_points_inside_vector": 7836,
+      "match_fraction": 1.0
+    },
+    {
+      "country_id": 4,
+      "identified_name": "Tanzania",
+      "official_cells": 30817,
+      "center_points_inside_vector": 30817,
+      "match_fraction": 1.0
+    },
+    {
+      "country_id": 5,
+      "identified_name": "Somalia",
+      "official_cells": 20945,
+      "center_points_inside_vector": 20945,
+      "match_fraction": 1.0
+    },
+    {
+      "country_id": 6,
+      "identified_name": "Sudan",
+      "official_cells": 63284,
+      "center_points_inside_vector": 62471,
+      "match_fraction": 0.9871531508754188
+    },
+    {
+      "country_id": 7,
+      "identified_name": "South Sudan",
+      "official_cells": 20250,
+      "center_points_inside_vector": 20250,
+      "match_fraction": 1.0
+    },
+    {
+      "country_id": 8,
+      "identified_name": "Eritrea",
+      "official_cells": 4126,
+      "center_points_inside_vector": 4126,
+      "match_fraction": 1.0
+    },
+    {
+      "country_id": 9,
+      "identified_name": "Djibouti",
+      "official_cells": 721,
+      "center_points_inside_vector": 721,
+      "match_fraction": 1.0
+    },
+    {
+      "country_id": 10,
+      "identified_name": "Rwanda",
+      "official_cells": 817,
+      "center_points_inside_vector": 817,
+      "match_fraction": 1.0
+    },
+    {
+      "country_id": 11,
+      "identified_name": "Burundi",
+      "official_cells": 885,
+      "center_points_inside_vector": 885,
+      "match_fraction": 1.0
+    }
+  ],
+  "map_outputs": {
+    "saved_map_png": 35,
+    "saved_map_svg": 34,
+    "color_limits": {
+      "rmse": [
+        0,
+        40
+      ],
+      "bias": [
+        -20,
+        20
+      ],
+      "gain": [
+        -12,
+        12
+      ],
+      "correlation": [
+        0,
+        1
+      ],
+      "rainfall": [
+        0,
+        45
+      ]
+    },
+    "full_diagnostics": true
+  },
+  "diagnostic_reinference": true,
+  "note": "September 2025 style reference is a DIFFERENT experiment (537 cases, Atmospheric37). These maps use October frozen 551-case data only."
+}

@@ -1,0 +1,61 @@
+# Registration descriptor: one policy of the frozen pre-refit ICPAC Week-2 model bundle
+# (ICPAC_WEEK2_WEB_MODEL_20261025). Registration verifies the bundle manifest and every
+# file it lists, the training contract, the MBC factors, the PCA and the 24-input schema,
+# and runs a smoke prediction. It registers the model as experimental: it is never
+# made active automatically (see docs/operational_models.md, model lifecycle).
+model_id: icpac_week2_mam_protected_prerefit_v1
+model_name: MBC + CatBoost residual, MAM-protected
+version: 1.0.0-prerefit
+experiment: ICPAC_RETRAIN_2005_2025_V1
+baseline: MBC
+family: hybrid7_pc17
+algorithm: catboost
+feature_schema: hybrid7_pc17
+feature_count: 24
+expected_trees: 300
+training_period: "2005-2019"
+validation_period: "2020-2021"
+test_period: "2022-2024"
+# The HPC's independent test result is recorded through the registry by a reviewer.
+test_status: untested
+declared_status: experimental
+declared_by: Joe254h
+policy: mam_protected
+# The training code's seven upper-air leads (provenance/fullgrid_stats_mbc.py LEADS).
+pressure_steps_hours: [192, 216, 240, 264, 288, 312, 336]
+# Perturbed members per forecast in the 2005-2024 reforecasts the model was trained on.
+ensemble_members: 10
+# Frozen MBC factor range (prior 500, cap 3; lower clip 0.2).
+mbc_factor_bounds: [0.2, 3.0]
+# The bundle refuses real-time inputs from 2025 until their compatibility is confirmed.
+realtime_gate_from: "2025-01-01"
+notes: >-
+  The policy preselected on 2020-2021 validation: MBC alone for March-May initializations,
+  otherwise the 75% blend. It did not beat the full CatBoost correction on the independent
+  2022-2024 test (RMSE 15.271 against 15.204 mm/week); that finding stands.
+
+# Paths are relative to ARTIFACT_ROOT (the repository's artifacts/ by default).
+artifacts:
+  manifest: bundles/ICPAC_WEEK2_WEB_MODEL_20261025/manifest.json
+  model: bundles/ICPAC_WEEK2_WEB_MODEL_20261025/artifacts/catboost_residual_fullrows.cbm
+  metrics: bundles/ICPAC_WEEK2_WEB_MODEL_20261025/verification/CATBOOST_VALIDATION_FULLGRID.json
+  policy_manifest: bundles/ICPAC_WEEK2_WEB_MODEL_20261025/config/HYBRID_POLICY_MANIFEST.json
+  policies: bundles/ICPAC_WEEK2_WEB_MODEL_20261025/config/deployment_policies.json
+  feature_schema: bundles/ICPAC_WEEK2_WEB_MODEL_20261025/config/feature_schema.json
+  mbc: bundles/ICPAC_WEEK2_WEB_MODEL_20261025/artifacts/mbc_monthly_prior500_cap3.npz
+  pca: bundles/ICPAC_WEEK2_WEB_MODEL_20261025/artifacts/pca_atmos30_train2005_2019.npz
+  domain: bundles/ICPAC_WEEK2_WEB_MODEL_20261025/artifacts/authoritative_icpac11_mask.npz
+  independent_summary: bundles/ICPAC_WEEK2_WEB_MODEL_20261025/verification/global_skill_summary.csv
+
+# SHA256 of each file; the manifest's own list covers every other bundle file.
+checksums:
+  manifest: 5b91a0107a87c534b63ae47471aee71c4cb627277a87d2133509f6f38375b294
+  model: 19a17b2c9cafcdcbb624c89fe9eb2a147ad10662f7a1d42144656cbd5aec0763
+  metrics: 23f2ab4a5ee7c35747debcff671a5f71331fb3859b070777be30780a6aed374c
+  policy_manifest: 782aa642593b357cffe1e8621c895b429415d9f043f0e367211bcc8ac2a9c3ba
+  policies: 42fc35afe7b80b5bf8df3d71e2d1d3d398a8e49a7e41d69f4b1aca95f9f6dd13
+  feature_schema: 05ee63bfcf331ccdc28a196bce47b64ee58d4d73c4a6e6c247c0c9d4d559a57f
+  mbc: 7205ec7579b6f4832660613e504f6dbe2940e2041bf0dbf099e2a347ad6e95a5
+  pca: 798403ccf36c73bfdee095f1dfb17c4b4c537c8dac586e898b8cbe1a54378bf9
+  domain: 3906541fd4bbd368095340c43e649acd9e319aea3936144192fe921d9f786ed9
+  independent_summary: 4244448292708c027c7d7e6713e6d940d1b4e85936357a3824dbc930b34b04ff

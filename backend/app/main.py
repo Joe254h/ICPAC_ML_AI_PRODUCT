@@ -143,14 +143,33 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
     @app.get("/models")
     def models(p: Platform = Depends(platform)) -> list[dict]:
-        return [m for m in p.repo.list("model") if operational.is_operational(m)]
+        """Every operational model with its separate lifecycle states."""
+        from backend.app.services.registry import ModelRegistry
+
+        stages = ModelRegistry(p).lifecycles()
+        return [
+            {**m, "lifecycle": stages.get(m["model_id"])}
+            for m in p.repo.list("model")
+            if operational.is_operational(m)
+        ]
 
     @app.get("/models/current")
     def current_model(p: Platform = Depends(platform)) -> dict:
-        """The operational model forecasts use: production, else the newest candidate."""
+        """The model forecasts use: the one a reviewer activated (before any activation,
+        production, else the newest candidate), with its activation history."""
         from backend.app.services.registry import ModelRegistry
 
         return ModelRegistry(p).current()
+
+    @app.get("/models/registration-issues")
+    def registration_issues(p: Platform = Depends(platform)) -> list[dict]:
+        """Descriptors present on the server that failed an integrity check (uploaded,
+        not verified): what failed, never the files themselves."""
+        return [
+            {"model_id": i["model_id"], "error": i["error"], "timestamp": i["timestamp"]}
+            for i in p.repo.list("registration_issue")
+            if i.get("current")
+        ]
 
     @app.get("/models/{model_id}")
     def model(model_id: str, p: Platform = Depends(platform)) -> dict:

@@ -19,6 +19,7 @@ from backend.app.schemas import (
     DescriptorRegisterRequest,
     EmailActionRequest,
     IndependentTestRequest,
+    RealtimeReviewRequest,
     ResendRequest,
     ReviewRequest,
 )
@@ -51,6 +52,20 @@ def install(app: FastAPI, dependency):
         user: Principal = Depends(require_admin),
     ) -> dict:
         return ModelRegistry(platform).record_independent_test(
+            id, body.model_copy(update={"actor": user.name})
+        )
+
+    @app.post("/models/{id}/realtime-review")
+    def realtime_review(
+        id: str,
+        body: RealtimeReviewRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_admin),
+    ) -> dict:
+        """Confirm, or withdraw, that a real-time input source matches the frozen model."""
+        if not body.withdraw and not body.forecast_id:
+            raise HTTPException(422, "Name the forecast run whose input checks all passed")
+        return ModelRegistry(platform).review_realtime_feed(
             id, body.model_copy(update={"actor": user.name})
         )
 

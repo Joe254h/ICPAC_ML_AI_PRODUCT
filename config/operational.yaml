@@ -45,7 +45,9 @@ ecmwf:
     regrid: bilinear
     training_resolution_degrees: 1.5
   pressure:
-    # REQUIRED: the seven Week-2 step hours used for the atmospheric training features.
+    # REQUIRED for the Atmos37 candidate: the seven Week-2 step hours used for its
+    # atmospheric training features (not supplied for that experiment). Models whose
+    # descriptor states their own steps (the Hybrid7 + 17 PC model) use those instead.
     week2_steps_hours: null
 
 calendar:
@@ -87,4 +89,16 @@ feature_schemas:
       u200_mean, u200_spread, v200_mean, v200_spread,
       shear200_850_mean, shear200_850_spread,
       MBC_forecast,
+    ]
+  # The 2026-10-25 frozen bundle (config/feature_schema.json): Hybrid7 in mm/week and
+  # degrees, then the 17 train-only principal components of the 30 atmospheric predictors.
+  hybrid7_pc17:
+    [
+      X_mean_mmweek, X_spread_mmweek, latitude_deg, longitude_deg, doy_sin, doy_cos,
+      MBC_forecast_mmweek,
+      atmospheric_PC01, atmospheric_PC02, atmospheric_PC03, atmospheric_PC04,
+      atmospheric_PC05, atmospheric_PC06, atmospheric_PC07, atmospheric_PC08,
+      atmospheric_PC09, atmospheric_PC10, atmospheric_PC11, atmospheric_PC12,
+      atmospheric_PC13, atmospheric_PC14, atmospheric_PC15, atmospheric_PC16,
+      atmospheric_PC17,
     ]

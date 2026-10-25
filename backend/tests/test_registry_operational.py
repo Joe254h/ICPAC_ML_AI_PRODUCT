@@ -122,10 +122,11 @@ def test_production_needs_a_passed_independent_test_recorded_once(setup):
         registry.record_independent_test(model_id, passed(status="failed"))
     promoted = registry.transition(model_id, "promote", REVIEW)
     assert promoted["status"] == "production" and promoted["deployment_date"]
-    assert registry.current() == {
-        "role": "production",
-        "model": platform.repo.get("model", model_id),
-    }
+    current = registry.current()
+    assert current["role"] == "production"
+    assert current["model"] == platform.repo.get("model", model_id)
+    assert current["activation"]["model_id"] == model_id
+    assert current["activation"]["actor"] == "Dr Reviewer"
 
 
 def test_concurrent_registrations_of_one_model_record_it_once(setup):
@@ -233,9 +234,25 @@ def test_startup_registers_the_committed_candidate_from_real_artifacts(tmp_path,
     assert record["trees"] == 378 and record["feature_count"] == 37
     assert record["metrics"]["rainfall_RMSE"] == pytest.approx(14.0459, abs=1e-4)
     assert record["model_info"]["feature_names_in_artifact"] == "positional"
-    assert ModelRegistry(platform).current()["role"] == "candidate"
+    current = ModelRegistry(platform).current()
+    assert current["role"] == "candidate"
+    assert current["model"]["model_id"] == "mbc_atmos37_catboost_candidate_v1"
+    # The frozen pre-refit bundle registers each policy, experimental: none becomes active.
+    bundle = {
+        m["model_id"]: m for m in platform.repo.list("model") if m.get("family") == "hybrid7_pc17"
+    }
+    assert sorted(m["policy"] for m in bundle.values()) == [
+        "catboost_full",
+        "global_alpha075",
+        "mam_protected",
+        "mbc_only",
+    ]
+    assert {m["status"] for m in bundle.values()} == {"experimental"}
+    stages = ModelRegistry(platform).lifecycles()
+    assert stages["icpac_week2_catboost_prerefit_v1"]["stage"] == "integrity_verified"
+    assert stages["mbc_atmos37_catboost_candidate_v1"]["stage"] == "active"
     again = Platform(platform.repo, register_descriptors=True)
-    assert len([m for m in again.repo.list("model") if operational.is_operational(m)]) == 1
+    assert len([m for m in again.repo.list("model") if operational.is_operational(m)]) == 5
 
 
 @pytest.mark.parametrize(
@@ -262,3 +279,114 @@ def test_api_registration_reads_descriptors_from_the_registry_folder_only(
     ) as client:
         response = client.post("/models/register", json={"descriptor": descriptor, "actor": "me"})
     assert response.status_code == 422
+
+
+def second_model(paths, root, tmp, model_id: str, **overrides):
+    """Another model file under the same ARTIFACT_ROOT, with its own metrics and descriptor."""
+    trees = 21 + len(model_id) % 5
+    other = paths["model"].with_name(f"{model_id}.cbm")
+    train_catboost(other, trees=trees)
+    metrics = json.loads(paths["metrics"].read_text())
+    metrics["best_iteration_or_trees"] = trees
+    other_metrics = paths["metrics"].with_name(f"{model_id}.json")
+    other_metrics.write_text(json.dumps(metrics))
+    paths = {**paths, "model": other, "metrics": other_metrics}
+    return write_descriptor(
+        tmp / f"{model_id}.yaml", paths, root, model_id=model_id, expected_trees=trees, **overrides
+    )
+
+
+def test_only_an_explicit_activation_changes_the_model_in_use(setup):
+    platform, registry, paths, root, tmp = setup
+    first = registry.register_descriptor(str(write_descriptor(tmp / "a.yaml", paths, root)))
+    first_id = first["model_id"]
+    assert registry.current()["model"]["model_id"] == first_id
+    # A newer declared candidate would have become current by the earlier rule: it does not.
+    second_id = registry.register_descriptor(str(second_model(paths, root, tmp, "second_v1")))[
+        "model_id"
+    ]
+    current = registry.current()
+    assert current["model"]["model_id"] == first_id and current["activation"]["actor"] == "registry"
+    # An experimental model must be approved before it can be activated.
+    third_id = registry.register_descriptor(
+        str(second_model(paths, root, tmp, "third_v1", declared_status="experimental"))
+    )["model_id"]
+    with pytest.raises(ValueError, match="Approve the model"):
+        registry.transition(third_id, "activate", REVIEW)
+    registry.transition(third_id, "candidate", REVIEW)
+    assert registry.current()["model"]["model_id"] == first_id  # approval is not activation
+    with pytest.raises(ValueError, match="confirmation"):
+        registry.transition(second_id, "activate", REVIEW.model_copy(update={"confirmed": False}))
+    registry.transition(second_id, "activate", REVIEW)
+    current = registry.current()
+    assert current["model"]["model_id"] == second_id
+    assert [h["model_id"] for h in current["activation"]["history"]] == [first_id]
+    with pytest.raises(ValueError, match="already the one in use"):
+        registry.transition(second_id, "activate", REVIEW)
+    with pytest.raises(ValueError, match="before retiring the one in use"):
+        registry.transition(second_id, "retire", REVIEW)
+    # Rollback: reactivate the earlier model from the history.
+    registry.transition(first_id, "activate", REVIEW)
+    current = registry.current()
+    assert current["model"]["model_id"] == first_id
+    assert [h["model_id"] for h in current["activation"]["history"]] == [second_id, first_id]
+    stages = registry.lifecycles()
+    assert stages[first_id]["stage"] == "active"
+    assert stages[second_id]["states"]["operationally_approved"] is True
+    assert stages[second_id]["states"]["scientifically_validated"] is False
+    assert [a["action"] for a in platform.repo.list("audit") if a["action"] == "model_activate"]
+
+
+def test_activation_in_a_production_release_needs_the_production_gate(setup, monkeypatch):
+    platform, registry, paths, root, tmp = setup
+    registry.register_descriptor(str(write_descriptor(tmp / "a.yaml", paths, root)))
+    second_id = registry.register_descriptor(str(second_model(paths, root, tmp, "second_v1")))[
+        "model_id"
+    ]
+    monkeypatch.setenv("RELEASE_MODE", "production")
+    with pytest.raises(ValueError, match="passed independent 2022-2024 test"):
+        registry.transition(second_id, "activate", REVIEW)
+
+
+def test_a_realtime_review_needs_a_run_whose_checks_all_passed(setup):
+    from backend.app.schemas import RealtimeReviewRequest
+
+    platform, registry, paths, root, tmp = setup
+    model_id = registry.register_descriptor(str(write_descriptor(tmp / "a.yaml", paths, root)))[
+        "model_id"
+    ]
+    checks = [{"check": "ensemble size", "status": "passed", "detail": "10 members"}]
+    run = {
+        "model_id": model_id,
+        "input_source": "ecmwf_opendata",
+        "realtime_gate_required": True,
+        "input_checks": checks,
+    }
+    platform.repo.save("forecast", run, "w2-2026-10-19-0000000a")
+    failed = {**run, "input_checks": [{**checks[0], "status": "failed"}]}
+    platform.repo.save("forecast", failed, "w2-2026-10-19-0000000b")
+    body = RealtimeReviewRequest(
+        source="ecmwf_opendata",
+        forecast_id="w2-2026-10-19-0000000b",
+        actor="Dr Reviewer",
+        confirmed=True,
+        comment="Members, leads, units and grid reviewed against the training files",
+    )
+    with pytest.raises(ValueError, match="not every input check passed"):
+        registry.review_realtime_feed(model_id, body)
+    with pytest.raises(ValueError, match="another input source"):
+        registry.review_realtime_feed(
+            model_id,
+            body.model_copy(
+                update={"source": "ecmwf_files", "forecast_id": "w2-2026-10-19-0000000a"}
+            ),
+        )
+    record = registry.review_realtime_feed(
+        model_id, body.model_copy(update={"forecast_id": "w2-2026-10-19-0000000a"})
+    )
+    review = record["realtime_reviews"]["ecmwf_opendata"]
+    assert review["actor"] == "Dr Reviewer" and review["forecast_id"] == "w2-2026-10-19-0000000a"
+    withdrawn = registry.review_realtime_feed(model_id, body.model_copy(update={"withdraw": True}))
+    assert withdrawn["realtime_reviews"] == {}
+    actions = [a["action"] for a in platform.repo.list("approval")]
+    assert "realtime_review_confirmed" in actions and "realtime_review_withdrawn" in actions

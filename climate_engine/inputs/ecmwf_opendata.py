@@ -159,6 +159,27 @@ def is_published(initialization: date, mirror: str) -> bool:
         session_client.session.close()
 
 
+def upper_air_listed(initialization: date, mirror: str, steps: list[int]) -> bool:
+    """Whether the run's index lists the upper-air predictors at the first and last of the
+    seven leads (every member and field is checked again when they are downloaded)."""
+    import requests
+
+    session_client = client(mirror)
+    try:
+        for step in (steps[0], steps[-1]):
+            for name, levels in PRESSURE_INPUTS.items():
+                found = session_client._get_urls(
+                    use_index=True, **pressure_request(initialization, name, levels, step)
+                ).urls
+                if not any(isinstance(item, tuple) and item[1] for item in found):
+                    return False
+        return True
+    except (requests.RequestException, ValueError):
+        return False
+    finally:
+        session_client.session.close()
+
+
 def latest_initialization(today: date | None = None, lookback_days: int = 5) -> date:
     """The newest 00 UTC run whose Week-2 rainfall is published (ECMWF disseminates the
     ensemble's day-15 fields about eight to nine hours after the run time)."""
@@ -620,6 +641,7 @@ __all__ = [
     "decode_pressure",
     "fetch",
     "fetch_pressure",
+    "upper_air_listed",
     "file_name",
     "is_published",
     "latest_initialization",

@@ -1,0 +1,94 @@
+"""The ECMWF readiness page and the frozen experimental verification, through the API."""
+
+import shutil
+from datetime import date
+
+import pytest
+
+from backend.app.services import evidence
+from backend.tests.test_forecasts import env as env
+from backend.tests.test_forecasts import fast_maps as fast_maps
+from backend.tests.test_forecasts import run
+from backend.tests.test_inputs import mirror as mirror
+from backend.tests.test_inputs import wait
+
+
+def test_readiness_reports_only_recorded_states(env, fast_maps):
+    client = env.client
+    ready = client.get("/data/ecmwf/readiness").json()
+    assert ready["availability"] is None  # never checked: nothing is assumed
+    assert ready["rainfall"]["status"] == "missing"
+    assert ready["compatibility"]["status"] == "unchecked"
+    assert ready["generation"]["raw_mbc"]["allowed"] is False
+    assert ready["model"]["model_id"] == "test_mbc_atmos37_catboost_v1"
+    run(env)
+    ready = client.get("/data/ecmwf/readiness").json()
+    assert ready["rainfall"]["status"] == "available"
+    assert ready["rainfall"]["type"] == "operator-supplied files"
+    assert ready["last_run"]["hybrid"] == {"status": "available"}
+    assert ready["compatibility"]["status"] == "compatible"
+    assert ready["generation"]["raw_mbc"]["allowed"] is True
+
+
+def test_check_ecmwf_records_the_published_run(env, mirror, monkeypatch):
+    client = env.client
+    operation = client.post(
+        "/operations",
+        json={"action": "check_ecmwf", "initialization": "2026-10-05", "actor": "Joe N"},
+    ).json()
+    done = wait(client, operation)
+    assert done["status"] == "complete", done
+    ready = client.get("/data/ecmwf/readiness").json()
+    availability = ready["availability"]
+    assert availability["status"] == "published"
+    assert availability["initialization"] == "2026-10-05"
+    assert availability["checked_by"]  # the signed-in operator
+    assert availability["upper_air_listed"] is False  # the mirror holds rainfall only
+
+
+def test_the_experimental_verification_is_served_from_the_frozen_tables(env):
+    client = env.client
+    body = client.get("/verification/experimental").json()
+    assert body["scope"]["cases"] == 551 and body["scope"]["rows"] == 113285600
+    regional = {s["model"]: s for s in body["regional"]}
+    assert regional["CatBoost"]["rmse"] == pytest.approx(15.203976, abs=1e-6)
+    assert regional["MAMProtected"]["rmse"] == pytest.approx(15.270882, abs=1e-6)
+    assert regional["RawECMWF"]["rmse"] == pytest.approx(17.268974, abs=1e-6)
+    assert regional["TrainingClimatology"]["rmse"] == pytest.approx(17.613541, abs=1e-6)
+    assert min(regional.values(), key=lambda s: s["rmse"])["model"] == "CatBoost"
+    crps = {c["id"]: c["crps_mmweek"] for c in body["ensemble"]["crps"]}
+    assert crps["ALL"] == pytest.approx(6.772580, abs=1e-6)
+    assert "skill score" in body["ensemble"]["note"]
+    assert sorted(body["ensemble"]["reliability"]) == ["1", "10", "100", "25", "50"]
+    assert [c["id"] for c in body["ensemble"]["crps"]][:5] == ["ALL", "DJF", "MAM", "JJA", "SON"]
+    # Monthly scores pool the per-case sums exactly: their union is the regional score.
+    assert sum(item["cases"] for items in body["monthly"].values() for item in items) == 551 * 7
+    assert sorted(body["thresholds_mmweek"]) == [1.0, 10.0, 25.0, 50.0, 100.0]
+    assert {c["model"] for c in body["deterministic_roc"]} >= {"CatBoost", "MBC"}
+    assert all(len(c["curve"]) <= 80 for c in body["deterministic_roc"])
+    assert body["sudan"]["cells_outside_vector"] == 813
+    png = client.get("/verification/experimental/maps/added_value_mbc")
+    assert png.status_code == 200 and png.content[:4] == b"\x89PNG"
+    assert client.get("/verification/experimental/maps/country-south-sudan").status_code == 200
+    assert client.get("/verification/experimental/maps/secrets").status_code == 422
+
+
+def test_changed_evidence_is_refused(tmp_path, monkeypatch):
+    copy = tmp_path / "evidence"
+    shutil.copytree(evidence.EVIDENCE, copy)
+    monkeypatch.setattr(evidence, "EVIDENCE", copy)
+    evidence.rows("T01_independent_regional_metrics.csv")
+    table = copy / "tables" / "T01_independent_regional_metrics.csv"
+    table.write_text(table.read_text().replace("15.20", "14.20", 1))
+    with pytest.raises(evidence.EvidenceError, match="changed after it was frozen"):
+        evidence.rows("T01_independent_regional_metrics.csv")
+    with pytest.raises(evidence.EvidenceError, match="not part of the frozen evidence"):
+        evidence.verified_file("tables/../../SHA256SUMS.txt")
+
+
+def test_the_realtime_gate_date_is_inclusive():
+    from climate_engine.models.hybrid7_pc17 import MBCHybrid7PC17CatBoost
+
+    model = MBCHybrid7PC17CatBoost.__new__(MBCHybrid7PC17CatBoost)
+    model.realtime_from = date(2025, 1, 1)
+    assert model.realtime_gated(date(2025, 1, 1)) and not model.realtime_gated(date(2024, 12, 31))

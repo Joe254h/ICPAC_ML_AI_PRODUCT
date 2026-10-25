@@ -43,6 +43,25 @@ fixtures/references/                    reference maps for visual regression tes
 └── PANEL_RMSE_RAW_HYBRID_CATBOOST.png
 ```
 
+## The frozen pre-refit bundle and its evidence (2026-10-25)
+
+```text
+artifacts/bundles/ICPAC_WEEK2_WEB_MODEL_20261025/      unchanged; manifest.json pins every file
+├── artifacts/   catboost_residual_fullrows.cbm (300 trees, 24 inputs), MBC factors
+│                (prior 500, cap 3), 2005-2019 PCA, mask, training-only climatology
+├── config/      feature schema, deployment and hybrid policy files
+├── provenance/  the training code; runtime/ the bundle's own inference code
+└── verification/ validation and independent-test summaries
+artifacts/verification/PRE_REFIT_INDEPENDENT_2022_2024_20261025/
+├── tables/      the 551-case independent results (continuous, categorical, ROC,
+│                ECMWF ensemble CRPS/Brier/reliability, bootstrap, per case)
+├── maps/        frozen spatial verification maps; geo_review/ the Sudan mask review
+└── SHA256SUMS.txt
+```
+
+Both are checked by `python -m scripts.verify_artifacts`. See
+[the operational models guide](../docs/operational_models.md#the-frozen-pre-refit-model-icpac_week2_web_model_20261025).
+
 ## Not stored here
 
 Training matrices, the ECMWF and CHIRPS archives, atmospheric chunks, validation arrays

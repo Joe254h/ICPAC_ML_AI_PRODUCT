@@ -1,5 +1,6 @@
 "use client";
 /** The latest (or a chosen) Week-2 forecast: map, outlook text, countries, products. */
+import Link from "next/link";
 import { useState } from "react";
 import { FileDown, FileText } from "lucide-react";
 import ForecastMap from "@/components/forecast-map";
@@ -123,6 +124,16 @@ function Body({ detail }: { detail: ForecastDetail }) {
           The MBC + AI/ML hybrid is still in progress: it needs {hybrid.reason}.
           This forecast provides raw ECMWF and the MBC-corrected rainfall.
         </Notice>
+      )}
+      {hybrid?.status === "blocked" && (
+        <Notice tone="red" title="Issued from MBC.">
+          The MBC + AI/ML hybrid was not produced: {hybrid.reason}. Nothing was
+          filled in; this forecast provides raw ECMWF and the MBC-corrected
+          rainfall. See the <Link href="/data/ecmwf">ECMWF input checks</Link>.
+        </Notice>
+      )}
+      {hybrid?.status === "not_produced" && (
+        <Notice title="Issued from MBC.">{hybrid.reason}.</Notice>
       )}
       <div className="stats">
         <Stat
