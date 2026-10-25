@@ -92,3 +92,23 @@ def test_the_realtime_gate_date_is_inclusive():
     model = MBCHybrid7PC17CatBoost.__new__(MBCHybrid7PC17CatBoost)
     model.realtime_from = date(2025, 1, 1)
     assert model.realtime_gated(date(2025, 1, 1)) and not model.realtime_gated(date(2024, 12, 31))
+
+
+def test_a_map_downloads_as_pdf(env):
+    import io
+
+    from PIL import Image
+
+    from backend.app.api.forecasts import pdf_of
+
+    image = io.BytesIO()
+    Image.new("RGBA", (40, 30), (20, 120, 60, 255)).save(image, format="PNG")
+    assert pdf_of(image.getvalue())[:5] == b"%PDF-"
+    record = run(env)
+    response = env.client.get(f"/forecasts/{record['forecast_id']}/map?layer=mbc&format=pdf")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content[:5] == b"%PDF-"
+    assert "icpac-week2-mbc.pdf" in response.headers["content-disposition"]
+    bad = env.client.get(f"/forecasts/{record['forecast_id']}/map?layer=mbc&format=svg")
+    assert bad.status_code == 422

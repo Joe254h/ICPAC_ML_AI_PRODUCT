@@ -19,11 +19,12 @@ import { SERIES, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type { ForecastDetail, MapsStatus, Variant } from "@/types/operational";
 import {
-  LAYER_TEXT,
   NoForecast,
   forecastFacts,
   layersOf,
+  layerText,
   mapUrl,
+  productReason,
   useForecast,
 } from "@/features/operational/shared";
 
@@ -81,19 +82,28 @@ function RainfallMaps({ detail }: { detail: ForecastDetail }) {
             <Card
               key={variant}
               eyebrow={SERIES[variant].label}
-              title={LAYER_TEXT[variant].title}
+              title={layerText(detail.family)[variant].title}
+              action={
+                <a
+                  className="btn btn-outline btn-sm"
+                  href={`${mapUrl(detail, variant, country || undefined)}&format=pdf`}
+                >
+                  PDF
+                </a>
+              }
             >
               <MapFigure
                 src={mapUrl(detail, variant, country || undefined)}
-                alt={`${LAYER_TEXT[variant].title} Week-2 rainfall${country ? ` over ${country}` : ""}`}
+                alt={`${layerText(detail.family)[variant].title} Week-2 rainfall${country ? ` over ${country}` : ""}`}
                 caption={`Valid ${validDays(detail.valid_start, detail.valid_end)}`}
               />
             </Card>
           ) : (
-            <InProgress key={variant} title={LAYER_TEXT[variant].title}>
-              {detail.products?.hybrid?.reason
-                ? `Waiting for ${detail.products.hybrid.reason}.`
-                : "Its inputs are not available yet."}
+            <InProgress
+              key={variant}
+              title={layerText(detail.family)[variant].title}
+            >
+              {productReason(detail.products?.[variant])}
             </InProgress>
           ),
         )}

@@ -25,6 +25,18 @@ MODEL_ID = r"^[a-zA-Z0-9_-]{1,80}$"
 IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
+def pdf_of(png: bytes) -> bytes:
+    """The same map as a one-page PDF (the picture is not redrawn)."""
+    import io
+
+    from PIL import Image
+
+    with Image.open(io.BytesIO(png)) as image:
+        out = io.BytesIO()
+        image.convert("RGB").save(out, format="PDF", resolution=200.0)
+    return out.getvalue()
+
+
 def install(app: FastAPI, dependency) -> None:
     @app.get("/automations")
     def automations(platform=Depends(dependency)) -> dict:
@@ -185,9 +197,19 @@ def install(app: FastAPI, dependency) -> None:
         # style names stay valid and give the current bulletin style.
         style: str | None = Query(None, pattern=r"^(package|weekly-v1|weekly-v2|weekly-v3)$"),
         country: str | None = Query(None, min_length=4, max_length=40),
+        format: str = Query("png", pattern=r"^(png|pdf)$"),
         platform=Depends(dependency),
     ):
         png = ForecastService(platform).map_png(forecast_id, layer, style, country)
+        if format == "pdf":
+            name = (
+                f"icpac-week2-{layer}{'-' + country.lower().replace(' ', '-') if country else ''}"
+            )
+            return Response(
+                pdf_of(png),
+                media_type="application/pdf",
+                headers={**IMMUTABLE, "Content-Disposition": f'attachment; filename="{name}.pdf"'},
+            )
         return Response(png, media_type="image/png", headers=IMMUTABLE)
 
     @app.get("/forecasts/{forecast_id}/overlay")
