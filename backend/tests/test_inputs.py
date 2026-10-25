@@ -360,10 +360,17 @@ def test_chirps_downloads_retry_with_a_doubling_wait():
     assert waits == []
 
 
+def seen_from(monkeypatch, today: date) -> None:
+    """CHIRPS publication as it stood on ``today``, whatever the date the tests run."""
+    complete = chirps.window_complete
+    monkeypatch.setattr(chirps, "window_complete", lambda start, _=None: complete(start, today))
+
+
 def test_finished_forecasts_are_verified_against_chirps(env, fast_maps, monkeypatch):
     record = run(env, "2026-09-14")
     future = run(env, "2026-10-05")
     monkeypatch.setattr(chirps, "download", chc(week(date(2026, 9, 21))))
+    seen_from(monkeypatch, date(2026, 10, 15))  # the 2026-10-05 run's window is unfinished
     service = forecasts.ForecastService(env.platform)
     result = service.verify_due("Joe N")
     assert result["verified"] == [record["forecast_id"]]
@@ -383,6 +390,7 @@ def test_finished_forecasts_are_verified_against_chirps(env, fast_maps, monkeypa
 def test_the_weekly_cycle_runs_as_one_operation(env, fast_maps, mirror, monkeypatch):
     monkeypatch.setattr(ecmwf_opendata, "latest_initialization", lambda: date(2026, 10, 5))
     monkeypatch.setattr(chirps, "download", chc({}))  # CHIRPS lists nothing yet
+    seen_from(monkeypatch, date(2026, 10, 15))
     client = env.client
     operation = client.post("/operations", json={"action": "cycle", "actor": "Joe N"}).json()
     done = wait(client, operation)
