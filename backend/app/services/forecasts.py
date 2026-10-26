@@ -95,9 +95,9 @@ def package_root() -> Path:
 
 
 REALTIME_CONFIRMATION = (
-    "It waits for a reviewer's one-time confirmation, on the latest forecast's page, that "
-    "the real-time ECMWF input matches the reforecasts the model was trained on. Until "
-    "then, forecasts are issued from MBC."
+    "It needs a weekly run with this model, then a reviewer's one-time confirmation on that "
+    "forecast's page that the real-time ECMWF input matches the reforecasts the model was "
+    "trained on. Until then, forecasts are issued from MBC."
 )
 
 

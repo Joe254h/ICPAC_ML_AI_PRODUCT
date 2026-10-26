@@ -72,8 +72,8 @@ def system_health(platform) -> dict:
         if hybrid["status"] == "available"
         else "Warning · the model in use issues MBC alone"
         if hybrid["status"] == "not_produced"
-        else "In progress · forecasts provide raw ECMWF and MBC until a reviewer confirms "
-        "the real-time ECMWF input"
+        else "In progress · forecasts provide raw ECMWF and MBC until a weekly run with the "
+        "model in use and a reviewer's one-time confirmation of the real-time ECMWF input"
         if hybrid["reason"] == forecasts.REALTIME_CONFIRMATION
         else "In progress · forecasts provide raw ECMWF and MBC until the AI/ML model's "
         "upper-air inputs are supplied"

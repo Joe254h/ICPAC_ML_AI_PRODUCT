@@ -27,6 +27,7 @@ import {
   useForecastHover,
 } from "@/components/forecast-map";
 import CountryCards from "@/components/country-cards";
+import { useApp } from "@/components/shell";
 import { LinkButton, Skeleton } from "@/components/ui";
 import { day, num, period, weekPeriod } from "@/lib/format";
 import { useApi } from "@/services/hooks";
@@ -39,7 +40,7 @@ import type {
   Variant,
 } from "@/types/operational";
 import type { Bulletin } from "@/types/workflows";
-import { layersOf, primaryOf } from "@/features/operational/shared";
+import { laterModel, layersOf, primaryOf } from "@/features/operational/shared";
 
 function Lead({ text, lead }: { text: string; lead?: string }) {
   if (lead && text.startsWith(lead))
@@ -84,6 +85,8 @@ function OutlookHero({
     layer,
   );
   const headline = bulletin.data?.sections?.find((s) => s.key === "headline");
+  const { current } = useApp();
+  const now = detail ? laterModel(detail, current.data) : null;
 
   if (!detail || !detail.overlay_bounds || !detail.overlays)
     return (
@@ -157,6 +160,13 @@ function OutlookHero({
               ECMWF ensemble of {day(detail.initialization)}, 00 UTC · issued{" "}
               {day(detail.generation_time)}
             </p>
+            {now && (
+              <p className="outlook-note">
+                Issued by the earlier model. Forecasts are now made by{" "}
+                {now.model_name ?? "a newer model"}.{" "}
+                <Link href="/data/runs">Run the weekly cycle</Link>
+              </p>
+            )}
             {headline?.text[0] && (
               <p className="outlook-text">
                 <Lead text={headline.text[0]} lead={headline.leads?.[0]} />

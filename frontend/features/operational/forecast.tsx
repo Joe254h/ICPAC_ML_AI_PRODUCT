@@ -7,6 +7,7 @@ import { CheckCircle2, FileDown, FileText, LoaderCircle } from "lucide-react";
 import ForecastMap from "@/components/forecast-map";
 import { openStaffAccess } from "@/components/bulletin-access";
 import ReviewDialog from "@/components/review-dialog";
+import { useApp } from "@/components/shell";
 import {
   Button,
   Card,
@@ -34,6 +35,7 @@ import {
   CountryChart,
   CountryTable,
   Downloads,
+  EarlierModelNotice,
   ForecastFacts,
   NoForecast,
   NotesCard,
@@ -41,6 +43,7 @@ import {
   ProvenanceList,
   VerificationSummary,
   forecastFacts,
+  laterModel,
   layersOf,
   mapUrl,
   methodName,
@@ -228,6 +231,9 @@ function Body({
     (a, b) => (b[primary]?.mean_mm ?? 0) - (a[primary]?.mean_mm ?? 0),
   )[0];
   const hybrid = detail.products?.hybrid;
+  const { current } = useApp();
+  // A forecast from the earlier model: what it was waiting for no longer applies.
+  const earlier = laterModel(detail, current.data) !== null;
   return (
     <>
       <PageBanner
@@ -257,7 +263,9 @@ function Body({
           </>
         }
       />
-      {awaitingConfirmation(detail) ? (
+      {earlier ? (
+        <EarlierModelNotice detail={detail} />
+      ) : awaitingConfirmation(detail) ? (
         <RealtimeConfirm detail={detail} onIssued={onIssued} />
       ) : (
         hybrid?.status === "in_progress" && (
@@ -267,14 +275,14 @@ function Body({
           </Notice>
         )
       )}
-      {hybrid?.status === "blocked" && (
+      {!earlier && hybrid?.status === "blocked" && (
         <Notice tone="red" title="Issued from MBC.">
           The MBC + AI/ML hybrid was not produced: {hybrid.reason}. Nothing was
           filled in; this forecast provides raw ECMWF and the MBC-corrected
           rainfall. See the <Link href="/data/ecmwf">ECMWF input checks</Link>.
         </Notice>
       )}
-      {hybrid?.status === "not_produced" && (
+      {!earlier && hybrid?.status === "not_produced" && (
         <Notice title="Issued from MBC.">{hybrid.reason}.</Notice>
       )}
       <div className="stats">

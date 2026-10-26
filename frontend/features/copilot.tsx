@@ -117,9 +117,11 @@ function Message({ message }: { message: ChatMessage }) {
         )}
         {message.fallback && (
           <p className="chat-fallback">
-            Standard answer from the forecast data:{" "}
-            {message.fallback_reason ??
-              "the assistant could not respond just now"}
+            Answered from the forecast data alone, because the AI assistant did
+            not respond:{" "}
+            {(
+              message.fallback_reason ?? "it could not respond just now"
+            ).replace(/\.$/, "")}
             .
           </p>
         )}

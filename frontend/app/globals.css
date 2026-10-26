@@ -2510,6 +2510,19 @@ select.input,
   font-size: 14px;
   color: rgba(255, 255, 255, 0.72);
 }
+.outlook-note {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--amber);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 13.5px;
+  color: rgba(255, 255, 255, 0.86);
+}
+.outlook-note a {
+  color: #ffd27a;
+  font-weight: 600;
+}
 .outlook-text {
   margin: 18px 0 0;
   font-size: 15.5px;

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { Download } from "lucide-react";
 import Chart from "@/components/chart";
+import { useApp } from "@/components/shell";
 import {
   Card,
   EmptyState,
@@ -18,9 +19,11 @@ import { SERIES, dateTime, day, num, signed, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type {
   CountryRow,
+  CurrentModel,
   ForecastDetail,
   ForecastRun,
   Metrics,
+  OperationalModel,
   ProductStatus,
   Variant,
 } from "@/types/operational";
@@ -73,6 +76,32 @@ export function familyOf(
   detail: Pick<ForecastRun, "family"> & { model?: { family?: string } },
 ): string | undefined {
   return detail.model?.family ?? detail.family;
+}
+
+/** The model forecasts use now, when another model issued this forecast (a reviewer or
+ * a recorded decision activated it since). */
+export function laterModel(
+  detail: Pick<ForecastRun, "model_id">,
+  current?: CurrentModel,
+): OperationalModel | null {
+  const model = current?.model;
+  return model && model.model_id !== detail.model_id ? model : null;
+}
+
+/** Says that a forecast came from the earlier model and the next run uses the new one. */
+export function EarlierModelNotice({ detail }: { detail: ForecastDetail }) {
+  const { current } = useApp();
+  const now = laterModel(detail, current.data);
+  if (!now) return null;
+  return (
+    <Notice title="Issued by the earlier model.">
+      This forecast was issued on {day(detail.generation_time)} by{" "}
+      {detail.model?.model_name ?? "the model in use then"}. Forecasts are now
+      made by {now.model_name ?? "the model a reviewer activated"}: the next
+      weekly run issues one with it, including its MBC + AI/ML layer.{" "}
+      <Link href="/data/runs">Run the weekly cycle now</Link>
+    </Notice>
+  );
 }
 
 /** The forecast named in the URL (?id=), else the latest one. */

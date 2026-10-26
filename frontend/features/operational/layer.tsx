@@ -17,9 +17,11 @@ import { SERIES, num, validDays } from "@/lib/format";
 import { useApp } from "@/components/shell";
 import type { ForecastDetail, Variant } from "@/types/operational";
 import {
+  EarlierModelNotice,
   LAYER_TEXT,
   familyOf,
   NoForecast,
+  laterModel,
   layerText,
   forecastFacts,
   layersOf,
@@ -62,6 +64,18 @@ const PREREFIT_STEPS: Record<Variant, string[]> = {
   ],
 };
 
+/** What the AI/ML layer of each model family needs before a forecast includes it. */
+const NEEDS = [
+  "The forecast hours at which the model's training read the upper-air (pressure-level) fields, from ICPAC's training scripts.",
+  "Those ECMWF ensemble fields: humidity, winds, temperature and geopotential at 850, 700, 500 and 200 hPa.",
+  "With both, every forecast adds the AI/ML layer automatically. Until then the model is checked and kept ready, and forecasts are issued from MBC.",
+];
+const PREREFIT_NEEDS = [
+  "A weekly run with the model: it downloads the ECMWF upper-air fields (humidity, winds, temperature and geopotential at 850, 700, 500 and 200 hPa) at the model's seven forecast hours, 192 to 336 h.",
+  "Every input is checked against the model's training data; a failed check stops the AI/ML layer and nothing is filled in.",
+  "For runs from 2025, a reviewer confirms once, on the forecast page, that the real-time ECMWF input matches the reforecasts the model was trained on. From then on every forecast includes the MBC + AI/ML layer.",
+];
+
 function Body({
   detail,
   variant,
@@ -69,11 +83,15 @@ function Body({
   detail: ForecastDetail;
   variant: Variant;
 }) {
-  const { config } = useApp();
+  const { config, current } = useApp();
   const family = familyOf(detail);
-  const text = layerText(family)[variant];
-  const steps = (family === "hybrid7_pc17" ? PREREFIT_STEPS : STEPS)[variant];
   const available = layersOf(detail).includes(variant);
+  // A layer missing from a forecast of the earlier model is described, with what it
+  // still needs, for the model now in use.
+  const now = laterModel(detail, current.data);
+  const shown = !available && now ? now.family : family;
+  const text = layerText(shown)[variant];
+  const steps = (family === "hybrid7_pc17" ? PREREFIT_STEPS : STEPS)[variant];
   const reason =
     detail.products?.hybrid?.reason ??
     config.data?.operational.hybrid.reason ??
@@ -95,31 +113,26 @@ function Body({
       />
       {!available ? (
         <>
-          <InProgress title="MBC + AI/ML hybrid">
-            {!reason
-              ? "The AI/ML model's inputs are not available yet, so forecasts are issued from MBC."
-              : /^[A-Z]/.test(reason)
-                ? reason
-                : `Waiting for ${reason.replace(/\.$/, "")}. Forecasts are issued from MBC until then.`}
-          </InProgress>
+          {now ? (
+            <EarlierModelNotice detail={detail} />
+          ) : (
+            <InProgress title="MBC + AI/ML hybrid">
+              {!reason
+                ? "The AI/ML model's inputs are not available yet, so forecasts are issued from MBC."
+                : /^[A-Z]/.test(reason)
+                  ? reason
+                  : `Waiting for ${reason.replace(/\.$/, "")}. Forecasts are issued from MBC until then.`}
+            </InProgress>
+          )}
           <Card title="What is needed to complete it">
             <ol
               style={{ margin: 0, paddingLeft: 22, display: "grid", gap: 10 }}
             >
-              <li>
-                The forecast hours at which the model&apos;s training read the
-                upper-air (pressure-level) fields, from ICPAC&apos;s training
-                scripts.
-              </li>
-              <li>
-                Those ECMWF ensemble fields: humidity, winds, temperature and
-                geopotential at 850, 700, 500 and 200 hPa.
-              </li>
-              <li>
-                With both, every forecast adds the AI/ML layer automatically.
-                Until then the model is checked and kept ready, and forecasts
-                are issued from MBC.
-              </li>
+              {(shown === "hybrid7_pc17" ? PREREFIT_NEEDS : NEEDS).map(
+                (need) => (
+                  <li key={need}>{need}</li>
+                ),
+              )}
             </ol>
             <p style={{ margin: "18px 0 0" }}>
               <Link className="link-amber" href="/forecasts/mbc">
