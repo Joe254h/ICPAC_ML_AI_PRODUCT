@@ -174,12 +174,12 @@ secret `llm-api-key` and never printed:
 ```
 
 Any other OpenAI-compatible service takes the same three parameters, for example an open
-Qwen model on Groq's free plan (take the exact model name from Groq's Models page):
+Qwen model on Groq's free plan (Groq lists the models a key can use at `https://api.groq.com/openai/v1/models`):
 
 ```powershell
 & $Script -ExpectedCommit $Commit -ResourceGroup icpac -AppName icpac-api -ReleaseMode evaluation -AccessMode public `
   -LlmProvider openai_compatible -LlmBaseUrl 'https://api.groq.com/openai/v1' `
-  -LlmModel 'qwen/qwen3-32b' -LlmReasoningEffort none -SetLlmKey
+  -LlmModel 'qwen/qwen3.8-27b' -LlmReasoningEffort none -SetLlmKey
 ```
 
 With `openai_compatible` the script also sets `LLM_TOOLS=true`, so the model answers through
