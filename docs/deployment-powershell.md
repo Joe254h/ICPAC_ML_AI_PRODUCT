@@ -191,9 +191,10 @@ the script again with `-SetEarthdataToken`.
 ## Redeploying the same commit
 
 Express apps start a new replica only when the image reference changes; settings changed
-alone are saved but not applied. The script therefore alternates between the image's
-digest and its commit tag when the same commit is deployed again, so new settings (access
-mode, Copilot service, tokens) take effect. The health check still requires the expected
+alone are saved but not applied. When the same commit is deployed again, the script
+therefore alternates between the digest reference and the commit tag pinned to the same
+digest (`:<commit>@sha256:…`), so new settings (access mode, Copilot service, tokens) take
+effect. Both forms run the identical image; the health check still requires the expected
 source commit.
 
 ## Scientific release remains evaluation

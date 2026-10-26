@@ -88,6 +88,10 @@ Reset-DeploymentFixture
 if ($global:DeployTestwrites) { throw 'Plan mutated Azure' }
 & $deployment -ExpectedCommit $global:DeployTestcommit
 if ($global:DeployTestwrites -ne 1) { throw 'Expected one deployment write' }
+# Express applies new settings only with a new image reference: the same image is pinned
+# again by its commit tag and the same digest.
+$redeployed = 'ghcr.io/joe254h/icpac-backend:' + $global:DeployTestcommit + '@sha256:' + ('b' * 64)
+if ($global:DeployTestapp.properties.template.containers[0].image -ne $redeployed) { throw 'Redeploying the same image did not change its pinned reference' }
 $global:DeployTestbadCI = $true
 try { & $deployment -ExpectedCommit $global:DeployTestcommit; throw 'Bad CI accepted' }
 catch { if ($_.Exception.Message -eq 'Bad CI accepted') { throw } }

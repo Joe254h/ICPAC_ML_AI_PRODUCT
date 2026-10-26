@@ -137,11 +137,10 @@ $manifest = Invoke-WebRequest "https://ghcr.io/v2/joe254h/icpac-backend/manifest
 $digest = [string](@($manifest.Headers['Docker-Content-Digest'])[0])
 if ($digest -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Registry did not return an immutable image digest.' }
 $image = "ghcr.io/joe254h/icpac-backend@$digest"
-# The same image by its source tag (the tag the digest above was read from). Express apps
-# start a new replica only when the image reference changes (settings alone are saved but
-# not applied), so a redeployment of the same commit alternates between the two forms; the
-# health check below confirms the running source commit either way.
-$taggedImage = "ghcr.io/joe254h/icpac-backend:$ExpectedCommit"
+# The same image, still pinned to its digest, with its source tag. Express apps start a
+# new replica only when the image reference changes (settings alone are saved but not
+# applied), so a redeployment of the same commit alternates between the two pinned forms.
+$taggedImage = "ghcr.io/joe254h/icpac-backend:${ExpectedCommit}@$digest"
 $app = Invoke-Azure @('containerapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroup)
 if ($app.properties.template.containers.Count -ne 1) { throw 'This script expects one API container.' }
 if ($VerifyOnly) {
