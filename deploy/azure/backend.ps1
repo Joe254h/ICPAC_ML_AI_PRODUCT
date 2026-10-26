@@ -8,7 +8,9 @@ are preserved. Missing durable storage or staff credentials stop deployment. No 
 are printed or written into this repository. Keep a database backup before updating.
 Use -VerifyOnly to check an existing deployment without reading secrets or changing Azure.
 Use -LlmProvider, -LlmBaseUrl and -LlmModel, with -SetLlmKey to enter its key privately, to
-change the Copilot's AI service; leave them out to keep the current one.
+change the Copilot's AI service; leave them out to keep the current one. -LlmReasoningEffort
+sets the reasoning effort sent with each question (off removes it); a new -LlmBaseUrl
+removes the previous service's reasoning effort and fallback models.
 Use -SetEarthdataToken to enter a NASA Earthdata token privately for the GPM IMERG downloads.
 #>
 [CmdletBinding()]
@@ -25,6 +27,7 @@ param(
     [ValidatePattern('^https://')][string]$LlmBaseUrl,
     [ValidatePattern('^[A-Za-z0-9._:/-]{2,100}$')][string]$LlmModel,
     [switch]$SetLlmKey,
+    [ValidateSet('off', 'none', 'default', 'minimal', 'low', 'medium', 'high')][string]$LlmReasoningEffort,
     [switch]$SetEarthdataToken,
     [switch]$PlanOnly,
     [switch]$VerifyOnly
@@ -35,7 +38,7 @@ if ($PlanOnly -and $VerifyOnly) { throw 'Choose either -PlanOnly or -VerifyOnly.
 if ($EnableAutomation -and $DisableAutomation) { throw 'Choose either -EnableAutomation or -DisableAutomation.' }
 if ($VerifyOnly -and ($EnableAutomation -or $DisableAutomation)) { throw 'Verification cannot change the automation schedule.' }
 if ($AccessMode -eq 'public' -and $ReleaseMode -ne 'evaluation') { throw 'Public access requires an evaluation release.' }
-if ($VerifyOnly -and ($LlmProvider -or $LlmBaseUrl -or $LlmModel -or $SetLlmKey -or $SetEarthdataToken)) { throw 'Verification cannot change settings.' }
+if ($VerifyOnly -and ($LlmProvider -or $LlmBaseUrl -or $LlmModel -or $SetLlmKey -or $LlmReasoningEffort -or $SetEarthdataToken)) { throw 'Verification cannot change settings.' }
 
 function Invoke-Azure([string[]]$Arguments) {
     $result = & az @Arguments --only-show-errors --output json
@@ -241,7 +244,15 @@ if ($LlmProvider) { Set-Value 'LLM_PROVIDER' $LlmProvider }
 # An OpenAI-compatible service answers through the Copilot's tools (forecast data, maps,
 # verification) rather than only ordering the checked sentences.
 if ($LlmProvider -eq 'openai_compatible') { Set-Value 'LLM_TOOLS' 'true' }
-if ($LlmBaseUrl) { Set-Value 'LLM_BASE_URL' $LlmBaseUrl.TrimEnd('/') }
+if ($LlmBaseUrl) {
+    Set-Value 'LLM_BASE_URL' $LlmBaseUrl.TrimEnd('/')
+    # Settings of the previous service (Gemini's 'low' effort, its fallback models) can be
+    # refused by another one: a new service starts without them unless given again.
+    $variables.Remove('LLM_REASONING_EFFORT')
+    $variables.Remove('LLM_FALLBACK_MODELS')
+}
+if ($LlmReasoningEffort -eq 'off') { $variables.Remove('LLM_REASONING_EFFORT') }
+elseif ($LlmReasoningEffort) { Set-Value 'LLM_REASONING_EFFORT' $LlmReasoningEffort }
 if ($LlmModel) { Set-Value 'LLM_MODEL' $LlmModel }
 if ($SetLlmKey) {
     if ($PlanOnly) { throw '-SetLlmKey asks for the key; run it without -PlanOnly.' }

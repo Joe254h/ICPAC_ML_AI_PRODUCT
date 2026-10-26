@@ -48,6 +48,12 @@ def answer_probe(url: str, key: str | None, model: str) -> str | None:
                 "model": model,
                 "messages": [{"role": "user", "content": "Reply with OK."}],
                 "max_tokens": 1,
+                # As each question sends it: a service may refuse the setting itself.
+                **(
+                    {"reasoning_effort": effort}
+                    if (effort := os.getenv("LLM_REASONING_EFFORT"))
+                    else {}
+                ),
             },
             timeout=10,
         )

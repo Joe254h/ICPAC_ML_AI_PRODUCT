@@ -217,3 +217,17 @@ if ($global:DeployTestapp.properties.template.containers[0].image -ne ('ghcr.io/
 & $deployment -ExpectedCommit $global:DeployTestcommit
 if ($global:DeployTestapp.properties.template.containers[0].image -ne ('ghcr.io/joe254h/icpac-backend@sha256:' + ('b' * 64))) { throw 'Redeploying from the commit tag did not return to the digest' }
 Write-Host 'Image reference alternation tests passed (offline).'
+# A new AI service starts without the previous service's reasoning effort; it can be set
+# or removed explicitly.
+Reset-DeploymentFixture
+$global:DeployTestapp.properties.template.containers[0].env += @{name = 'LLM_REASONING_EFFORT'; value = 'low'}
+& $deployment -ExpectedCommit $global:DeployTestcommit -LlmProvider openai_compatible -LlmBaseUrl 'https://llm.example/v1' -LlmModel 'qwen/qwen3-32b'
+$names = @($global:DeployTestapp.properties.template.containers[0].env | ForEach-Object name)
+if ($names -contains 'LLM_REASONING_EFFORT') { throw "The previous service's reasoning effort was kept" }
+if (-not ($names -contains 'LLM_API_KEY')) { throw 'The Copilot key was lost' }
+Reset-DeploymentFixture
+& $deployment -ExpectedCommit $global:DeployTestcommit -LlmReasoningEffort none
+$effort = @($global:DeployTestapp.properties.template.containers[0].env | Where-Object name -EQ LLM_REASONING_EFFORT)
+if ($effort.Count -ne 1 -or $effort[0].value -ne 'none') { throw 'The reasoning effort was not set' }
+Write-Host 'Copilot service switch tests passed (offline).'
+

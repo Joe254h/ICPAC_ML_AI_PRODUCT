@@ -531,13 +531,16 @@ def test_status_asks_the_ai_service_to_answer_not_only_to_be_reached(env, monkey
         ),
     )
     refusal = {"error": {"message": "The Gemini API free tier is not available for this project."}}
-    monkeypatch.setattr(
-        health.httpx,
-        "post",
-        lambda url, headers, json, timeout: httpx.Response(
-            429, json=refusal, request=httpx.Request("POST", url)
-        ),
-    )
+    sent = []
+
+    def post(url, headers, json, timeout):
+        sent.append(json)
+        return httpx.Response(429, json=refusal, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(health.httpx, "post", post)
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "low")
     status = env.client.get("/health").json()["components"]["Copilot language model"]
     assert status.startswith("Warning · reachable but does not answer")
     assert "free tier is not available" in status
+    # The check is asked the way questions are, reasoning effort included.
+    assert sent[0]["reasoning_effort"] == "low" and sent[0]["max_tokens"] == 1

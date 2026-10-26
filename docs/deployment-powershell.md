@@ -173,10 +173,22 @@ secret `llm-api-key` and never printed:
   -LlmProvider anthropic -SetLlmKey
 ```
 
-Any other OpenAI-compatible service (for example Groq, see [groq-setup.md](groq-setup.md))
-takes the same three parameters. With `openai_compatible` the script also sets
-`LLM_TOOLS=true`, so the model answers through the tools. Leave the parameters out to keep
-the current service.
+Any other OpenAI-compatible service takes the same three parameters, for example an open
+Qwen model on Groq's free plan (take the exact model name from Groq's Models page):
+
+```powershell
+& $Script -ExpectedCommit $Commit -ResourceGroup icpac -AppName icpac-api -ReleaseMode evaluation -AccessMode public `
+  -LlmProvider openai_compatible -LlmBaseUrl 'https://api.groq.com/openai/v1' `
+  -LlmModel 'qwen/qwen3-32b' -LlmReasoningEffort none -SetLlmKey
+```
+
+With `openai_compatible` the script also sets `LLM_TOOLS=true`, so the model answers through
+the tools. A new `-LlmBaseUrl` drops the previous service's reasoning effort and fallback
+models (a value one service needs, such as Gemini's `low`, another can refuse);
+`-LlmReasoningEffort` sets it again (`off` removes it). Leave the parameters out to keep the
+current service. **System status → Copilot language model** asks the service to answer
+the way each question does and quotes its reason when it refuses (for example, no credits
+left).
 
 ## Further rainfall estimates
 
