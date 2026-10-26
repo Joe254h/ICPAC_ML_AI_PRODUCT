@@ -16,7 +16,9 @@ function az {
         $bodyIndex = [Array]::IndexOf($args, '--body') + 1
         $payload = Get-Content -Raw -LiteralPath $args[$bodyIndex].Substring(1) | ConvertFrom-Json
         if ($payload.properties.template.scale.minReplicas -ne 1) { throw 'Worker can scale to zero' }
-        if ($payload.properties.template.containers[0].image -notmatch '@sha256:') { throw 'Moving image tag' }
+        $sent = $payload.properties.template.containers[0].image
+        # A digest, or the exact commit's tag that the script has just resolved to it.
+        if ($sent -notmatch '^ghcr\.io/joe254h/icpac-backend@sha256:[0-9a-f]{64}$' -and $sent -ne ('ghcr.io/joe254h/icpac-backend:' + $global:DeployTestcommit)) { throw 'Moving image tag' }
         if (-not ($payload.properties.template.containers[0].env | Where-Object name -EQ LLM_API_KEY)) { throw 'Existing Copilot setting lost' }
         if ($payload.properties.configuration.ingress.PSObject.Properties.Name -contains 'fqdn') { throw 'Read-only ingress field was sent back' }
         $global:DeployTestapp.properties.template = $payload.properties.template
@@ -88,10 +90,10 @@ Reset-DeploymentFixture
 if ($global:DeployTestwrites) { throw 'Plan mutated Azure' }
 & $deployment -ExpectedCommit $global:DeployTestcommit
 if ($global:DeployTestwrites -ne 1) { throw 'Expected one deployment write' }
-# Express applies new settings only with a new image reference: the same image is pinned
-# again by its commit tag and the same digest.
-$redeployed = 'ghcr.io/joe254h/icpac-backend:' + $global:DeployTestcommit + '@sha256:' + ('b' * 64)
-if ($global:DeployTestapp.properties.template.containers[0].image -ne $redeployed) { throw 'Redeploying the same image did not change its pinned reference' }
+# Express applies new settings only with a new image reference: the same image is deployed
+# again by its commit tag.
+$redeployed = 'ghcr.io/joe254h/icpac-backend:' + $global:DeployTestcommit
+if ($global:DeployTestapp.properties.template.containers[0].image -ne $redeployed) { throw 'Redeploying the same image did not change its reference' }
 $global:DeployTestbadCI = $true
 try { & $deployment -ExpectedCommit $global:DeployTestcommit; throw 'Bad CI accepted' }
 catch { if ($_.Exception.Message -eq 'Bad CI accepted') { throw } }
@@ -206,3 +208,12 @@ try { & $deployment -ExpectedCommit $global:DeployTestcommit -EnableAutomation -
 catch { if ($_.Exception.Message -ne 'Verification cannot change the automation schedule.') { throw } }
 if ($global:DeployTestwrites -or $global:DeployTestsecretReads) { throw 'Conflicting automation options touched Azure' }
 Write-Host 'PowerShell schedule guards passed (offline).'
+# A reference holding both a tag and the digest (which failed to provision) is replaced by
+# the commit tag, and the commit tag by the digest.
+Reset-DeploymentFixture
+$global:DeployTestapp.properties.template.containers[0].image = 'ghcr.io/joe254h/icpac-backend:' + $global:DeployTestcommit + '@sha256:' + ('b' * 64)
+& $deployment -ExpectedCommit $global:DeployTestcommit
+if ($global:DeployTestapp.properties.template.containers[0].image -ne ('ghcr.io/joe254h/icpac-backend:' + $global:DeployTestcommit)) { throw 'A tag-and-digest reference was not replaced by the commit tag' }
+& $deployment -ExpectedCommit $global:DeployTestcommit
+if ($global:DeployTestapp.properties.template.containers[0].image -ne ('ghcr.io/joe254h/icpac-backend@sha256:' + ('b' * 64))) { throw 'Redeploying from the commit tag did not return to the digest' }
+Write-Host 'Image reference alternation tests passed (offline).'

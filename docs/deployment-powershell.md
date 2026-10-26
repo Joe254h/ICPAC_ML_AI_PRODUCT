@@ -192,10 +192,12 @@ the script again with `-SetEarthdataToken`.
 
 Express apps start a new replica only when the image reference changes; settings changed
 alone are saved but not applied. When the same commit is deployed again, the script
-therefore alternates between the digest reference and the commit tag pinned to the same
-digest (`:<commit>@sha256:…`), so new settings (access mode, Copilot service, tokens) take
-effect. Both forms run the identical image; the health check still requires the expected
-source commit.
+therefore alternates between the digest reference (`@sha256:…`) and the exact commit tag
+(`:<commit>`), which it has just resolved to that digest, so new settings (access mode,
+Copilot service, tokens) take effect. The health check still requires the expected source
+commit. A reference holding both a tag and a digest (`:<commit>@sha256:…`) failed to
+provision on this app and is never sent; a deployment left in that state is repaired by
+the next run, which switches to the commit tag.
 
 ## Scientific release remains evaluation
 

@@ -78,7 +78,7 @@ function Confirm-Deployment([switch]$Once) {
             if ($properties['runningStatus'] -ne 'Running') { $pending.Add('Express app is not Running') }
         }
         $containers = @($properties.template.containers)
-        if ($containers.Count -ne 1 -or $containers[0].image -notin @($image, $taggedImage)) { $pending.Add('configured image does not match the expected immutable digest') }
+        if ($containers.Count -ne 1 -or $containers[0].image -notin @($image, $commitImage)) { $pending.Add('configured image does not match the expected immutable digest') }
         if ($properties.template.scale.minReplicas -lt 1) { $pending.Add('worker minimum replicas is below one') }
         $fqdn = [string]$properties.configuration.ingress['fqdn']
         $health = $null
@@ -137,10 +137,12 @@ $manifest = Invoke-WebRequest "https://ghcr.io/v2/joe254h/icpac-backend/manifest
 $digest = [string](@($manifest.Headers['Docker-Content-Digest'])[0])
 if ($digest -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Registry did not return an immutable image digest.' }
 $image = "ghcr.io/joe254h/icpac-backend@$digest"
-# The same image, still pinned to its digest, with its source tag. Express apps start a
-# new replica only when the image reference changes (settings alone are saved but not
-# applied), so a redeployment of the same commit alternates between the two pinned forms.
-$taggedImage = "ghcr.io/joe254h/icpac-backend:${ExpectedCommit}@$digest"
+# The same image by its commit tag, which the registry resolved to $digest just above (the
+# publish workflow writes each commit tag once). Express apps start a new replica only when
+# the image reference changes (settings alone are saved but not applied), so a redeployment
+# of the same commit alternates between the digest and this tag. A reference holding both a
+# tag and a digest failed to provision on this app, so it is never sent.
+$commitImage = "ghcr.io/joe254h/icpac-backend:$ExpectedCommit"
 $app = Invoke-Azure @('containerapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroup)
 if ($app.properties.template.containers.Count -ne 1) { throw 'This script expects one API container.' }
 if ($VerifyOnly) {
@@ -254,7 +256,7 @@ if ($SetEarthdataToken) {
     Set-Private 'EARTHDATA_TOKEN' 'earthdata-token' $earthdata
 }
 $container = $app.properties.template.containers[0]
-$container.image = if ($container.image -eq $image) { $taggedImage } else { $image }
+$container.image = if ($container.image -ne $commitImage -and $container.image -like "*@$digest") { $commitImage } else { $image }
 $container.env = @($variables.Values)
 # The persistent worker needs a running replica even after the browser is closed.
 $app.properties.template.scale.minReplicas = 1
