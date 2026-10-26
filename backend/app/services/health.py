@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import time
 from datetime import date
 
 import anthropic
@@ -24,6 +25,41 @@ def model_label(model: str) -> str:
     return " ".join(
         part if part[:1].isdigit() else part.capitalize() for part in model.split("-")
     ).replace("Gpt", "GPT")
+
+
+#: The last real answer request to the Copilot's AI service and when: (seconds, error).
+_PROBE: dict[str, tuple[float, str | None]] = {}
+PROBE_SECONDS = 15 * 60
+
+
+def answer_probe(url: str, key: str | None, model: str) -> str | None:
+    """Whether the AI service answers a real one-word request, checked at most every 15
+    minutes. Reaching the service is not enough: a key without billing or quota is refused
+    only when it is asked to answer. Returns why it refused, or None."""
+    cached = _PROBE.get(url + model)
+    if cached and time.monotonic() - cached[0] < PROBE_SECONDS:
+        return cached[1]
+    error: str | None = None
+    try:
+        response = httpx.post(
+            url + "/chat/completions",
+            headers={"Authorization": f"Bearer {key}"} if key else {},
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": "Reply with OK."}],
+                "max_tokens": 1,
+            },
+            timeout=10,
+        )
+        if response.is_error:
+            said = provider_message(response.text)
+            error = explain_refusal(response.status_code, response.text) + (
+                f". The AI service said: “{said}”" if said else ""
+            )
+    except httpx.HTTPError as exc:
+        error = f"not reachable ({type(exc).__name__})"
+    _PROBE[url + model] = (time.monotonic(), error)
+    return error
 
 
 def system_health(platform) -> dict:
@@ -100,13 +136,20 @@ def system_health(platform) -> dict:
         if dekads
         else "Warning · no CHIRPS dekad downloaded yet"
     )
-    tamsat = MonitoringService(platform, "tamsat").dekads()
-    components["TAMSAT monitoring"] = (
-        "Healthy · latest dekad "
-        f"{date.fromisoformat(tamsat[0]['start']).day}–{_day(tamsat[0]['end'])}"
-        if tamsat
-        else "Warning · no TAMSAT dekad downloaded yet"
-    )
+    from backend.app.services.monitoring import NAMES
+
+    for source in ("tamsat", "arc2", "rfe2", "imerg"):
+        monitor = MonitoringService(platform, source)
+        held = monitor.dekads()
+        check = monitor.last_check() or {}
+        components[f"{NAMES[source]} monitoring"] = (
+            "Healthy · latest dekad "
+            f"{date.fromisoformat(held[0]['start']).day}–{_day(held[0]['end'])}"
+            if held
+            else f"Warning · {check['reason']}"
+            if check.get("status") == "failed" and check.get("reason")
+            else f"Warning · no {NAMES[source]} dekad downloaded yet"
+        )
     from backend.app.services.bulletin_mail import email_status
 
     email = email_status()
@@ -160,7 +203,22 @@ def system_health(platform) -> dict:
                 )
             else:
                 response.raise_for_status()
-                components["Copilot language model"] = "Healthy · endpoint reachable"
+                from chatbot.agent import LAST_OUTCOME as last
+
+                # A question answered (or refused) since start-up says more than a probe.
+                refused = (
+                    None
+                    if last
+                    else answer_probe(
+                        url.removesuffix("/models"), key, os.getenv("LLM_MODEL", cfg["model"])
+                    )
+                )
+                components["Copilot language model"] = (
+                    "Healthy · answers questions"
+                    if refused is None
+                    else f"Warning · reachable but does not answer: {refused}; the Copilot "
+                    "gives checked fixed answers"
+                )
     except (anthropic.APIError, httpx.HTTPError, ValueError):
         components["Copilot language model"] = (
             "Unavailable · not reachable: the Copilot gives checked fixed answers"

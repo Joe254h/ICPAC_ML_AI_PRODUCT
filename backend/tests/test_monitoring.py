@@ -220,7 +220,7 @@ def test_tamsat_dekads_are_monitored_next_to_chirps(env, monkeypatch):
     assert [d["dekad"] for d in client.get("/monitoring/dekads?source=tamsat").json()] == [
         newest.id
     ]
-    assert client.get("/monitoring/dekads/latest?source=rfe2").status_code == 422
+    assert client.get("/monitoring/dekads/latest?source=gsmap").status_code == 422
 
 
 def test_tamsat_files_are_checked(tmp_path):

@@ -7,6 +7,9 @@ Run in Azure Cloud Shell PowerShell. Existing environment variables, secrets and
 are preserved. Missing durable storage or staff credentials stop deployment. No credentials
 are printed or written into this repository. Keep a database backup before updating.
 Use -VerifyOnly to check an existing deployment without reading secrets or changing Azure.
+Use -LlmProvider, -LlmBaseUrl and -LlmModel, with -SetLlmKey to enter its key privately, to
+change the Copilot's AI service; leave them out to keep the current one.
+Use -SetEarthdataToken to enter a NASA Earthdata token privately for the GPM IMERG downloads.
 #>
 [CmdletBinding()]
 param(
@@ -18,6 +21,11 @@ param(
     [switch]$EnableAutomation,
     [switch]$DisableAutomation,
     [ValidateRange(0, 23)][int]$AutomationHourUtc = 10,
+    [ValidateSet('openai_compatible', 'anthropic')][string]$LlmProvider,
+    [ValidatePattern('^https://')][string]$LlmBaseUrl,
+    [ValidatePattern('^[A-Za-z0-9._:/-]{2,100}$')][string]$LlmModel,
+    [switch]$SetLlmKey,
+    [switch]$SetEarthdataToken,
     [switch]$PlanOnly,
     [switch]$VerifyOnly
 )
@@ -27,6 +35,7 @@ if ($PlanOnly -and $VerifyOnly) { throw 'Choose either -PlanOnly or -VerifyOnly.
 if ($EnableAutomation -and $DisableAutomation) { throw 'Choose either -EnableAutomation or -DisableAutomation.' }
 if ($VerifyOnly -and ($EnableAutomation -or $DisableAutomation)) { throw 'Verification cannot change the automation schedule.' }
 if ($AccessMode -eq 'public' -and $ReleaseMode -ne 'evaluation') { throw 'Public access requires an evaluation release.' }
+if ($VerifyOnly -and ($LlmProvider -or $LlmBaseUrl -or $LlmModel -or $SetLlmKey -or $SetEarthdataToken)) { throw 'Verification cannot change settings.' }
 
 function Invoke-Azure([string[]]$Arguments) {
     $result = & az @Arguments --only-show-errors --output json
@@ -69,7 +78,7 @@ function Confirm-Deployment([switch]$Once) {
             if ($properties['runningStatus'] -ne 'Running') { $pending.Add('Express app is not Running') }
         }
         $containers = @($properties.template.containers)
-        if ($containers.Count -ne 1 -or $containers[0].image -ne $image) { $pending.Add('configured image does not match the expected immutable digest') }
+        if ($containers.Count -ne 1 -or $containers[0].image -notin @($image, $taggedImage)) { $pending.Add('configured image does not match the expected immutable digest') }
         if ($properties.template.scale.minReplicas -lt 1) { $pending.Add('worker minimum replicas is below one') }
         $fqdn = [string]$properties.configuration.ingress['fqdn']
         $health = $null
@@ -128,6 +137,11 @@ $manifest = Invoke-WebRequest "https://ghcr.io/v2/joe254h/icpac-backend/manifest
 $digest = [string](@($manifest.Headers['Docker-Content-Digest'])[0])
 if ($digest -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Registry did not return an immutable image digest.' }
 $image = "ghcr.io/joe254h/icpac-backend@$digest"
+# The same image by its source tag (the tag the digest above was read from). Express apps
+# start a new replica only when the image reference changes (settings alone are saved but
+# not applied), so a redeployment of the same commit alternates between the two forms; the
+# health check below confirms the running source commit either way.
+$taggedImage = "ghcr.io/joe254h/icpac-backend:$ExpectedCommit"
 $app = Invoke-Azure @('containerapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroup)
 if ($app.properties.template.containers.Count -ne 1) { throw 'This script expects one API container.' }
 if ($VerifyOnly) {
@@ -222,8 +236,26 @@ if (-not (Get-Setting 'EMAIL_ACTION_SECRET')) {
     if ($PlanOnly) { throw 'EMAIL_ACTION_SECRET is missing; rerun without -PlanOnly to generate it.' }
     Set-Private 'EMAIL_ACTION_SECRET' 'email-action-secret' ([Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(48)))
 }
+if ($LlmProvider) { Set-Value 'LLM_PROVIDER' $LlmProvider }
+# An OpenAI-compatible service answers through the Copilot's tools (forecast data, maps,
+# verification) rather than only ordering the checked sentences.
+if ($LlmProvider -eq 'openai_compatible') { Set-Value 'LLM_TOOLS' 'true' }
+if ($LlmBaseUrl) { Set-Value 'LLM_BASE_URL' $LlmBaseUrl.TrimEnd('/') }
+if ($LlmModel) { Set-Value 'LLM_MODEL' $LlmModel }
+if ($SetLlmKey) {
+    if ($PlanOnly) { throw '-SetLlmKey asks for the key; run it without -PlanOnly.' }
+    $llmKey = Read-Private "Paste the Copilot's AI service API key (hidden)"
+    if ($llmKey.Length -lt 20) { throw 'That does not look like an API key; nothing was changed.' }
+    Set-Private 'LLM_API_KEY' 'llm-api-key' $llmKey
+}
+if ($SetEarthdataToken) {
+    if ($PlanOnly) { throw '-SetEarthdataToken asks for the token; run it without -PlanOnly.' }
+    $earthdata = Read-Private 'Paste your NASA Earthdata token (urs.earthdata.nasa.gov, Generate Token; hidden)'
+    if ($earthdata.Length -lt 40) { throw 'That does not look like an Earthdata token; nothing was changed.' }
+    Set-Private 'EARTHDATA_TOKEN' 'earthdata-token' $earthdata
+}
 $container = $app.properties.template.containers[0]
-$container.image = $image
+$container.image = if ($container.image -eq $image) { $taggedImage } else { $image }
 $container.env = @($variables.Values)
 # The persistent worker needs a running replica even after the browser is closed.
 $app.properties.template.scale.minReplicas = 1

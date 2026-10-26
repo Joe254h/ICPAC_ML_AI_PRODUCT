@@ -79,9 +79,10 @@ export const MENUS: Menu[] = [
 ];
 
 /** Planned observation sources: listed now, readers come later. */
-export const PLANNED_SOURCES = [
-  { id: "rfe2", title: "RFE 2.0" },
+/** The further rainfall estimates summed from daily files. */
+export const DAILY_SOURCES = [
   { id: "arc2", title: "ARC 2.0" },
+  { id: "rfe2", title: "RFE 2.0" },
   { id: "imerg", title: "GPM IMERG" },
 ] as const;
 
@@ -239,13 +240,12 @@ export const ROUTES: Route[] = [
     page: "source",
     param: "tamsat",
   },
-  ...PLANNED_SOURCES.map((source) => ({
+  ...DAILY_SOURCES.map((source) => ({
     path: "data/" + source.id,
     title: source.title,
     menu: "Data & Tools" as const,
     page: "source" as const,
     param: source.id,
-    soon: true,
   })),
   {
     path: "data/runs",

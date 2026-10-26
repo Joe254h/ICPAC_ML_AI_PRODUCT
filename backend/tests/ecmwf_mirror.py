@@ -292,6 +292,57 @@ def build_tamsat_dekad(root: Path, today: date) -> Path:
     return path
 
 
+def build_daily_references(root: Path, days: list[date]) -> None:
+    """ARC 2.0 and RFE 2.0 (zipped CPC GeoTIFFs) and GPM IMERG Late Run (NetCDF4 in month
+    folders), daily at 0.1 degree over the region (the real files cover Africa or the globe),
+    for ``days``, laid out as on their servers under /arc2, /rfe2 and /imerg."""
+    import io
+    import zipfile
+
+    import tifffile
+    import xarray as xr
+
+    lat = np.round(np.arange(25.95, -14.0, -0.1), 2)  # north first, as CPC
+    lon = np.round(np.arange(19.05, 54.0, 0.1), 2)
+    pattern = 2.0 + 2.0 * np.cos(np.deg2rad(lat * 6))[:, None] * (1 + np.sin(np.deg2rad(lon * 9)))
+    pattern = np.clip(pattern, 0.0, None)
+    geokeys = (1, 1, 0, 3, 1024, 0, 1, 2, 1025, 0, 1, 1, 2048, 0, 1, 4326)
+    for day in sorted(days):
+        # Each estimate a little drier or wetter than CHIRPS, as real estimates differ.
+        for source, prefix, scale in (("arc2", "africa_arc", 0.85), ("rfe2", "africa_rfe", 1.1)):
+            values = np.round(pattern * wetness(day) * scale * 2) / 2
+            tif = io.BytesIO()
+            tifffile.imwrite(
+                tif,
+                values.astype(np.float32),
+                compression="zlib",
+                extratags=[
+                    (33550, 12, 3, (0.1, 0.1, 0.0), False),
+                    (33922, 12, 6, (0.0, 0.0, 0.0, 19.0, 26.0, 0.0), False),
+                    (34735, 3, len(geokeys), geokeys, False),
+                    (42113, 2, 0, "-999", False),
+                ],
+            )
+            folder = root / source
+            folder.mkdir(parents=True, exist_ok=True)
+            name = f"{prefix}.{day:%Y%m%d}.tif"
+            with zipfile.ZipFile(folder / f"{name}.zip", "w", zipfile.ZIP_DEFLATED) as out:
+                out.writestr(name, tif.getvalue())
+        folder = root / f"imerg/{day.year}/{day.month:02d}"
+        folder.mkdir(parents=True, exist_ok=True)
+        values = np.round(pattern[::-1].T * wetness(day) * 1.2 * 2) / 2
+        xr.Dataset(
+            {
+                "precipitation": (
+                    ("time", "lon", "lat"),
+                    values[None].astype(np.float32),
+                    {"units": "mm/day"},
+                )
+            },
+            coords={"time": [np.datetime64(day.isoformat())], "lon": lon, "lat": lat[::-1]},
+        ).to_netcdf(folder / f"3B-DAY-L.MS.MRG.3IMERG.{day:%Y%m%d}-S000000-E235959.V07B.nc4")
+
+
 class _Quiet(SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -341,9 +392,11 @@ PAST_WEEKS = 4
 
 def main() -> None:
     """Build and serve a mirror holding yesterday's run, the newest a forecaster would find,
-    the newest ended CHIRPS and TAMSAT dekads, and, for past weeks, the archived runs and
-    the CHIRPS days that verify them (browser tests point ECMWF_OPENDATA_MIRRORS at the
-    mirror, CHIRPS_BASE_URL at its /chc folder and TAMSAT_BASE_URL at /tamsat)."""
+    the newest ended dekads of CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG, and, for past
+    weeks, the archived runs and the daily observations that verify them (browser tests
+    point ECMWF_OPENDATA_MIRRORS at the mirror, CHIRPS_BASE_URL at its /chc folder,
+    TAMSAT_BASE_URL at /tamsat, and ARC2_BASE_URL, RFE2_BASE_URL and IMERG_BASE_URL at
+    /arc2, /rfe2 and /imerg)."""
     parser = argparse.ArgumentParser(description=main.__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8998)
@@ -367,6 +420,12 @@ def main() -> None:
     build_chirps_days(args.root, past[-1] + timedelta(days=7), past[0] + timedelta(days=13))
     build_chirps_dekad(args.root, day + timedelta(days=1))
     build_tamsat_dekad(args.root, day + timedelta(days=1))
+    from climate_engine.inputs import daily_references
+
+    newest = daily_references.ended_dekads("arc2", day + timedelta(days=1))[0]
+    first, last = past[-1] + timedelta(days=7), past[0] + timedelta(days=13)
+    weeks = [first + timedelta(days=n) for n in range((last - first).days + 1)]
+    build_daily_references(args.root, sorted(set(daily_references.dekad_days(newest) + weeks)))
     handler = partial(_RangeHandler, directory=str(args.root))
     print(f"ECMWF mirror of the {day} 00 UTC run on http://127.0.0.1:{args.port}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", args.port), handler).serve_forever()

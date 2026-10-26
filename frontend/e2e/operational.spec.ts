@@ -71,7 +71,7 @@ test("a header menu opens on click and its pages are links", async ({
   await expect(tools).toHaveAttribute("aria-expanded", "false");
 });
 
-test("rainfall monitoring shows the newest CHIRPS and TAMSAT dekads", async ({
+test("rainfall monitoring shows the newest dekad of all five estimates", async ({
   page,
 }) => {
   await page.goto("/monitoring");
@@ -87,7 +87,7 @@ test("rainfall monitoring shows the newest CHIRPS and TAMSAT dekads", async ({
   await expect(
     page.getByRole("heading", { name: "Percent of normal" }),
   ).toBeVisible();
-  // TAMSAT, the second estimate, is one switch away and compared with CHIRPS.
+  // TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG are one switch away, compared with CHIRPS.
   const estimate = page.getByRole("group", { name: "Rainfall estimate" });
   await estimate.getByRole("button", { name: "TAMSAT" }).click();
   await expect(page).toHaveURL(/source=tamsat/);
@@ -96,9 +96,22 @@ test("rainfall monitoring shows the newest CHIRPS and TAMSAT dekads", async ({
     page.locator("tbody tr").filter({ hasText: "Kenya" }).first(),
   ).toBeVisible();
   const compare = page.locator(".card").filter({
-    has: page.getByRole("heading", { name: "CHIRPS and TAMSAT" }),
+    has: page.getByRole("heading", { name: "The estimates compared" }),
   });
-  await expect(compare.locator("tbody tr")).toHaveCount(2);
+  await expect(compare.locator("tbody tr")).toHaveCount(5);
+  // The daily estimates are summed into the same dekad.
+  for (const name of ["ARC 2.0", "RFE 2.0", "GPM IMERG"])
+    await expect(
+      compare.locator("tbody tr").filter({ hasText: name }),
+    ).toContainText("%");
+  await estimate.getByRole("button", { name: "GPM IMERG" }).click();
+  await expect(page).toHaveURL(/source=imerg/);
+  await expect(
+    page.getByText(/IMERG Late Run daily totals/).first(),
+  ).toBeVisible();
+  await expect(
+    page.locator("tbody tr").filter({ hasText: "Kenya" }).first(),
+  ).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await noHorizontalScroll(page);
 });
@@ -109,7 +122,9 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   test.setTimeout(300_000);
   await page.goto("/maps/correlation");
   await expect(
-    page.getByText(/needs at least 3 verified forecasts; 0 are verified/),
+    page.getByText(
+      /needs at least 3 verified forecasts of the model in use; 0 are verified/,
+    ),
   ).toBeVisible();
   await page
     .getByRole("button", { name: "Forecast and verify past weeks" })
@@ -123,6 +138,11 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   const stat = page.locator(".stat").filter({ hasText: "Verified forecasts" });
   await expect(stat.locator(".value")).toHaveText("4");
   await expect(page.getByRole("cell", { name: /SON/ }).first()).toBeVisible();
+  // The latest verified week is also scored against ARC 2.0, RFE 2.0 and GPM IMERG.
+  const others = page.locator("tbody tr");
+  await expect(others.filter({ hasText: "CHIRPS (reference)" })).toBeVisible();
+  for (const name of ["ARC 2.0", "RFE 2.0", "GPM IMERG"])
+    await expect(others.filter({ hasText: name }).first()).toContainText(" mm");
   // This week's forecast is still the current one.
   await page.goto("/forecasts");
   await expect(page.getByText("Not verified yet.")).toBeVisible();
@@ -143,6 +163,7 @@ test("no page shows code, identifiers or checksums", async ({ page }) => {
     "/maps/bias",
     "/monitoring",
     "/monitoring?source=tamsat",
+    "/monitoring?source=arc2",
     "/verification",
     "/verification/experimental",
     "/bulletin",
@@ -152,6 +173,9 @@ test("no page shows code, identifiers or checksums", async ({ page }) => {
     "/data/ecmwf",
     "/data/chirps",
     "/data/tamsat",
+    "/data/arc2",
+    "/data/rfe2",
+    "/data/imerg",
     "/data/runs",
     "/system",
     "/copilot",
@@ -209,7 +233,7 @@ test("a country page has its own map and figures", async ({ page }) => {
   await mapLoaded(page, /Kenya/);
 });
 
-test("data sources: ECMWF, CHIRPS and TAMSAT are fetched, the others come later", async ({
+test("data sources: every source is fetched and has its page", async ({
   page,
 }) => {
   await page.goto("/data/ecmwf");
@@ -228,11 +252,19 @@ test("data sources: ECMWF, CHIRPS and TAMSAT are fetched, the others come later"
     page.getByRole("heading", { name: "Downloaded dekads" }),
   ).toBeVisible();
   await expect(page.locator("tbody tr")).toHaveCount(1);
-  await page.goto("/data/arc2");
-  await expect(
-    page.getByRole("heading", { name: "ARC 2.0 reader" }),
-  ).toBeVisible();
-  await expect(page.getByText("In progress", { exact: true })).toBeVisible();
+  for (const [path, title] of [
+    ["/data/arc2", "ARC 2.0"],
+    ["/data/rfe2", "RFE 2.0"],
+    ["/data/imerg", "GPM IMERG Late Run"],
+  ]) {
+    await page.goto(path);
+    await expect(
+      page.getByRole("heading", { level: 1, name: title }),
+    ).toBeVisible();
+    await expect(page.locator("tbody tr")).toHaveCount(1);
+  }
+  await page.goto("/data");
+  await expect(page.getByText("Coming later")).toHaveCount(0);
 });
 
 test("system status reports the downloaded input and the issued forecast", async ({
@@ -248,5 +280,8 @@ test("system status reports the downloaded input and the issued forecast", async
   await expect(row("MBC + AI/ML forecast")).toContainText("In progress");
   await expect(row("CHIRPS monitoring")).toContainText("Healthy");
   await expect(row("TAMSAT monitoring")).toContainText("Healthy");
+  await expect(row("ARC 2.0 monitoring")).toContainText("Healthy");
+  await expect(row("RFE 2.0 monitoring")).toContainText("Healthy");
+  await expect(row("GPM IMERG monitoring")).toContainText("Healthy");
   await expect(row("Bulletin email")).toContainText("Healthy");
 });

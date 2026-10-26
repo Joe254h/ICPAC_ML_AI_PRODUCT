@@ -77,7 +77,7 @@ The list shown in the interface comes from `config/data_sources.yaml`.
 | CHIRPS v2.0 daily | verification | in use |
 | CHIRPS v2.0 dekadal (preliminary) | rainfall monitoring | in use |
 | TAMSAT v3.1 dekadal | rainfall monitoring, next to CHIRPS | in use |
-| RFE 2.0, ARC 2.0, GPM IMERG | further verification references | coming later: listed, no reader yet, nothing is computed from them |
+| ARC 2.0, RFE 2.0, GPM IMERG Late Run (daily) | rainfall monitoring; each verified forecast is also scored against them | in use (IMERG needs a NASA Earthdata token) |
 
 ### ECMWF Open Data
 
@@ -159,6 +159,33 @@ firm, where they differ it is uncertain. CHIRPS stays the verification reference
   (`gws-access.jasmin.ac.uk/public/tamsat/rfe/data/v3.1`); `TAMSAT_BASE_URL` points at
   another server laid out the same way. If TAMSAT reorganises its folders, set it there;
   the System page shows "TAMSAT monitoring" with the latest dekad held.
+
+### ARC 2.0, RFE 2.0 and GPM IMERG
+
+Three further daily estimates (`climate_engine/inputs/daily_references.py`), all at 0.1°:
+NOAA CPC's ARC 2.0 and RFE 2.0 (one zipped GeoTIFF a day for Africa) and NASA's GPM IMERG
+Late Run (one NetCDF4 a day, globally, from GES DISC). CHIRPS stays the reference of record.
+
+* Each day is downloaded once and kept under `DATA_ROOT/daily`, so a dekad and a forecast
+  week that share days read them once. Every file is checked: georeferenced (GeoTIFF tags,
+  or the archive's world file), on its 0.1° grid, daily rainfall between 0 and 1,500 mm;
+  other cells are missing and stay missing. Days are summed, cropped to the CHIRPS box and
+  interpolated bilinearly to the 0.05° grid, as TAMSAT is.
+* Monitoring: the update (`update_chirps`) sums the newest dekad whose every day each
+  source should have published (two days' latency), else the dekad before. The outcome of
+  every source's check, with why there is no new dekad, is kept and shown on its data
+  page, the Monitoring page and System status. One source's failure never holds up another;
+  a CHIRPS failure still fails the update, after the others have had their turn.
+* Comparison: each pass of `verify_due` (and the past-weeks and single-forecast
+  verifications) scores the newest verified forecasts against the seven days of their week
+  from each source, with the same metrics as the CHIRPS verification, recorded apart
+  (`/forecasts/<id>/references`). A comparison is made once; a source not published yet
+  or not configured is recorded with why and tried again in the next pass.
+* GPM IMERG downloads carry a NASA Earthdata token (`EARTHDATA_TOKEN`, an app secret; see
+  [deployment-powershell.md](deployment-powershell.md)). The day's file name, with its
+  version, is read from the month's listing.
+* `ARC2_BASE_URL`, `RFE2_BASE_URL` and `IMERG_BASE_URL` point at other servers laid out the
+  same way. Percent of normal is shown from CHIRPS only.
 
 ## Bulletin approval by email
 

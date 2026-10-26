@@ -414,11 +414,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 <small>IGAD Climate Prediction and Applications Centre</small>
               </div>
             </Link>
-            <p>
-              Week-2 (days 8–14) rainfall forecasts for the eleven member
-              states: the ECMWF ensemble, bias-corrected by ICPAC and verified
-              against CHIRPS.
-            </p>
           </div>
           <div>
             <h4>Forecasts</h4>
@@ -452,7 +447,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           </span>
           <span>
             Forecast data: ECMWF Open Data (CC BY 4.0) · Observations: CHIRPS,
-            TAMSAT
+            TAMSAT, ARC 2.0, RFE 2.0, GPM IMERG
           </span>
         </div>
       </footer>

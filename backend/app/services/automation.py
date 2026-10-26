@@ -114,7 +114,8 @@ class AutomationService:
             ),
             "observations": (
                 "partial",
-                "CHIRPS and TAMSAT; ERA5 requires an approved CDS request and server credentials.",
+                "CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG; ERA5 requires an approved "
+                "CDS request and server credentials.",
             ),
             "quality": (
                 "available",
@@ -133,8 +134,15 @@ class AutomationService:
                 "Authoritative ICPAC mask and country grid are used.",
             ),
             "predictors": (
-                "ready" if hybrid["status"] == "available" else "blocked",
-                hybrid.get("reason") or "Frozen feature order is enforced.",
+                "available"
+                if "hybrid" in layers
+                else "ready"
+                if hybrid["status"] == "available"
+                else "blocked",
+                "The model's predictors are built in the frozen training order, after every "
+                "input check."
+                if "hybrid" in layers
+                else hybrid.get("reason") or "Frozen feature order is enforced.",
             ),
             "correction": (
                 "available" if "mbc" in layers else "ready",
@@ -142,12 +150,19 @@ class AutomationService:
             ),
             "inference": (
                 "available" if "hybrid" in layers else "blocked",
-                "A registered final model is not promoted automatically. "
+                f"The MBC + AI/ML layer of the latest forecast was produced by "
+                f"{(current_record(self.platform) or {}).get('model_name') or 'the model in use'}; "
+                "a newly registered model is never used without a reviewer's activation."
+                if "hybrid" in layers
+                else "A registered final model is not promoted automatically. "
                 + (hybrid.get("reason") or "Await a successful hybrid forecast."),
             ),
             "comparison": (
                 "available" if "hybrid" in layers else "partial",
-                "Compare available raw/MBC layers; hybrid comparison waits for a hybrid run.",
+                "Raw ECMWF, MBC and MBC + AI/ML are compared in every forecast and verified "
+                "against CHIRPS."
+                if "hybrid" in layers
+                else "Compare available raw/MBC layers; hybrid comparison waits for a hybrid run.",
             ),
             "verification": (
                 "available" if verified else "waiting",

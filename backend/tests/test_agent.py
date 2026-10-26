@@ -512,3 +512,32 @@ def test_a_key_problem_is_not_retried_with_other_models(env, fast_maps, monkeypa
     )
     # The System page names the reason and what the AI service itself said.
     assert agent.LAST_OUTCOME["said"] == "API key not valid. Please pass a valid API key."
+
+
+def test_status_asks_the_ai_service_to_answer_not_only_to_be_reached(env, monkeypatch):
+    """A key without billing reaches the service but is refused when asked to answer."""
+    from backend.app.services import health
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example/v1")
+    monkeypatch.setenv("LLM_MODEL", "gemini-3.8-flash")
+    monkeypatch.setattr(agent, "LAST_OUTCOME", {})
+    monkeypatch.setattr(health, "_PROBE", {})
+    monkeypatch.setattr(
+        health.httpx,
+        "get",
+        lambda url, headers, timeout: httpx.Response(
+            200, json={"data": []}, request=httpx.Request("GET", url)
+        ),
+    )
+    refusal = {"error": {"message": "The Gemini API free tier is not available for this project."}}
+    monkeypatch.setattr(
+        health.httpx,
+        "post",
+        lambda url, headers, json, timeout: httpx.Response(
+            429, json=refusal, request=httpx.Request("POST", url)
+        ),
+    )
+    status = env.client.get("/health").json()["components"]["Copilot language model"]
+    assert status.startswith("Warning · reachable but does not answer")
+    assert "free tier is not available" in status

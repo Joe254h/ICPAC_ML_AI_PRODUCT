@@ -95,6 +95,11 @@ def test_drafts_are_the_weekly_bulletin_of_the_latest_forecast(env, fast_maps, m
     assert published["status"] == "published"
     page = client.get(f"/bulletins/{draft['id']}/export").text
     assert "PUBLISHED by Joe254h" in page and 'class="chip approved">' in page
+    # The released Word bulletin has a clean page header: no draft or review label.
+    released = client.get(f"/bulletins/{draft['id']}/export?format=docx").content
+    header = part(released, "word/header1.xml")
+    assert not re.search(r"PUBLISHED|APPROVED|DRAFT|candidate model|review", header)
+    assert part(released, "word/document.xml") == part(word.content, "word/document.xml")
 
     revision = client.post(f"/bulletins/generate?parent_id={draft['id']}", json={}).json()
     assert revision["forecast_id"] == record["forecast_id"]

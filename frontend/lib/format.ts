@@ -145,3 +145,9 @@ export function versionLabel(version: string): string {
 export function sentence(text: string): string {
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
 }
+
+/** A recorded person. The public app's one-way visitor identities are never shown. */
+export function personName(actor?: string | null): string {
+  if (!actor) return "";
+  return actor.startsWith("visitor:") ? "Public visitor" : actor;
+}

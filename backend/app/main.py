@@ -46,6 +46,8 @@ handler.setFormatter(JSONFormatter())
 logging.getLogger("icpac").addHandler(handler)
 logging.getLogger("icpac").setLevel(logging.INFO)
 HEAVY_READ_SLOTS = threading.BoundedSemaphore(4)
+#: How long a map or export waits for a free slot before it is refused.
+HEAVY_READ_WAIT_SECONDS = 60.0
 
 
 def create_app(database_url: str | None = None) -> FastAPI:
@@ -88,7 +90,11 @@ def create_app(database_url: str | None = None) -> FastAPI:
             path.startswith("/verification/")
             or path.endswith(("/map", "/overlay", "/export", "/bulletin"))
         )
-        if heavy and not HEAVY_READ_SLOTS.acquire(blocking=False):
+        # Maps and exports wait up to a minute for a slot (a page asks for several at
+        # once) rather than failing; only a longer queue is refused.
+        if heavy and not await asyncio.to_thread(
+            HEAVY_READ_SLOTS.acquire, True, HEAVY_READ_WAIT_SECONDS
+        ):
             return JSONResponse(
                 status_code=429,
                 headers={"Retry-After": "5", "Cache-Control": "no-store"},

@@ -54,7 +54,7 @@ ACTIONS = {
     "run_forecast": "Run the Week-2 forecast",
     "verify_due": "Verify finished forecasts against CHIRPS",
     "verify_forecast": "Verify one forecast against CHIRPS",
-    "update_chirps": "Update the rainfall monitoring (CHIRPS and TAMSAT)",
+    "update_chirps": "Update the rainfall monitoring (CHIRPS and the further estimates)",
     "cycle": "Weekly cycle: download ECMWF, run the forecast, verify against CHIRPS",
     "end_to_end": "Connected forecast workflow: acquire, forecast, verify, map and prepare bulletin",
     "past_weeks": "Forecast and verify past weeks (ECMWF archive and CHIRPS)",
@@ -466,33 +466,38 @@ class OperationService:
             return {"forecast_id": forecast_id, "status": "already_verified"}
         self._log(operation_id, "Downloading CHIRPS for the forecast's week")
         result = self._forecasts().verify_with_chirps(forecast_id, body.actor)
+        self._compare_references(operation_id, [forecast_id], body.actor)
         return {"forecast_id": forecast_id, "season": result["season"]}
 
     def _update_chirps(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
-        from backend.app.services.monitoring import MonitoringService
+        """The newest dekad of every monitoring source. CHIRPS is the reference: its failure
+        fails the operation, after the other sources have had their turn."""
+        from backend.app.services.monitoring import NAMES, MonitoringService
 
-        self._log(operation_id, "Looking for the newest CHIRPS dekad")
-        result = MonitoringService(self.platform).update(body.actor)
-        self._log(
-            operation_id,
-            "Downloaded the newest CHIRPS dekad"
-            if result["new"]
-            else "The newest CHIRPS dekad is already held",
-        )
-        self._log(operation_id, "Looking for the newest TAMSAT dekad")
-        try:
-            other = MonitoringService(self.platform, "tamsat").update(body.actor)
-        except Exception as exc:  # TAMSAT never holds up CHIRPS
-            self._log(operation_id, f"TAMSAT could not be updated: {exc}")
-            result["tamsat"] = {"error": str(exc)}
-        else:
+        result: dict[str, Any] = {}
+        failed: Exception | None = None
+        for source, name in NAMES.items():
+            self._log(operation_id, f"Looking for the newest {name} dekad")
+            try:
+                found = MonitoringService(self.platform, source).check(body.actor)
+            except Exception as exc:  # one source never holds up the others
+                self._log(operation_id, f"{name} could not be updated: {exc}")
+                if source == "chirps":
+                    failed = exc
+                result[source] = {"error": str(exc)}
+                continue
             self._log(
                 operation_id,
-                "Downloaded the newest TAMSAT dekad"
-                if other["new"]
-                else "The newest TAMSAT dekad is already held",
+                f"Downloaded the newest {name} dekad"
+                if found["new"]
+                else f"The newest {name} dekad is already held",
             )
-            result["tamsat"] = other
+            if source == "chirps":
+                result.update(found)
+            else:
+                result[source] = found
+        if failed is not None:
+            raise failed
         return result
 
     def _past_weeks(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
@@ -588,7 +593,31 @@ class OperationService:
             f"{len(verified)} past weeks verified, {len(waiting)} waiting for CHIRPS, "
             f"{len(failed)} failed",
         )
-        return {"verified": verified, "waiting": waiting, "failed": failed}
+        compared = self._compare_references(operation_id, verified, body.actor)
+        return {"verified": verified, "waiting": waiting, "failed": failed, "compared": compared}
+
+    def _compare_references(
+        self, operation_id: str, forecast_ids: Sequence[str], actor: str
+    ) -> int:
+        """Score verified forecasts against ARC 2.0, RFE 2.0 and GPM IMERG as well; these
+        comparisons never hold up the CHIRPS verification."""
+        forecasts = self._forecasts()
+        compared = 0
+        for forecast_id in forecast_ids:
+            try:
+                compared += sum(
+                    c["status"] == "available"
+                    for c in forecasts.compare_references(forecast_id, actor)
+                )
+            except Exception as exc:
+                self._log(operation_id, f"A further comparison failed: {_plain(exc)}")
+        if forecast_ids:
+            self._log(
+                operation_id,
+                f"{compared} comparisons with ARC 2.0, RFE 2.0 and GPM IMERG held "
+                f"for {len(forecast_ids)} verified forecasts",
+            )
+        return compared
 
     def _cycle(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
         from climate_engine.inputs import ecmwf_opendata

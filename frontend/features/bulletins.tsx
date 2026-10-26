@@ -20,7 +20,7 @@ import {
 import type { Tone } from "@/components/ui";
 import type { PageProps } from "@/features/view";
 import { useActor } from "@/lib/actor";
-import { dateTime, day } from "@/lib/format";
+import { dateTime, day, personName } from "@/lib/format";
 import { mutate, request } from "@/services/api";
 import { useApi } from "@/services/hooks";
 import type { Bulletin, EmailNotice, EmailStatus } from "@/types/workflows";
@@ -64,7 +64,7 @@ function documentHeader(draft: Bulletin): string {
         part !== "forecaster review required",
     );
   return [
-    `${state} by ${review.actor} on ${day(review.timestamp)}`,
+    `${state} by ${personName(review.actor)} on ${day(review.timestamp)}`,
     ...scope,
   ].join(" · ");
 }
@@ -294,7 +294,7 @@ function Detail({
           items={[
             [
               "Created",
-              `${dateTime(draft.created_at)}${draft.created_by ? ` by ${draft.created_by}` : ""}`,
+              `${dateTime(draft.created_at)}${draft.created_by ? ` by ${personName(draft.created_by)}` : ""}`,
             ],
             [
               "Consistency",
@@ -327,7 +327,7 @@ function Detail({
                     <td className="strong">
                       {DECIDED[review.action] ?? review.action}
                     </td>
-                    <td>{review.actor}</td>
+                    <td>{personName(review.actor)}</td>
                     <td>{review.comment}</td>
                   </tr>
                 ))}

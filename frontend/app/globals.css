@@ -3051,8 +3051,19 @@ select.input,
   gap: 10px 18px;
   margin: 0 0 20px;
 }
+.source-bar .segmented {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
 .source-bar .segmented button {
   min-width: 96px;
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .source-bar .segmented button {
+    min-width: 0;
+    flex: 1 1 30%;
+  }
 }
 .source-bar-note {
   margin: 0;
@@ -3306,4 +3317,20 @@ ol.lifecycle li:not(:last-child)::after {
   content: "→";
   color: var(--muted);
   margin-left: 10px;
+}
+
+/* a text action inside a sentence */
+.link-button {
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--green-700);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link-button:hover {
+  color: var(--green-900);
 }

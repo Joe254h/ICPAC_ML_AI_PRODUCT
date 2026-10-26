@@ -1,5 +1,6 @@
 "use client";
-/** One data source: ECMWF ensemble, CHIRPS, TAMSAT, or a source that is coming later. */
+/** One data source: the ECMWF ensemble, CHIRPS, or a further rainfall estimate (TAMSAT,
+ * ARC 2.0, RFE 2.0, GPM IMERG). */
 import Link from "next/link";
 import { useState } from "react";
 import { CheckCircle2, Download, ExternalLink, RefreshCw } from "lucide-react";
@@ -7,7 +8,6 @@ import {
   Button,
   Card,
   ErrorState,
-  InProgress,
   KeyValues,
   LinkButton,
   Notice,
@@ -23,6 +23,7 @@ import {
   day,
   num,
   period,
+  personName,
   sentence,
   validDays,
   versionLabel,
@@ -149,7 +150,7 @@ function Readiness({
               [
                 "Real-time review",
                 ready.realtime_review
-                  ? `Confirmed by ${ready.realtime_review.actor}, ${dateTime(ready.realtime_review.timestamp)}`
+                  ? `Confirmed by ${personName(ready.realtime_review.actor)}, ${dateTime(ready.realtime_review.timestamp)}`
                   : model?.realtime_gate_from
                     ? "Not confirmed: runs from 2025 produce the AI/ML layer only after a reviewer confirms the real-time input"
                     : "Not required for this model",
@@ -313,7 +314,7 @@ function Readiness({
                 </td>
                 <td>
                   {rain.fetched_at
-                    ? `${dateTime(rain.fetched_at)} · ${rain.fetched_by ?? ""} · ${rain.mirror ? mirrorName(rain.mirror) : ""}${rain.bytes ? ` · ${(rain.bytes / 1e6).toFixed(1)} MB` : ""}`
+                    ? `${dateTime(rain.fetched_at)} · ${personName(rain.fetched_by)} · ${rain.mirror ? mirrorName(rain.mirror) : ""}${rain.bytes ? ` · ${(rain.bytes / 1e6).toFixed(1)} MB` : ""}`
                     : "—"}
                 </td>
               </tr>
@@ -541,7 +542,7 @@ function Ecmwf({ source }: { source?: DataSource }) {
                       {(row.grib_bytes / 1e6).toFixed(1)} MB
                     </td>
                     <td style={{ color: "var(--muted)" }}>
-                      {dateTime(row.fetched_at)} · {row.fetched_by}
+                      {dateTime(row.fetched_at)} · {personName(row.fetched_by)}
                     </td>
                   </tr>
                 ))}
@@ -630,7 +631,7 @@ function Chirps() {
                       ).toLocaleString("en-GB")}
                     </td>
                     <td style={{ color: "var(--muted)" }}>
-                      {dateTime(row.fetched_at)} · {row.fetched_by}
+                      {dateTime(row.fetched_at)} · {personName(row.fetched_by)}
                     </td>
                   </tr>
                 ))}
@@ -661,18 +662,151 @@ function Chirps() {
   );
 }
 
-function Tamsat() {
-  const dekads = useApi<Dekad[]>("/monitoring/dekads?source=tamsat");
-  const [actor] = useActor();
-  const { operation, error, running, start } = useOperation(() =>
-    dekads.reload(),
+type Monitored = "tamsat" | "arc2" | "rfe2" | "imerg";
+
+const DAILY_STEPS = (server: string) => [
+  `Each day of the dekad is downloaded once from ${server} and kept, so a later dekad or a forecast comparison reads it again from the service.`,
+  "Each file is checked: georeferenced, on its 0.1° grid, with daily rainfall between 0 and 1,500 mm. Missing cells stay missing, never filled.",
+  "The days are summed into the dekad, cut to Eastern Africa, interpolated to the 0.05° ICPAC grid and summarised by member state. A dekad is shown once all its days are published.",
+  "Each forecast verified against CHIRPS is also scored against the seven days of its Week-2 window from this estimate, the same way.",
+];
+
+const MONITORED: Record<
+  Monitored,
+  {
+    title: string;
+    crumb: string;
+    subtitle: string;
+    steps: string[];
+    use: [string, string][];
+  }
+> = {
+  tamsat: {
+    title: "TAMSAT v3.1",
+    crumb: "TAMSAT",
+    subtitle:
+      "A second observed-rainfall estimate for the monitoring: dekadal rainfall over Africa from Meteosat thermal-infrared imagery, calibrated against rain gauges, at 0.0375°.",
+    steps: [
+      "The month's folder on the TAMSAT server is listed and the newest dekad is downloaded once.",
+      "The file is checked: a rainfall field, dated inside the dekad, on TAMSAT's 0.0375° grid. Gap-filled rainfall is used where TAMSAT provides it.",
+      "It is cut to Eastern Africa, interpolated to the 0.05° ICPAC grid and summarised by member state.",
+    ],
+    use: [
+      ["Monitoring", "Dekad totals, next to CHIRPS"],
+      [
+        "Percent of normal",
+        "From CHIRPS; TAMSAT's own 1991–2020 normal is not held",
+      ],
+      ["Verification", "CHIRPS stays the reference"],
+      ["Licence", "CC BY 4.0, University of Reading"],
+    ],
+  },
+  arc2: {
+    title: "ARC 2.0",
+    crumb: "ARC 2.0",
+    subtitle:
+      "NOAA's African Rainfall Climatology: Meteosat infrared estimates merged with daily rain-gauge reports, one file a day at 0.1°, about two days after each day.",
+    steps: DAILY_STEPS("the NOAA Climate Prediction Center"),
+    use: [
+      ["Monitoring", "Dekad totals summed from the daily files"],
+      [
+        "Percent of normal",
+        "From CHIRPS; ARC 2.0's own 1991–2020 normal is not held",
+      ],
+      [
+        "Verification",
+        "CHIRPS stays the reference; verified forecasts are also compared with ARC 2.0",
+      ],
+      ["Licence", "Public domain, NOAA Climate Prediction Center"],
+    ],
+  },
+  rfe2: {
+    title: "RFE 2.0",
+    crumb: "RFE 2.0",
+    subtitle:
+      "NOAA's African Rainfall Estimate: Meteosat infrared, passive-microwave and rain-gauge data merged into one file a day at 0.1°, about two days after each day.",
+    steps: DAILY_STEPS("the NOAA Climate Prediction Center"),
+    use: [
+      ["Monitoring", "Dekad totals summed from the daily files"],
+      [
+        "Percent of normal",
+        "From CHIRPS; RFE 2.0's own 1991–2020 normal is not held",
+      ],
+      [
+        "Verification",
+        "CHIRPS stays the reference; verified forecasts are also compared with RFE 2.0",
+      ],
+      ["Licence", "Public domain, NOAA Climate Prediction Center"],
+    ],
+  },
+  imerg: {
+    title: "GPM IMERG Late Run",
+    crumb: "GPM IMERG",
+    subtitle:
+      "NASA's multi-satellite rainfall from the Global Precipitation Measurement constellation: one file a day at 0.1°, about a day after each day.",
+    steps: [
+      "The month's folder on NASA GES DISC is listed with the service's NASA Earthdata token, and each day's Late Run file is downloaded once and kept.",
+      ...DAILY_STEPS("NASA GES DISC").slice(1),
+    ],
+    use: [
+      ["Monitoring", "Dekad totals summed from the daily files"],
+      [
+        "Percent of normal",
+        "From CHIRPS; IMERG's own 1991–2020 normal is not held",
+      ],
+      [
+        "Verification",
+        "CHIRPS stays the reference; verified forecasts are also compared with IMERG",
+      ],
+      ["Access", "A free NASA Earthdata login token, set on the server"],
+      ["Licence", "Open data, NASA GES DISC"],
+    ],
+  },
+};
+
+function LastCheck({ source }: { source?: DataSource }) {
+  const check = source?.last_check;
+  if (!check) return null;
+  if (check.status === "failed")
+    return (
+      <Notice tone="amber" title={`Last check ${dateTime(check.checked_at)}:`}>
+        {sentence(check.reason ?? "it failed")}
+      </Notice>
+    );
+  return (
+    <Notice tone="green" title={`Last check ${dateTime(check.checked_at)}:`}>
+      {check.status === "new"
+        ? "a new dekad was downloaded."
+        : "the newest published dekad is already held."}
+    </Notice>
   );
+}
+
+function MonitoredSource({
+  id,
+  source,
+  onChecked,
+}: {
+  id: Monitored;
+  source?: DataSource;
+  onChecked: () => void;
+}) {
+  const about = MONITORED[id];
+  const dekads = useApi<Dekad[]>(`/monitoring/dekads?source=${id}`);
+  const [actor] = useActor();
+  const { operation, error, running, start } = useOperation(() => {
+    dekads.reload();
+    onChecked();
+  });
   return (
     <>
       <PageBanner
-        title="TAMSAT v3.1"
-        crumbs={[{ label: "Data & Tools", href: "/data" }, { label: "TAMSAT" }]}
-        subtitle="A second observed-rainfall estimate for the monitoring: dekadal rainfall over Africa from Meteosat thermal-infrared imagery, calibrated against rain gauges, at 0.0375°."
+        title={about.title}
+        crumbs={[
+          { label: "Data & Tools", href: "/data" },
+          { label: about.crumb },
+        ]}
+        subtitle={about.subtitle}
         actions={
           <Button
             variant="amber"
@@ -685,9 +819,10 @@ function Tamsat() {
         }
       />
       <OperationNotice operation={operation} error={error} />
+      {!operation && <LastCheck source={source} />}
       <Card
         title="Downloaded dekads"
-        subtitle="Each one is shown on the Monitoring page next to CHIRPS."
+        subtitle="Each one is shown on the Monitoring page next to the other estimates."
       >
         {dekads.loading && <Skeleton height={160} />}
         {dekads.error && (
@@ -714,7 +849,7 @@ function Tamsat() {
                 {dekads.data.map((row) => (
                   <tr key={row.dekad}>
                     <td className="strong">
-                      <Link href="/monitoring?source=tamsat">
+                      <Link href={`/monitoring?source=${id}`}>
                         {period(row.start, row.end)}
                       </Link>
                     </td>
@@ -723,7 +858,7 @@ function Tamsat() {
                       {Math.round(row.region.dry_fraction * 100)}%
                     </td>
                     <td style={{ color: "var(--muted)" }}>
-                      {dateTime(row.fetched_at)} · {row.fetched_by}
+                      {dateTime(row.fetched_at)} · {personName(row.fetched_by)}
                     </td>
                   </tr>
                 ))}
@@ -735,79 +870,22 @@ function Tamsat() {
       <div className="grid-2">
         <Card title="How it is processed">
           <ol style={{ margin: 0, paddingLeft: 22, display: "grid", gap: 8 }}>
-            <li>
-              The month&apos;s folder on the TAMSAT server is listed and the
-              newest dekad is downloaded once.
-            </li>
-            <li>
-              The file is checked: a rainfall field, dated inside the dekad, on
-              TAMSAT&apos;s 0.0375° grid. Gap-filled rainfall is used where
-              TAMSAT provides it.
-            </li>
-            <li>
-              It is cut to Eastern Africa, interpolated to the 0.05° ICPAC grid
-              and summarised by member state.
-            </li>
+            {about.steps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
           </ol>
         </Card>
         <Card title="Use">
-          <KeyValues
-            items={[
-              ["Monitoring", "Dekad totals, next to CHIRPS"],
-              [
-                "Percent of normal",
-                "From CHIRPS; TAMSAT's own 1991–2020 normal is not held",
-              ],
-              ["Verification", "CHIRPS stays the reference"],
-              ["Licence", "CC BY 4.0, University of Reading"],
-            ]}
-          />
+          <KeyValues items={about.use} />
+          {source?.url && (
+            <p style={{ margin: "12px 0 0", fontSize: 14 }}>
+              <a href={source.url} target="_blank" rel="noreferrer">
+                {source.provider} <ExternalLink size={12} />
+              </a>
+            </p>
+          )}
         </Card>
       </div>
-    </>
-  );
-}
-
-function Planned({ source, title }: { source?: DataSource; title: string }) {
-  return (
-    <>
-      <PageBanner
-        title={source?.name ?? title}
-        crumbs={[{ label: "Data & Tools", href: "/data" }, { label: title }]}
-        subtitle={source?.description}
-        facts={["Coming later"]}
-      />
-      <div className="grid-2">
-        <InProgress title={`${source?.name ?? title} reader`}>
-          This dataset is planned as a further verification reference. Its
-          download and reader have not been built yet, so no forecast is
-          compared with it. CHIRPS is used until then.
-        </InProgress>
-        <Card title="About the dataset">
-          <KeyValues
-            items={[
-              ["Provider", source?.provider ?? "—"],
-              ["Role", source?.role ?? "verification"],
-              [
-                "Website",
-                source ? (
-                  <a href={source.url} target="_blank" rel="noreferrer">
-                    {source.url.replace(/^https?:\/\//, "")}{" "}
-                    <ExternalLink size={12} />
-                  </a>
-                ) : (
-                  "—"
-                ),
-              ],
-            ]}
-          />
-        </Card>
-      </div>
-      <p>
-        <LinkButton href="/data/chirps" variant="outline">
-          CHIRPS, the reference in use
-        </LinkButton>
-      </p>
     </>
   );
 }
@@ -821,9 +899,12 @@ export default function Source({ route }: PageProps) {
       <div className="wrap">
         {id === "ecmwf" && <Ecmwf source={source} />}
         {id === "chirps" && <Chirps />}
-        {id === "tamsat" && <Tamsat />}
-        {id !== "ecmwf" && id !== "chirps" && id !== "tamsat" && (
-          <Planned source={source} title={route.title} />
+        {id in MONITORED && (
+          <MonitoredSource
+            id={id as Monitored}
+            source={source}
+            onChecked={sources.reload}
+          />
         )}
       </div>
     </div>

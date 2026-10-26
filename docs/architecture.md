@@ -4,9 +4,9 @@ Next.js frontend (`frontend/`) → FastAPI (`backend/app/`) → application serv
 independent scientific engine (`climate_engine/`). The frontend computes nothing
 scientific: every number, map and label comes from the API.
 
-* **Inputs** (`climate_engine/inputs/`): the ECMWF Open Data ensemble download and the
-  CHIRPS daily reader, configured in `config/data_sources.yaml`. Planned sources (TAMSAT,
-  RFE 2.0, ARC 2.0, GPM IMERG) are listed there without readers.
+* **Inputs** (`climate_engine/inputs/`): the ECMWF Open Data ensemble download, the
+  CHIRPS daily and dekadal readers, TAMSAT, and the daily ARC 2.0, RFE 2.0 and GPM IMERG
+  readers (`daily_references.py`), configured in `config/data_sources.yaml`.
 * **Forecast** (`climate_engine/operational/`): Week-2 processing on the authoritative
   800 × 700, 0.05° grid; MBC; the Atmos37 feature builder and CatBoost residual model,
   used once its pressure-level inputs exist.

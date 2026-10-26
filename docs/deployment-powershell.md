@@ -152,6 +152,50 @@ grounding rechecks and outline fallback; the proxy waits 240 seconds under its 3
 Fluid compute limit. Provider calls use bounded network timeouts. Long forecast/download
 work should use `/operations` rather than synchronous `/forecasts/run` requests.
 
+## Copilot AI service
+
+The Copilot answers through its tools (forecast data, maps, verification, monitoring) with
+an AI service when one responds. Otherwise it gives the checked standard answer and says
+why, and **System status → Copilot** reports whether the service actually answers, not
+only whether it can be reached. To change the service, add these parameters to the
+deployment command. `-SetLlmKey` asks for the key privately; it is stored as the app
+secret `llm-api-key` and never printed:
+
+```powershell
+# Gemini through its OpenAI-compatible endpoint (the key's Google Cloud project needs billing
+# enabled for current models):
+& $Script -ExpectedCommit $Commit -ResourceGroup icpac -AppName icpac-api -ReleaseMode evaluation -AccessMode public `
+  -LlmProvider openai_compatible -LlmBaseUrl 'https://generativelanguage.googleapis.com/v1beta/openai' `
+  -LlmModel 'gemini-3.8-flash' -SetLlmKey
+
+# Claude (an Anthropic API key from console.anthropic.com); no base URL is needed:
+& $Script -ExpectedCommit $Commit -ResourceGroup icpac -AppName icpac-api -ReleaseMode evaluation -AccessMode public `
+  -LlmProvider anthropic -SetLlmKey
+```
+
+Any other OpenAI-compatible service (for example Groq, see [groq-setup.md](groq-setup.md))
+takes the same three parameters. With `openai_compatible` the script also sets
+`LLM_TOOLS=true`, so the model answers through the tools. Leave the parameters out to keep
+the current service.
+
+## Further rainfall estimates
+
+TAMSAT, ARC 2.0 and RFE 2.0 need no account. GPM IMERG downloads need a free NASA
+Earthdata token: sign in at [urs.earthdata.nasa.gov](https://urs.earthdata.nasa.gov/),
+open **Generate Token**, then redeploy with `-SetEarthdataToken` and paste it when asked
+(stored as the app secret `earthdata-token`). Until then the IMERG page and System status
+say the token is missing; the other estimates are unaffected. Tokens expire after about two
+months; when IMERG reports that Earthdata refused the token, generate a new one and run
+the script again with `-SetEarthdataToken`.
+
+## Redeploying the same commit
+
+Express apps start a new replica only when the image reference changes; settings changed
+alone are saved but not applied. The script therefore alternates between the image's
+digest and its commit tag when the same commit is deployed again, so new settings (access
+mode, Copilot service, tokens) take effect. The health check still requires the expected
+source commit.
+
 ## Scientific release remains evaluation
 
 This deployment explicitly uses `RELEASE_MODE=evaluation`: the available candidate model

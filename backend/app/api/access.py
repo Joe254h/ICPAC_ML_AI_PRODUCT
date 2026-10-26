@@ -91,6 +91,16 @@ def principal(
     )
 
 
+def acting_name(user: Principal, claimed: str | None = None) -> str:
+    """Who an action is recorded for. With staff access, the signed-in person. In the public
+    evaluation app, the name the visitor typed, marked as unverified; never their one-way
+    visitor identity, which only keeps each browser's conversations apart."""
+    if not user.name.startswith("visitor:"):
+        return user.name
+    name = " ".join((claimed or "").split())[:60]
+    return f"{name} (public access)" if len(name) >= 2 else "Public visitor"
+
+
 def require_role(role: str):
     def allowed(user: Principal = Depends(principal)) -> Principal:
         if "admin" not in user.roles and role not in user.roles:

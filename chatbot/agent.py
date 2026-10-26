@@ -146,16 +146,17 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "get_rainfall_monitoring",
-        "description": "Observed rainfall of the latest dekad (10-day period) from CHIRPS "
-        "(satellite and gauges) and TAMSAT (satellite, a second independent estimate): "
-        "regional and country means, area below 1 mm, and percent of normal when available "
-        "(CHIRPS only). Use both to judge how certain the observed picture is.",
+        "description": "Observed rainfall of the latest dekad (10-day period) from five "
+        "estimates: CHIRPS (satellite and gauges, the reference), TAMSAT, ARC 2.0, RFE 2.0 "
+        "and GPM IMERG: regional and country means, area below 1 mm, each estimate's "
+        "difference from CHIRPS for the same dekad, and percent of normal when available "
+        "(CHIRPS only). Use them together to judge how certain the observed picture is.",
         "parameters": _schema(),
     },
     {
         "name": "get_data_sources",
-        "description": "The data the service uses (ECMWF ensemble, CHIRPS, TAMSAT) with the "
-        "latest downloads, and the sources coming later.",
+        "description": "The data the service uses (ECMWF ensemble, CHIRPS, TAMSAT, ARC 2.0, "
+        "RFE 2.0, GPM IMERG) with the latest downloads and why a source has none.",
         "parameters": _schema(),
     },
     {
@@ -188,7 +189,7 @@ EVIDENCE = {
     "get_verification": "Verification against CHIRPS",
     "get_seasonal_skill": "Seasonal verification scores",
     "get_weekly_bulletin": "Weekly bulletin",
-    "get_rainfall_monitoring": "Observed rainfall (CHIRPS and TAMSAT)",
+    "get_rainfall_monitoring": "Observed rainfall (CHIRPS and four further estimates)",
     "get_data_sources": "Data sources",
     "get_model_info": "Model registry",
     "show_map": "Forecast map",
@@ -503,13 +504,21 @@ class ToolBox:
         products = {
             "chirps": "CHIRPS preliminary dekad (satellite and station rainfall)",
             "tamsat": "TAMSAT v3.1 dekad (satellite rainfall calibrated against gauges)",
+            "arc2": "ARC 2.0 dekad summed from daily files (infrared satellite and gauges)",
+            "rfe2": "RFE 2.0 dekad summed from daily files (infrared, microwave and gauges)",
+            "imerg": "GPM IMERG Late Run dekad summed from daily files (multi-satellite)",
         }
+        checks = {e["source"]: e for e in MonitoringService.estimates(self.platform)}
         found: dict[str, Any] = {}
         for source, product in products.items():
-            try:
-                latest = MonitoringService(self.platform, source).latest()
-            except KeyError:
-                found[source] = {"product": product, "status": "no dekad downloaded yet"}
+            latest = checks[source]["latest"]
+            if latest is None:
+                check = checks[source]["last_check"] or {}
+                found[source] = {
+                    "product": product,
+                    "status": "no dekad downloaded yet",
+                    **({"reason": check["reason"]} if check.get("reason") else {}),
+                }
                 continue
             found[source] = {
                 "product": product,
@@ -520,22 +529,28 @@ class ToolBox:
             }
         if all("period" not in item for item in found.values()):
             raise ToolError("No observed rainfall dekad has been downloaded yet.")
-        chirps, tamsat = found["chirps"], found["tamsat"]
-        if chirps.get("period") and chirps.get("period") == tamsat.get("period"):
+        chirps = found["chirps"]
+        differences = {}
+        if chirps.get("period"):
             by_country = {row["country"]: row["mean_mm"] for row in chirps["countries"]}
-            found["tamsat_minus_chirps_mm"] = {
-                "region": round(tamsat["region"]["mean_mm"] - chirps["region"]["mean_mm"], 2),
-                **{
-                    row["country"]: round(row["mean_mm"] - by_country[row["country"]], 2)
-                    for row in tamsat["countries"]
-                    if row["country"] in by_country
-                },
-            }
+            for source, other in found.items():
+                if source == "chirps" or other.get("period") != chirps["period"]:
+                    continue
+                differences[source] = {
+                    "region": round(other["region"]["mean_mm"] - chirps["region"]["mean_mm"], 2),
+                    **{
+                        row["country"]: round(row["mean_mm"] - by_country[row["country"]], 2)
+                        for row in other["countries"]
+                        if row["country"] in by_country
+                    },
+                }
+        if differences:
+            found["minus_chirps_mm"] = differences
         return {
             **found,
-            "note": "Two independent estimates; where they agree the observed rainfall is "
-            "well established, where they differ it is uncertain. Percent of normal comes "
-            "from CHIRPS.",
+            "note": "Independent estimates; where they agree the observed rainfall is well "
+            "established, where they differ it is uncertain. Percent of normal comes from "
+            "CHIRPS.",
         }
 
     def _get_data_sources(self) -> dict[str, Any]:

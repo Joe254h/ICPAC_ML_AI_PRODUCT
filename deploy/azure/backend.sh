@@ -51,6 +51,8 @@
 #     PUBLIC_SITE_URL  The website the email links open (default the Vercel site).
 #     EMAIL_ACTION_SECRET  Signs the email links; generated once and kept as an app secret.
 #   TAMSAT_BASE_URL  Another server laid out like TAMSAT's (default TAMSAT's own).
+#   EARTHDATA_TOKEN  A NASA Earthdata token for the GPM IMERG downloads, stored as an app
+#                 secret (urs.earthdata.nasa.gov, Generate Token).
 #   Each of these is kept from the previous deployment unless it is given again.
 set -euo pipefail
 
@@ -296,6 +298,7 @@ for name, reference in (
     ("EMAIL_ACTION_SECRET", "email-action-secret"),
     ("BULLETIN_OPERATOR_KEY", "bulletin-operator-key"),
     ("STAFF_CREDENTIALS", "staff-credentials"),
+    ("EARTHDATA_TOKEN", "earthdata-token"),
 ):
     deployed = current.get(name) or {}
     value = (e.get(name) or "").strip() or stored.get(deployed.get("secretRef", reference)) or deployed.get("value")

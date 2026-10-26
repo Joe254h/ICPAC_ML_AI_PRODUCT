@@ -70,7 +70,16 @@ def weekly_text(facts: dict) -> str:
 
 
 def review_label(bulletin: dict) -> str | None:
-    """The page header label of a reviewed weekly draft (None while it is still a draft)."""
+    """The Word page header label of a weekly draft: None while it is still a draft (it
+    keeps its frozen draft label), empty once published (the released bulletin carries no
+    label), else the decision, who made it and when."""
+    if bulletin["status"] == "published":
+        return ""
+    return decision_label(bulletin)
+
+
+def decision_label(bulletin: dict) -> str | None:
+    """The review decision of a weekly draft, who made it and when (None for a draft)."""
     decisions = {
         "approved": "APPROVED",
         "published": "PUBLISHED",
@@ -86,7 +95,8 @@ def review_label(bulletin: dict) -> str | None:
         if part not in ("DRAFT - NOT APPROVED", "forecaster review required")
     ]
     day = date.fromisoformat(review["timestamp"][:10])
-    return " · ".join([f"{state} by {review['actor']} on {day.day} {day:%b %Y}", *scope])
+    actor = "a public visitor" if review["actor"].startswith("visitor:") else review["actor"]
+    return " · ".join([f"{state} by {actor} on {day.day} {day:%b %Y}", *scope])
 
 
 def check_consistency(bulletin: dict) -> dict:
@@ -325,13 +335,14 @@ class BulletinService:
     def released(self, bulletin: dict) -> bytes:
         """The frozen Word document with its page header showing the review state.
 
-        A draft keeps its frozen "DRAFT - NOT APPROVED" label; once approved, published or
-        rejected the label names that decision, its reviewer and date. Only the header label
-        changes: the text and maps are the checksummed ones that were reviewed.
+        A draft keeps its frozen "DRAFT - NOT APPROVED" label; once approved or rejected the
+        label names that decision, its reviewer and date; a published bulletin has a clean
+        header. Only the header label changes: the text and maps are the checksummed ones
+        that were reviewed.
         """
         document = self.document(bulletin)
         label = review_label(bulletin)
-        return stamp_header(document, label) if label else document
+        return document if label is None else stamp_header(document, label)
 
     def _frozen(self, bulletin: dict, path_key: str, checksum_key: str, key, lost: str) -> bytes:
         root = Path(os.getenv("RUN_ROOT", str(ROOT / "data" / "runs"))).resolve()

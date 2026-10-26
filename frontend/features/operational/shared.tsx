@@ -13,6 +13,7 @@ import {
   LinkButton,
   Notice,
   Status,
+  Tabs,
 } from "@/components/ui";
 import { countrySlug } from "@/features/routes";
 import { SERIES, dateTime, day, num, signed, validDays } from "@/lib/format";
@@ -26,6 +27,7 @@ import type {
   OperationalModel,
   ProductStatus,
   Variant,
+  VerifiedModel,
 } from "@/types/operational";
 
 export const VARIANTS: Variant[] = ["raw", "mbc", "hybrid"];
@@ -101,6 +103,71 @@ export function EarlierModelNotice({ detail }: { detail: ForecastDetail }) {
       weekly run issues one with it, including its MBC + AI/ML layer.{" "}
       <Link href="/data/runs">Run the weekly cycle now</Link>
     </Notice>
+  );
+}
+
+/** Which model's verified forecasts pooled scores use. Scores of different models are never
+ * mixed: the model in use by default, another with verified weeks on request; when the
+ * model in use has none yet, the page says so and offers the earlier model's. */
+export function ModelScope({
+  shown,
+  models,
+  onChoose,
+}: {
+  /** The model whose scores are shown. */
+  shown: string;
+  models?: VerifiedModel[];
+  onChoose: (modelId: string | null) => void;
+}) {
+  const { current } = useApp();
+  const inUse = current.data?.model;
+  const list = [...(models ?? [])];
+  if (inUse && !list.some((m) => m.model_id === inUse.model_id))
+    list.unshift({
+      model_id: inUse.model_id,
+      model_name: inUse.model_name ?? "The model in use",
+      cases: 0,
+    });
+  const name = (id: string) =>
+    list.find((m) => m.model_id === id)?.model_name ?? "this model";
+  const cases = (id: string) => list.find((m) => m.model_id === id)?.cases ?? 0;
+  const earlier = list.filter((m) => m.model_id !== inUse?.model_id && m.cases);
+  return (
+    <>
+      {list.length > 1 && (
+        <Tabs
+          label="Model"
+          value={shown}
+          onChange={(id) => onChoose(id === inUse?.model_id ? null : id)}
+          options={list.map((m) => ({
+            value: m.model_id,
+            label: `${m.model_name} · ${m.cases} verified`,
+          }))}
+        />
+      )}
+      {inUse && shown === inUse.model_id && !cases(shown) && earlier[0] && (
+        <Notice title="No verified week for the model in use yet.">
+          {name(shown)} is verified once CHIRPS covers the week of its first
+          forecast; its last four weeks can also be forecast and verified now.
+          The verified weeks so far come from {earlier[0].model_name}:{" "}
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => onChoose(earlier[0].model_id)}
+          >
+            show its scores ({earlier[0].cases} weeks)
+          </button>
+          .
+        </Notice>
+      )}
+      {inUse && shown !== inUse.model_id && (
+        <Notice title={`Scores of ${name(shown)}.`}>
+          These weeks were forecast by {name(shown)}, before{" "}
+          {inUse.model_name ?? "the model in use"} was activated; they say
+          nothing about the model in use.
+        </Notice>
+      )}
+    </>
   );
 }
 

@@ -1,6 +1,7 @@
-"""Rainfall monitoring: the latest dekad of observed rainfall from CHIRPS (preliminary) and
-TAMSAT v3.1, as ICPAC's climate monitoring framework produces it (total rainfall and, with
-the 1991-2020 normal, percent of normal).
+"""Rainfall monitoring: the latest dekad of observed rainfall from CHIRPS (preliminary),
+TAMSAT v3.1, and the dekads summed from the daily ARC 2.0, RFE 2.0 and GPM IMERG files, as
+ICPAC's climate monitoring framework produces it (total rainfall and, with the 1991-2020
+normal, percent of normal).
 
 Each update lists the source's server, downloads the newest dekad only if it is not held
 yet, checks and crops it, and records its regional and country figures. The cropped file is
@@ -18,14 +19,23 @@ import xarray as xr
 
 from backend.app.services import operational
 from climate_engine.core import ROOT
-from climate_engine.inputs import chirps, chirps_dekad, tamsat
+from climate_engine.inputs import chirps, chirps_dekad, daily_references, tamsat
 from climate_engine.inputs.chirps_dekad import Dekad
 from climate_engine.operational.grid import DomainGrid, country_selections
 from climate_engine.products.store import package_store
 
 KIND = "chirps_dekad"
 #: Record kind of each source's dekads.
-SOURCES = {"chirps": "chirps_dekad", "tamsat": "tamsat_dekad"}
+SOURCES = {
+    "chirps": "chirps_dekad",
+    "tamsat": "tamsat_dekad",
+    **{source: f"{source}_dekad" for source in daily_references.REFERENCES},
+}
+#: Sources whose dekads are summed from daily files.
+DAILY = set(daily_references.REFERENCES)
+NAMES = {"chirps": "CHIRPS", "tamsat": "TAMSAT", **daily_references.NAMES}
+#: The last look at each source's server, kept to say why a source has no new dekad.
+CHECK_KIND = "monitoring_check"
 PRODUCTS = ("total", "percent")
 
 
@@ -72,7 +82,7 @@ def figures(
 class MonitoringService:
     def __init__(self, platform, source: str = "chirps"):
         if source not in SOURCES:
-            raise ValueError("Monitoring sources: chirps, tamsat")
+            raise ValueError(f"Monitoring sources: {', '.join(SOURCES)}")
         self.platform = platform
         self.repo = platform.repo
         self.source = source
@@ -88,8 +98,44 @@ class MonitoringService:
     def latest(self) -> dict[str, Any]:
         records = self.dekads()
         if not records:
-            raise KeyError(f"no {self.source.upper()} dekad downloaded yet")
+            raise KeyError(f"no {NAMES[self.source]} dekad downloaded yet")
         return records[0]
+
+    def check(self, actor: str) -> dict[str, Any]:
+        """Update, keeping the outcome (the dekad, or why there is none) as the last check."""
+        try:
+            result = self.update(actor)
+        except Exception as exc:
+            self._checked({"status": "failed", "reason": str(exc)})
+            raise
+        self._checked({"status": "new" if result["new"] else "held", "dekad": result["dekad"]})
+        return result
+
+    def _checked(self, outcome: dict[str, Any]) -> None:
+        record = {"source": self.source, "checked_at": now(), **outcome}
+        self.repo.save(CHECK_KIND, record, f"check-{self.source}")
+
+    def last_check(self) -> dict[str, Any] | None:
+        try:
+            return self.repo.get(CHECK_KIND, f"check-{self.source}")
+        except KeyError:
+            return None
+
+    @classmethod
+    def estimates(cls, platform) -> list[dict[str, Any]]:
+        found = []
+        for source, name in NAMES.items():
+            service = cls(platform, source)
+            held = service.dekads()
+            found.append(
+                {
+                    "source": source,
+                    "name": name,
+                    "latest": held[0] if held else None,
+                    "last_check": service.last_check(),
+                }
+            )
+        return found
 
     def key(self, dekad: Dekad) -> str:
         """The record's id: record ids are shared by every kind, so TAMSAT's are prefixed
@@ -101,6 +147,8 @@ class MonitoringService:
 
     def update(self, actor: str, server: chirps.Server | None = None) -> dict[str, Any]:
         """Download the newest published dekad if it is not held yet."""
+        if self.source in DAILY:
+            return self._update_daily(actor, server)
         if self.source == "tamsat":
             server = server or tamsat.server()
             listed = tamsat.published(server)
@@ -132,7 +180,44 @@ class MonitoringService:
         self.repo.save(self.kind, record, self.key(dekad))
         return {"source": self.source, "dekad": dekad.id, "new": True}
 
+    def _update_daily(self, actor: str, server: chirps.Server | None) -> dict[str, Any]:
+        """The newest dekad whose every day is published, summed from the daily files (the
+        days are kept, so a later dekad or a forecast comparison reuses them)."""
+        held = {r["dekad"] for r in self.repo.list(self.kind)}
+        server = server or daily_references.server(self.source)
+        reason = None
+        for dekad in daily_references.ended_dekads(self.source):
+            if dekad.id in held:
+                return {"source": self.source, "dekad": dekad.id, "new": False}
+            try:
+                field, origin = daily_references.days_total(
+                    self.source,
+                    daily_references.dekad_days(dekad),
+                    self.root().parent / "daily",
+                    server,
+                )
+            except daily_references.ReferenceUnavailable as exc:
+                reason = str(exc)
+                continue
+            name = f"{self.source}-{dekad.id}.nc"
+            path = self.root() / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            partial = path.with_name(f".{path.name}.partial")
+            field.to_dataset().to_netcdf(partial)
+            partial.replace(path)
+            store = package_store()
+            if store is not None:
+                store.put(f"inputs/{self.source}/dekad/{name}", path.read_bytes())
+            record = self._record(dekad, field, origin, actor, name)
+            self.repo.save(self.kind, record, self.key(dekad))
+            return {"source": self.source, "dekad": dekad.id, "new": True}
+        raise daily_references.ReferenceUnavailable(
+            reason or f"No complete {daily_references.NAMES[self.source]} dekad is published yet"
+        )
+
     def on_grid(self, field: xr.DataArray, grid: DomainGrid) -> np.ndarray:
+        if self.source in DAILY:
+            return daily_references.on_grid(field, grid)
         if self.source == "tamsat":
             return tamsat.on_grid(field, grid)
         return chirps_dekad.on_grid(field, grid)
@@ -152,7 +237,11 @@ class MonitoringService:
             "start": dekad.start.isoformat(),
             "end": dekad.end.isoformat(),
             "source": self.source,
-            "product": "preliminary" if self.source == "chirps" else "v3.1",
+            "product": "preliminary"
+            if self.source == "chirps"
+            else "v3.1"
+            if self.source == "tamsat"
+            else "daily totals",
             "file": name,
             **origin,
             "region": region,
@@ -166,9 +255,10 @@ class MonitoringService:
         }
 
     def _normal(self, dekad: Dekad, grid: DomainGrid) -> tuple[np.ndarray | None, str | None]:
-        if self.source == "tamsat":
+        if self.source != "chirps":
+            name = "TAMSAT" if self.source == "tamsat" else daily_references.NAMES[self.source]
             return None, (
-                "Percent of normal from TAMSAT needs TAMSAT's own 1991–2020 mean of each "
+                f"Percent of normal from {name} needs its own 1991–2020 mean of each "
                 "dekad; it is shown from CHIRPS."
             )
         path = chirps_dekad.climatology_path()

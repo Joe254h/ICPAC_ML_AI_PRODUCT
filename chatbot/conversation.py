@@ -178,7 +178,10 @@ def intent_for(message: str, previous: dict) -> str:
     if "compare" in question or "best" in question:
         return (
             "compare_observations"
-            if any(source in question for source in ("chirps", "tamsat", "rfe2"))
+            if any(
+                source in question
+                for source in ("chirps", "tamsat", "rfe2", "rfe", "arc2", "arc", "imerg")
+            )
             else "compare"
         )
     if any(
@@ -285,8 +288,8 @@ class OperationalConversation:
             datasets = sources()
             active = [d["name"] for d in datasets if d["status"] == "active"]
             planned = [d["name"] for d in datasets if d["status"] != "active"]
-            sentences["datasets"] = (
-                f"In use: {', '.join(active)}. Coming later: {', '.join(planned)}."
+            sentences["datasets"] = f"In use: {', '.join(active)}." + (
+                f" Coming later: {', '.join(planned)}." if planned else ""
             )
             trace.append(
                 {
@@ -408,9 +411,19 @@ class OperationalConversation:
                 elif intent == "compare_observations":
                     tool = "compare_observations"
                     sentences["comparison"] = (
-                        "Forecasts are verified against CHIRPS. TAMSAT is shown next to CHIRPS on the Monitoring page, dekad by dekad; RFE 2.0, ARC 2.0 and IMERG are planned sources. A forecast verification against TAMSAT is not available yet."
+                        "Forecasts are verified against CHIRPS, the reference of record. TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG are shown next to CHIRPS on the Monitoring page, dekad by dekad, and each verified forecast is also scored against the daily ARC 2.0, RFE 2.0 and GPM IMERG files of its week. A forecast verification against TAMSAT is not available yet: TAMSAT is held by dekad, not by day."
                     )
+                    compared = self.forecasts.references(fid)
+                    primary = detail.get("primary_layer") or "hybrid"
+                    for item in compared:
+                        scores = (item.get("domain") or {}).get(primary)
+                        sentences[f"compared_{item['source']}"] = (
+                            f"Against {item['name']}: MAE {scores['mae']:.2f} mm, bias {scores['bias']:+.2f} mm, observed mean {scores['observed_mean']:.1f} mm."
+                            if item["status"] == "available" and scores
+                            else f"Against {item['name']}: not compared yet ({item.get('reason', 'waiting for its files')})."
+                        )
                     evidence["verification"] = detail["verification"]
+                    evidence["further_references"] = compared
                 elif intent == "model":
                     tool = "get_model_metadata"
                     model = detail["model"]

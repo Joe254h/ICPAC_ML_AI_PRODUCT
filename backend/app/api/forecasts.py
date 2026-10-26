@@ -4,7 +4,7 @@ runs, packages, maps, countries and verification."""
 from fastapi import Depends, FastAPI, HTTPException, Path, Query
 from fastapi.responses import Response
 
-from backend.app.api.access import Principal, require_operator
+from backend.app.api.access import Principal, acting_name, require_operator
 from backend.app.schemas import (
     FORECAST_ID,
     ForecastRunRequest,
@@ -73,16 +73,23 @@ def install(app: FastAPI, dependency) -> None:
         """Observation and forecast sources: active ones with what has been fetched,
         planned ones as listed for later."""
         service = ForecastService(platform)
+        monitored = {
+            source: MonitoringService(platform, source)
+            for source in ("tamsat", "arc2", "rfe2", "imerg")
+        }
         fetched = {
             "ecmwf": service.ecmwf_inputs(),
             "chirps": service.chirps_inputs(),
-            "tamsat": MonitoringService(platform, "tamsat").dekads(),
+            **{source: monitor.dekads() for source, monitor in monitored.items()},
         }
         return [
             {
                 **source,
                 "fetched": len(fetched.get(source["id"], [])),
                 "latest": next(iter(fetched.get(source["id"], [])), None),
+                "last_check": monitored[source["id"]].last_check()
+                if source["id"] in monitored
+                else None,
             }
             for source in sources()
         ]
@@ -102,7 +109,7 @@ def install(app: FastAPI, dependency) -> None:
     def chirps_inputs(platform=Depends(dependency)) -> list[dict]:
         return ForecastService(platform).chirps_inputs()
 
-    Source = Query("chirps", pattern=r"^(chirps|tamsat)$")
+    Source = Query("chirps", pattern=r"^(chirps|tamsat|arc2|rfe2|imerg)$")
 
     def with_overlays(record: dict, source: str) -> dict:
         base = f"/monitoring/dekads/{record['dekad']}/overlay?source={source}&product="
@@ -111,9 +118,15 @@ def install(app: FastAPI, dependency) -> None:
             overlays["percent"] = base + "percent"
         return {**record, "overlays": overlays, "overlay_bounds": MonitoringService.bounds()}
 
+    @app.get("/monitoring/estimates")
+    def monitoring_estimates(platform=Depends(dependency)) -> list[dict]:
+        """Each rainfall estimate's latest dekad (or none) and its last server check."""
+        return MonitoringService.estimates(platform)
+
     @app.get("/monitoring/dekads")
     def monitoring_dekads(source: str = Source, platform=Depends(dependency)) -> list[dict]:
-        """Dekads of observed rainfall (CHIRPS or TAMSAT) held for monitoring, newest first."""
+        """Dekads of observed rainfall held for monitoring (CHIRPS, TAMSAT, ARC 2.0, RFE 2.0
+        or GPM IMERG), newest first."""
         return MonitoringService(platform, source).dekads()
 
     @app.get("/monitoring/dekads/latest")
@@ -151,7 +164,9 @@ def install(app: FastAPI, dependency) -> None:
         user: Principal = Depends(require_operator),
     ) -> dict:
         """Start a background task (download, run, verify or the weekly cycle)."""
-        return OperationService(platform).start(body.model_copy(update={"actor": user.name}))
+        return OperationService(platform).start(
+            body.model_copy(update={"actor": acting_name(user, body.actor)})
+        )
 
     @app.get("/operations/{operation_id}", dependencies=[Depends(require_operator)])
     def operation(operation_id: str, platform=Depends(dependency)) -> dict:
@@ -173,7 +188,9 @@ def install(app: FastAPI, dependency) -> None:
         platform=Depends(dependency),
         user: Principal = Depends(require_operator),
     ) -> dict:
-        return ForecastService(platform).run(body.model_copy(update={"actor": user.name}))
+        return ForecastService(platform).run(
+            body.model_copy(update={"actor": acting_name(user, body.actor)})
+        )
 
     @app.post("/forecasts/import", status_code=201)
     def import_package(
@@ -182,7 +199,7 @@ def install(app: FastAPI, dependency) -> None:
         user: Principal = Depends(require_operator),
     ) -> dict:
         return ForecastService(platform).import_package(
-            body.model_copy(update={"actor": user.name})
+            body.model_copy(update={"actor": acting_name(user, body.actor)})
         )
 
     @app.get("/forecasts/{forecast_id}")
@@ -246,6 +263,14 @@ def install(app: FastAPI, dependency) -> None:
     def forecast_verification(forecast_id: str = ForecastId, platform=Depends(dependency)) -> dict:
         return ForecastService(platform).verification(forecast_id)
 
+    @app.get("/forecasts/{forecast_id}/references")
+    def forecast_references(
+        forecast_id: str = ForecastId, platform=Depends(dependency)
+    ) -> list[dict]:
+        """The verified forecast scored against the further references (ARC 2.0, RFE 2.0,
+        GPM IMERG), as recorded by the verification passes."""
+        return ForecastService(platform).references(forecast_id)
+
     @app.post("/forecasts/{forecast_id}/verification")
     def verify_forecast(
         body: VerificationRequest,
@@ -254,7 +279,7 @@ def install(app: FastAPI, dependency) -> None:
         user: Principal = Depends(require_operator),
     ) -> dict:
         return ForecastService(platform).verify(
-            forecast_id, body.model_copy(update={"actor": user.name})
+            forecast_id, body.model_copy(update={"actor": acting_name(user, body.actor)})
         )
 
     @app.get("/forecasts/{forecast_id}/bulletin")

@@ -171,10 +171,13 @@ def lead_segments(lead: str, rest: str) -> list[tuple[str, str]]:
 
 
 def fill_header(header: str, label: str) -> str:
-    """Write the draft label, centred and small, in the reference header's empty paragraph."""
+    """Write the draft label, centred and small, in the reference header's empty paragraph
+    (an empty label leaves the paragraph empty: the published bulletin)."""
     pattern = rf'(<w:p\b[^>]*\bw14:paraId="{HEADER_LABEL}"[^>]*>)(.*?)(</w:p>)'
     run = (
-        '<w:pPr><w:pStyle w:val="Header" /><w:jc w:val="center" /></w:pPr>'
+        '<w:pPr><w:pStyle w:val="Header" /></w:pPr>'
+        if not label
+        else '<w:pPr><w:pStyle w:val="Header" /><w:jc w:val="center" /></w:pPr>'
         '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial" w:cs="Arial" />'
         '<w:b w:val="1" /><w:bCs w:val="1" /><w:color w:val="C00000" /><w:sz w:val="16" />'
         f'<w:szCs w:val="16" /></w:rPr><w:t xml:space="preserve">{html.escape(label, quote=False)}'

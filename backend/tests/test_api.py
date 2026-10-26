@@ -42,12 +42,11 @@ def test_data_sources_list_active_and_planned_sources(client):
         "ecmwf",
         "chirps",
         "tamsat",
-    }
-    assert {k for k, s in sources.items() if s["status"] == "planned"} == {
         "rfe2",
         "arc2",
         "imerg",
     }
+    assert not any(s["status"] == "planned" for s in sources.values())
     assert sources["ecmwf"]["fetched"] == 0 and sources["ecmwf"]["latest"] is None
 
 

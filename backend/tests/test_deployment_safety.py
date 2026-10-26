@@ -118,9 +118,12 @@ def test_chat_quota_survives_new_repository_instance(tmp_path):
     other.chat_allowance("Bob")
 
 
-def test_public_map_work_is_bounded_without_blocking_health(client):
+def test_public_map_work_is_bounded_without_blocking_health(client, monkeypatch):
+    from backend.app import main
     from backend.app.main import HEAVY_READ_SLOTS
 
+    # A map waits for a free slot, and is refused only when none frees in time.
+    monkeypatch.setattr(main, "HEAVY_READ_WAIT_SECONDS", 0.2)
     for _ in range(4):
         assert HEAVY_READ_SLOTS.acquire(blocking=False)
     try:
@@ -239,7 +242,9 @@ def test_public_evaluation_needs_no_staff_key_and_can_be_switched_back(client, m
         "/operations", json={"action": "past_weeks", "weeks": 2, "actor": "Visitor"}
     )
     assert operation.status_code == 202
-    assert operation.json()["created_by"] == me.json()["name"]
+    # Recorded under the name typed, marked unverified, never the visitor identity.
+    assert operation.json()["created_by"] == "Visitor (public access)"
+    assert "visitor:" not in operation.text
     audit = client.get("/audit")
     assert audit.status_code == 200
     assert "a" * 32 not in audit.text

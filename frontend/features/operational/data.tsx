@@ -10,18 +10,32 @@ import {
   Skeleton,
   Status,
 } from "@/components/ui";
-import { dateTime, day } from "@/lib/format";
+import { dateTime, day, period, sentence } from "@/lib/format";
 import { useApi } from "@/services/hooks";
-import type { ChirpsWindow, DataSource, EcmwfInput } from "@/types/operational";
+import type {
+  ChirpsWindow,
+  DataSource,
+  Dekad,
+  EcmwfInput,
+} from "@/types/operational";
 
 function latestText(source: DataSource): string {
-  if (!source.latest) return "Nothing fetched yet";
+  if (!source.latest) {
+    const check = source.last_check;
+    return check?.status === "failed"
+      ? `Nothing fetched yet. ${sentence(check.reason ?? "")}`
+      : "Nothing fetched yet";
+  }
   if (source.id === "ecmwf") {
     const latest = source.latest as EcmwfInput;
     return `Latest: run of ${day(latest.initialization)} · fetched ${dateTime(latest.fetched_at)}`;
   }
-  const latest = source.latest as ChirpsWindow;
-  return `Latest: week from ${day(latest.valid_start)} · fetched ${dateTime(latest.fetched_at)}`;
+  if (source.id === "chirps") {
+    const latest = source.latest as ChirpsWindow;
+    return `Latest: week from ${day(latest.valid_start)} · fetched ${dateTime(latest.fetched_at)}`;
+  }
+  const latest = source.latest as Dekad;
+  return `Latest: dekad ${period(latest.start, latest.end)} · fetched ${dateTime(latest.fetched_at)}`;
 }
 
 function SourceCard({ source }: { source: DataSource }) {
@@ -82,7 +96,7 @@ export default function Data() {
         <PageBanner
           title="Data Sources"
           crumbs={[{ label: "Data & Tools" }, { label: "Data sources" }]}
-          subtitle="The forecast is made from the ECMWF ensemble and verified against CHIRPS, both downloaded by this service. Further observation datasets will be added."
+          subtitle="The forecast is made from the ECMWF ensemble and verified against CHIRPS. TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG add further observed-rainfall estimates for the monitoring and for comparing verified forecasts. All are downloaded by this service."
           actions={
             <LinkButton href="/data/runs" variant="amber">
               Operations

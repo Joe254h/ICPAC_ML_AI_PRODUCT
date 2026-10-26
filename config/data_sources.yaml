@@ -64,6 +64,41 @@ tamsat:
   resolution_degrees: 0.0375
   licence: "TAMSAT, University of Reading (CC BY 4.0; cite Maidment et al. 2017)"
 
+arc2:
+  # NOAA CPC African Rainfall Climatology 2.0: daily totals (mm) for Africa at 0.1 degree,
+  # one zipped GeoTIFF per day, published a day or two later (climate_engine/inputs/
+  # daily_references.py). ARC2_BASE_URL overrides the server.
+  base_url: "https://ftp.cpc.ncep.noaa.gov/fews/fewsdata/africa/arc2/geotiff"
+  day_file: "africa_arc.{day:%Y%m%d}.tif.zip"
+  format: cpc_geotiff_zip
+  resolution_degrees: 0.1
+  latency_days: 2
+  licence: "ARC 2.0, NOAA Climate Prediction Center (public domain; cite Novella and Thiaw 2013)"
+
+rfe2:
+  # NOAA CPC African Rainfall Estimate 2.0, read like ARC 2.0. RFE2_BASE_URL overrides it.
+  base_url: "https://ftp.cpc.ncep.noaa.gov/fews/fewsdata/africa/rfe2/geotiff"
+  day_file: "africa_rfe.{day:%Y%m%d}.tif.zip"
+  format: cpc_geotiff_zip
+  resolution_degrees: 0.1
+  latency_days: 2
+  licence: "RFE 2.0, NOAA Climate Prediction Center (public domain; cite Xie and Arkin 1996)"
+
+imerg:
+  # NASA GPM IMERG Late Run daily (version 7), global 0.1 degree NetCDF4 from GES DISC,
+  # about a day after each day. Downloads need a NASA Earthdata token, a server secret named
+  # by token_env; the file name, with its version, is read from the month's listing.
+  # IMERG_BASE_URL overrides the server.
+  base_url: "https://gpm1.gesdisc.eosdis.nasa.gov/data/GPM_L3/GPM_3IMERGDL.07"
+  day_dir: "{year}/{month:02d}/"
+  day_pattern: '3B-DAY-L\.MS\.MRG\.3IMERG\.{day:%Y%m%d}-S000000-E235959\.V\d+[A-Z]?\.nc4'
+  format: imerg_netcdf
+  variables: [precipitation, precipitationCal]
+  resolution_degrees: 0.1
+  latency_days: 2
+  token_env: EARTHDATA_TOKEN
+  licence: "GPM IMERG, NASA GES DISC (open data; cite Huffman et al. 2023)"
+
 sources:
   - id: ecmwf
     name: ECMWF ensemble (ENS)
@@ -88,22 +123,22 @@ sources:
     url: https://www.tamsat.org.uk/
   - id: rfe2
     name: RFE 2.0
-    role: verification (observed rainfall)
-    status: planned
+    role: rainfall monitoring and a further comparison (observed rainfall)
+    status: active
     description: "NOAA CPC African Rainfall Estimate, daily, 0.1 degree"
     provider: NOAA Climate Prediction Center
     url: https://www.cpc.ncep.noaa.gov/products/fews/rfe.shtml
   - id: arc2
     name: ARC 2.0
-    role: verification (observed rainfall)
-    status: planned
+    role: rainfall monitoring and a further comparison (observed rainfall)
+    status: active
     description: "NOAA CPC African Rainfall Climatology, daily, 0.1 degree"
     provider: NOAA Climate Prediction Center
     url: https://www.cpc.ncep.noaa.gov/products/fews/AFR_CLIM/AMS_ARC2a.pdf
   - id: imerg
     name: GPM IMERG
-    role: verification (observed rainfall)
-    status: planned
-    description: "NASA Integrated Multi-satellitE Retrievals for GPM, daily, 0.1 degree"
+    role: rainfall monitoring and a further comparison (observed rainfall)
+    status: active
+    description: "NASA Integrated Multi-satellitE Retrievals for GPM (Late Run), daily, 0.1 degree; needs a NASA Earthdata token"
     provider: NASA GES DISC
     url: https://gpm.nasa.gov/data/imerg

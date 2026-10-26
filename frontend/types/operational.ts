@@ -235,8 +235,16 @@ export type ForecastDetail = ForecastRun & {
   overlay_bounds?: [number, number, number, number];
 };
 
+/** A model with verified forecasts, and how many. */
+export type VerifiedModel = {
+  model_id: string;
+  model_name: string;
+  cases: number;
+};
+
 export type Seasonal = {
   model_id: string;
+  models?: VerifiedModel[];
   seasons: Record<string, Partial<Record<Variant, Metrics>>>;
   forecasts: string[];
   excluded_protected_period: number;
@@ -246,6 +254,7 @@ export type Seasonal = {
 
 export type MapsStatus = {
   model_id: string;
+  models?: VerifiedModel[];
   cases: number;
   forecasts: string[];
   excluded_protected_period: number;
@@ -354,7 +363,41 @@ export type DataSource = {
   provider: string;
   url: string;
   fetched?: number;
-  latest?: (EcmwfInput | ChirpsWindow) | null;
+  latest?: (EcmwfInput | ChirpsWindow | Dekad) | null;
+  /** The last look at a monitoring source's server (TAMSAT, ARC 2.0, RFE 2.0, GPM IMERG). */
+  last_check?: SourceCheck | null;
+};
+
+export type SourceCheck = {
+  source: RainfallEstimate;
+  checked_at: string;
+  status: "new" | "held" | "failed";
+  dekad?: string;
+  reason?: string;
+};
+
+/** The observed-rainfall estimates held for monitoring. */
+export type RainfallEstimate = "chirps" | "tamsat" | "arc2" | "rfe2" | "imerg";
+
+/** An estimate's latest monitoring dekad and its last server check. */
+export type Estimate = {
+  source: RainfallEstimate;
+  name: string;
+  latest: Dekad | null;
+  last_check: SourceCheck | null;
+};
+
+/** A verified forecast scored against a further daily reference (ARC 2.0, RFE 2.0, IMERG). */
+export type ReferenceComparison = {
+  forecast_id: string;
+  source: "arc2" | "rfe2" | "imerg";
+  name: string;
+  status: "available" | "waiting" | "unavailable";
+  reason?: string;
+  season?: string;
+  domain?: Partial<Record<Variant, Metrics>>;
+  licence?: string;
+  checked_at: string;
 };
 
 export type OperationAction =
@@ -396,11 +439,12 @@ export type DekadFigures = {
   percent_of_normal?: number | null;
 };
 
-/** A dekad of observed rainfall (CHIRPS preliminary or TAMSAT) held for monitoring. */
+/** A dekad of observed rainfall (CHIRPS preliminary, TAMSAT, or summed from the daily ARC 2.0,
+ * RFE 2.0 or GPM IMERG files) held for monitoring. */
 export type Dekad = {
   dekad: string;
   /** Older CHIRPS records have no source. */
-  source?: "chirps" | "tamsat";
+  source?: RainfallEstimate;
   year: number;
   month: number;
   number: number;

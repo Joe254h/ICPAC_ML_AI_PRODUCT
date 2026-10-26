@@ -25,7 +25,7 @@ import {
 import type { Tone } from "@/components/ui";
 import { useApp } from "@/components/shell";
 import { useActor } from "@/lib/actor";
-import { dateTime } from "@/lib/format";
+import { dateTime, personName } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
 import { operationActive, operationLabel } from "@/services/operation-state";
@@ -72,7 +72,7 @@ const STEPS: {
   {
     action: "update_chirps",
     title: "Update rainfall monitoring",
-    text: "Download the newest CHIRPS and TAMSAT dekads, if new ones are out.",
+    text: "Download the newest dekad of CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG, if new ones are out.",
     icon: BarChart3,
   },
 ];
@@ -234,7 +234,8 @@ export default function Operations() {
                       marginLeft: 6,
                     }}
                   >
-                    started by {operation.created_by} · {duration(operation)}
+                    started by {personName(operation.created_by)} ·{" "}
+                    {duration(operation)}
                   </span>
                 </p>
                 <Timeline operation={operation} />
@@ -318,7 +319,7 @@ export default function Operations() {
                           </Status>
                         </td>
                         <td>{dateTime(row.started_at ?? row.created_at)}</td>
-                        <td>{row.created_by}</td>
+                        <td>{personName(row.created_by)}</td>
                         <td className="num">{duration(row)}</td>
                         <td>
                           <button

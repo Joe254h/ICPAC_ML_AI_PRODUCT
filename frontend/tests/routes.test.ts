@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import {
   COUNTRIES,
   MENUS,
-  PLANNED_SOURCES,
+  DAILY_SOURCES,
   ROUTES,
   countrySlug,
   findRoute,
@@ -31,14 +31,17 @@ test("URLs resolve to routes and unknown ones do not", () => {
   expect(resolveRoute(["nowhere"])).toBeUndefined();
 });
 
-test("planned data sources are listed as coming later", () => {
-  for (const source of PLANNED_SOURCES) {
-    const route = findRoute("data/" + source.id);
-    expect(route?.page, source.id).toBe("source");
-    expect(route?.soon, source.id).toBe(true);
+test("every data source has its page, none of them coming later", () => {
+  for (const id of [
+    "ecmwf",
+    "chirps",
+    "tamsat",
+    ...DAILY_SOURCES.map((s) => s.id),
+  ]) {
+    const route = findRoute("data/" + id);
+    expect(route?.page, id).toBe("source");
+    expect(route?.soon, id).toBeFalsy();
   }
-  expect(findRoute("data/ecmwf")?.soon).toBeFalsy();
-  expect(findRoute("data/chirps")?.soon).toBeFalsy();
 });
 
 test("earlier URLs keep working", () => {

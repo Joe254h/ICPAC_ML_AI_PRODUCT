@@ -14,7 +14,7 @@ import {
   Status,
 } from "@/components/ui";
 import { useActor } from "@/lib/actor";
-import { SERIES, day, num, signed, validDays } from "@/lib/format";
+import { SERIES, day, num, sentence, signed, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
 import type {
@@ -22,10 +22,15 @@ import type {
   ForecastDetail,
   ForecastRun,
   Metrics,
+  ReferenceComparison,
   Seasonal,
   Variant,
 } from "@/types/operational";
-import { MetricsTable } from "@/features/operational/shared";
+import {
+  MetricsTable,
+  ModelScope,
+  primaryOf,
+} from "@/features/operational/shared";
 import PastWeeks, { PAST_WEEKS } from "@/features/operational/past-weeks";
 
 const SEASONS: Record<string, string> = {
@@ -34,6 +39,17 @@ const SEASONS: Record<string, string> = {
   JJA: "June – August",
   SON: "September – November",
 };
+
+/** The newest run of each model and ECMWF run (runs come newest first). */
+function latestRuns(runs: ForecastRun[]): ForecastRun[] {
+  const seen = new Set<string>();
+  return runs.filter((run) => {
+    const key = `${run.model_id}|${run.initialization.slice(0, 10)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 function readyOn(run: ForecastRun) {
   const end = new Date(run.valid_end).getTime();
@@ -48,7 +64,7 @@ function LatestVerified({ run }: { run: ForecastRun }) {
     <Card
       eyebrow="Latest verified week"
       title={validDays(run.valid_start, run.valid_end)}
-      subtitle={`Forecast from the ECMWF run of ${day(run.initialization)}, scored against CHIRPS${v.season ? ` · ${SEASONS[v.season] ?? v.season}` : ""}`}
+      subtitle={`${detail.data.model?.model_name ?? "Forecast"}, from the ECMWF run of ${day(run.initialization)}, scored against CHIRPS${v.season ? ` · ${SEASONS[v.season] ?? v.season}` : ""}`}
       action={
         <LinkButton
           href={`/forecasts?id=${run.forecast_id}`}
@@ -66,7 +82,94 @@ function LatestVerified({ run }: { run: ForecastRun }) {
           establish skill.
         </p>
       )}
+      {v.domain && <OtherObservations run={run} chirps={v.domain} />}
     </Card>
+  );
+}
+
+/** The same week scored against ARC 2.0, RFE 2.0 and GPM IMERG, next to CHIRPS. */
+function OtherObservations({
+  run,
+  chirps,
+}: {
+  run: ForecastRun;
+  chirps: Partial<Record<Variant, Metrics>>;
+}) {
+  const compared = useApi<ReferenceComparison[]>(
+    `/forecasts/${run.forecast_id}/references`,
+  );
+  const variant: Variant = chirps[primaryOf(run)]
+    ? primaryOf(run)
+    : ((Object.keys(chirps)[0] as Variant | undefined) ?? "raw");
+  const rows: {
+    name: string;
+    metrics?: Metrics;
+    reason?: string;
+  }[] = [
+    { name: "CHIRPS (reference)", metrics: chirps[variant] },
+    ...(compared.data ?? []).map((c) => ({
+      name: c.name,
+      metrics: c.status === "available" ? c.domain?.[variant] : undefined,
+      reason:
+        c.status === "waiting"
+          ? "Not published for the whole week yet"
+          : sentence(c.reason ?? "Not available"),
+    })),
+  ];
+  return (
+    <div style={{ marginTop: 22 }}>
+      <h4 style={{ margin: "0 0 4px" }}>Against the other observations</h4>
+      <p style={{ margin: "0 0 10px", color: "var(--muted)", fontSize: 14 }}>
+        The {SERIES[variant].label} forecast scored against each estimate of the
+        same week. Where they agree, the scores are firm; CHIRPS stays the
+        reference of record.
+      </p>
+      {compared.loading && <Skeleton height={120} />}
+      {compared.data && compared.data.length === 0 && (
+        <p style={{ margin: 0, fontSize: 14 }}>
+          ARC 2.0, RFE 2.0 and GPM IMERG are compared in the next verification
+          pass.
+        </p>
+      )}
+      {compared.data && compared.data.length > 0 && (
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Observation</th>
+                <th className="num">Observed mean</th>
+                <th className="num">MAE</th>
+                <th className="num">RMSE</th>
+                <th className="num">Bias</th>
+                <th className="num">Pearson r</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.name}>
+                  <td className="strong">{row.name}</td>
+                  {row.metrics ? (
+                    <>
+                      <td className="num">
+                        {num(row.metrics.observed_mean, 1)} mm
+                      </td>
+                      <td className="num">{num(row.metrics.mae, 2)} mm</td>
+                      <td className="num">{num(row.metrics.rmse, 2)} mm</td>
+                      <td className="num">{signed(row.metrics.bias, 2)} mm</td>
+                      <td className="num">{num(row.metrics.correlation, 3)}</td>
+                    </>
+                  ) : (
+                    <td colSpan={5} style={{ color: "var(--muted)" }}>
+                      {row.reason}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -184,18 +287,21 @@ function SeasonalTable({ seasonal }: { seasonal: Seasonal }) {
 export default function Verification() {
   const runs = useApi<ForecastRun[]>("/forecasts");
   const [includeTest, setIncludeTest] = useState(false);
+  /** Another model's verified weeks; empty: the model in use. */
+  const [model, setModel] = useState<string | null>(null);
   const seasonal = useApi<Seasonal>(
-    `/verification/seasonal?include_protected=${includeTest}`,
+    `/verification/seasonal?include_protected=${includeTest}${model ? `&model_id=${encodeURIComponent(model)}` : ""}`,
   );
   const [actor] = useActor();
   const { operation, running, error, start } = useOperation(() => {
     runs.reload();
     seasonal.reload();
   });
-  const verified =
-    runs.data?.filter((r) => r.verification_status === "available") ?? [];
-  const waiting =
-    runs.data?.filter((r) => r.verification_status !== "available") ?? [];
+  // A run issued again (after the real-time confirmation) supersedes the earlier one of the
+  // same model and ECMWF run: each forecast week is listed once.
+  const issued = latestRuns(runs.data ?? []);
+  const verified = issued.filter((r) => r.verification_status === "available");
+  const waiting = issued.filter((r) => r.verification_status !== "available");
   return (
     <div className="page">
       <div className="wrap">
@@ -285,7 +391,14 @@ export default function Verification() {
           }
         >
           {seasonal.data ? (
-            <SeasonalTable seasonal={seasonal.data} />
+            <div style={{ display: "grid", gap: 16 }}>
+              <ModelScope
+                shown={seasonal.data.model_id}
+                models={seasonal.data.models}
+                onChoose={setModel}
+              />
+              <SeasonalTable seasonal={seasonal.data} />
+            </div>
           ) : (
             <Skeleton height={140} />
           )}

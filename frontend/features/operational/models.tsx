@@ -17,7 +17,7 @@ import {
 } from "@/components/ui";
 import { useApp } from "@/components/shell";
 import { useActor } from "@/lib/actor";
-import { dateTime, num, versionLabel } from "@/lib/format";
+import { dateTime, num, personName, versionLabel } from "@/lib/format";
 import { mutate } from "@/services/api";
 import { useApi } from "@/services/hooks";
 import type {
@@ -373,7 +373,7 @@ function ModelCard({
                 [
                   "Real-time input",
                   confirmation
-                    ? `Confirmed by ${confirmation.actor}, ${dateTime(confirmation.timestamp)}`
+                    ? `Confirmed by ${personName(confirmation.actor)}, ${dateTime(confirmation.timestamp)}`
                     : "Not confirmed: runs from 2025 are issued from MBC until a reviewer confirms the ECMWF Open Data input",
                 ],
               ] as [string, string][])
@@ -585,7 +585,7 @@ function ActivationHistory({ models }: { models: OperationalModel[] }) {
         items={[
           [
             "Now",
-            `${name(activation.model_id)} · since ${dateTime(activation.since)} · ${activation.actor === "registry" ? "kept from before explicit activation" : activation.actor}`,
+            `${name(activation.model_id)} · since ${dateTime(activation.since)} · ${activation.actor === "registry" ? "kept from before explicit activation" : personName(activation.actor)}`,
           ],
           ...activation.history
             .slice(0, 5)

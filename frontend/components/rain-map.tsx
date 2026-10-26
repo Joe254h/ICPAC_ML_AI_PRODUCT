@@ -1,8 +1,8 @@
 "use client";
 /**
  * A rainfall field on an interactive map: a light or dark basemap, the field as a
- * transparent Web Mercator overlay rendered by the backend, and the ICPAC country outlines
- * with a hover label. Controls (layer switch, legend) are passed as children and float
+ * transparent Web Mercator overlay rendered by the backend, everything outside the member
+ * states masked, and the ICPAC country outlines with a hover label. Controls (layer switch, legend) are passed as children and float
  * over the map; those marked ``data-map-reserve`` keep their part of the map clear, so they
  * never cover the data.
  */
@@ -283,6 +283,25 @@ export default function RainMap({
         },
         labels,
       );
+      // Everything outside the eleven member states is covered, so only the region's
+      // rainfall shows (scripts/build_region_mask.py).
+      instance.addSource("outside", {
+        type: "geojson",
+        data: "/icpac-outside.geojson",
+      });
+      instance.addLayer(
+        {
+          id: "outside",
+          type: "fill",
+          source: "outside",
+          paint: {
+            "fill-color": theme === "dark" ? "#0e1a24" : "#eef1f3",
+            "fill-opacity": theme === "dark" ? 0.86 : 0.9,
+            "fill-antialias": false,
+          },
+        },
+        // Over the basemap's labels too: place names outside the region are hidden.
+      );
       instance.addSource("countries", {
         type: "geojson",
         data: "/icpac-countries.geojson",
@@ -296,19 +315,16 @@ export default function RainMap({
         },
         labels,
       );
-      instance.addLayer(
-        {
-          id: "country-line",
-          type: "line",
-          source: "countries",
-          paint: {
-            "line-color": theme === "dark" ? "#f4f1e8" : "#2b2f33",
-            "line-width": theme === "dark" ? 0.9 : 1.1,
-            "line-opacity": theme === "dark" ? 0.75 : 1,
-          },
+      instance.addLayer({
+        id: "country-line",
+        type: "line",
+        source: "countries",
+        paint: {
+          "line-color": theme === "dark" ? "#f4f1e8" : "#2b2f33",
+          "line-width": theme === "dark" ? 0.9 : 1.1,
+          "line-opacity": theme === "dark" ? 0.75 : 1,
         },
-        labels,
-      );
+      });
     });
     instance.on("mousemove", "country-hit", (event: MapLayerMouseEvent) => {
       const name = event.features?.[0]?.properties?.name as string | undefined;

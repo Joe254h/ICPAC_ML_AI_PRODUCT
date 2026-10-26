@@ -19,6 +19,7 @@ import { SERIES, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type { ForecastDetail, MapsStatus, Variant } from "@/types/operational";
 import {
+  ModelScope,
   NoForecast,
   familyOf,
   forecastFacts,
@@ -113,11 +114,20 @@ function RainfallMaps({ detail }: { detail: ForecastDetail }) {
   );
 }
 
+/** The name of the model whose verified forecasts a pooled score uses. */
+function modelName(data: MapsStatus): string {
+  return (
+    data.models?.find((m) => m.model_id === data.model_id)?.model_name ??
+    "the model in use"
+  );
+}
+
 function VerificationMap({ metric }: { metric: string }) {
   const [includeTest, setIncludeTest] = useState(false);
-  const status = useApi<MapsStatus>(
-    `/verification/maps?include_protected=${includeTest}`,
-  );
+  /** Another model's verified weeks; empty: the model in use. */
+  const [model, setModel] = useState<string | null>(null);
+  const scope = `include_protected=${includeTest}${model ? `&model_id=${encodeURIComponent(model)}` : ""}`;
+  const status = useApi<MapsStatus>(`/verification/maps?${scope}`);
   const [variant, setVariant] = useState<Variant | null>(null);
   const info = METRICS[metric];
   const data = status.data;
@@ -144,6 +154,11 @@ function VerificationMap({ metric }: { metric: string }) {
       )}
       {data && entry && (
         <>
+          <ModelScope
+            shown={data.model_id}
+            models={data.models}
+            onChoose={setModel}
+          />
           <div
             style={{
               display: "flex",
@@ -183,10 +198,10 @@ function VerificationMap({ metric }: { metric: string }) {
           {entry.available ? (
             <Card
               title={`${info.title} · ${SERIES[shown].label}`}
-              subtitle={`${data.cases} verified forecasts of the model in use`}
+              subtitle={`${data.cases} verified ${data.cases === 1 ? "forecast" : "forecasts"} of ${modelName(data)}`}
             >
               <MapFigure
-                src={`/api/verification/maps/${metric}?variant=${shown}&include_protected=${includeTest}`}
+                src={`/api/verification/maps/${metric}?variant=${shown}&${scope}`}
                 alt={`${info.title} of ${SERIES[shown].label} over verified forecasts`}
               />
             </Card>
@@ -194,7 +209,9 @@ function VerificationMap({ metric }: { metric: string }) {
             <>
               <InProgress title={`${info.title} map`}>
                 A per-cell {info.title.toLowerCase()} needs at least{" "}
-                {entry.min_cases} verified forecasts; {data.cases}{" "}
+                {entry.min_cases} verified{" "}
+                {entry.min_cases === 1 ? "forecast" : "forecasts"} of{" "}
+                {modelName(data)}; {data.cases}{" "}
                 {data.cases === 1 ? "is" : "are"} verified so far. Each weekly
                 forecast is verified once CHIRPS covers its week.
               </InProgress>

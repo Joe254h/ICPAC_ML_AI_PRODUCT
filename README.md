@@ -16,15 +16,16 @@ forecasts against CHIRPS. It shows three forecast layers:
   **in progress**: it needs the pressure-level inputs described in
   [weekly operations](docs/operations.md#the-mbc--aiml-hybrid-layer-in-progress).
 
-It also monitors observed rainfall dekad by dekad from CHIRPS and TAMSAT, downloaded the
+It also monitors observed rainfall dekad by dekad from CHIRPS and four further estimates, downloaded the
 way ICPAC's
 [climate monitoring framework](https://github.com/misianihabat/ICPAC-Climate-Monitoring-operational-framework)
 does, and its Forecaster Copilot answers questions about the forecast from the service's
 own results (checked number by number) and general climate questions, with Claude or the
 free Gemini API ([Copilot](docs/chatbot.md)).
 
-Other observation datasets (RFE 2.0, ARC 2.0, GPM IMERG) are listed as coming later;
-nothing is computed from them yet.
+Rainfall monitoring shows five observed estimates (CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and
+GPM IMERG), and each verified forecast is also scored against ARC 2.0, RFE 2.0 and GPM
+IMERG next to CHIRPS, the reference ([operations](docs/operations.md#arc-20-rfe-20-and-gpm-imerg)).
 
 The model in use is the **candidate** `mbc_atmos37_catboost_candidate_v1` (378 trees,
 trained 2008–2019, validated 2020–2021). It is not the production model: production
@@ -36,7 +37,7 @@ arrives as a new version.
 | Interface (Next.js 16, Tailwind 4, MapLibre; icpac.net design) | `frontend/` |
 | API (FastAPI) | `backend/app/` |
 | Science: grid, Week-2 processing, MBC, Atmos37 features, inference, verification | `climate_engine/` |
-| ECMWF Open Data, CHIRPS and TAMSAT downloads, rainfall monitoring | `climate_engine/inputs/`, `config/data_sources.yaml`, `backend/app/services/monitoring.py` |
+| ECMWF Open Data, CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG downloads, rainfall monitoring | `climate_engine/inputs/`, `config/data_sources.yaml`, `backend/app/services/monitoring.py` |
 | Bulletin approval by email | `backend/app/services/mail.py`, `backend/app/services/bulletin_mail.py` |
 | Forecaster Copilot (tool-using assistant, fixed-sentence fallback) | `chatbot/` |
 | ICPAC map standard | `climate_engine/cartography/icpac_maps.py` |
@@ -121,7 +122,8 @@ candidate with the refitted model is described in
 | Models, model in use, registration | `GET /models`, `GET /models/current`, `POST /models/register` |
 | Independent test, promotion | `POST /models/{id}/independent-test`, `POST /models/{id}/promote` |
 | Weekly cycle and its steps | `POST /operations` (`cycle`, `fetch_ecmwf`, `run_forecast`, `verify_due`, `verify_forecast`, `update_chirps`), `GET /operations`, `GET /operations/{id}` |
-| Rainfall monitoring (CHIRPS and TAMSAT dekads) | `GET /monitoring/dekads`, `GET /monitoring/dekads/latest`, `GET /monitoring/dekads/{dekad}`, `/overlay?product=total\|percent`; each takes `?source=chirps\|tamsat` |
+| Rainfall monitoring (CHIRPS, TAMSAT, ARC 2.0, RFE 2.0, GPM IMERG dekads) | `GET /monitoring/estimates`, `GET /monitoring/dekads`, `GET /monitoring/dekads/latest`, `GET /monitoring/dekads/{dekad}`, `/overlay?product=total\|percent`; each takes `?source=chirps\|tamsat\|arc2\|rfe2\|imerg` |
+| Further comparisons of a verified forecast | `GET /forecasts/{id}/references` (ARC 2.0, RFE 2.0, GPM IMERG) |
 | Forecaster Copilot | `POST /chat`, `GET /chat/sessions`, `GET /chat/sessions/{id}` |
 | Data sources | `GET /data/sources`, `GET /data/ecmwf`, `GET /data/chirps` |
 | Forecasts | `GET /forecasts`, `GET /forecasts/latest`, `POST /forecasts/run`, `POST /forecasts/import` |

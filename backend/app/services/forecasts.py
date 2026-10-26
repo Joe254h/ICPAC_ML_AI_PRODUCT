@@ -30,7 +30,7 @@ from backend.app.services.registry import ModelRegistry, status_at
 from climate_engine.cartography import icpac_maps as maps
 from climate_engine.core import ROOT, checksum
 from climate_engine.forecasts import ECMWFS2SForecastProvider
-from climate_engine.inputs import chirps, ecmwf_opendata
+from climate_engine.inputs import chirps, daily_references, ecmwf_opendata
 from climate_engine.operational.ecmwf import PRESSURE_INPUTS
 from climate_engine.operational.pipeline import (
     OPEN_DATA_LABEL,
@@ -55,6 +55,10 @@ KIND = "forecast_run"
 INPUT_KIND = "ecmwf_input"
 UPPER_AIR_KIND = "ecmwf_upper_air"
 CHIRPS_KIND = "chirps_week2"
+#: A verified forecast scored against a further reference (ARC 2.0, RFE 2.0, GPM IMERG).
+REFERENCE_KIND = "reference_comparison"
+#: Verified forecasts whose further comparisons are (re)tried in each pass.
+REFERENCE_RECENT = 8
 MEDIA_TYPES = {
     ".json": "application/json",
     ".csv": "text/csv",
@@ -774,7 +778,77 @@ class ForecastService:
                 waiting.append(f"{record['forecast_id']}: {exc}")
             except Exception as exc:  # recorded for the forecaster, then the next one
                 failed.append(f"{record['forecast_id']}: {type(exc).__name__}: {exc}")
-        return {"verified": verified, "waiting": waiting, "failed": failed}
+        compared = 0
+        recent = [r for r in self.runs() if r.get("verification_status") == "available"]
+        for record in recent[:REFERENCE_RECENT]:
+            try:
+                compared += sum(
+                    c["status"] == "available"
+                    for c in self.compare_references(record["forecast_id"], actor)
+                )
+            except Exception:  # the further comparisons never hold up verification
+                continue
+        return {"verified": verified, "waiting": waiting, "failed": failed, "compared": compared}
+
+    def references(self, forecast_id: str) -> list[dict[str, Any]]:
+        """A forecast's comparisons with the further references, in their order."""
+        self.repo.get(KIND, forecast_id)
+        held = {}
+        for source in daily_references.REFERENCES:
+            try:
+                held[source] = self.repo.get(REFERENCE_KIND, f"{forecast_id}-{source}")
+            except KeyError:
+                continue
+        return [held[s] for s in daily_references.REFERENCES if s in held]
+
+    def compare_references(self, forecast_id: str, actor: str) -> list[dict[str, Any]]:
+        """Score a verified forecast against each further reference whose seven days are
+        published: the same metrics as its CHIRPS verification, recorded apart from it
+        (CHIRPS stays the reference of record). A comparison is made once; a reference not
+        published yet, or not configured, is recorded with why and tried again later."""
+        record = self.repo.get(KIND, forecast_id)
+        if record.get("verification_status") != "available":
+            raise ValueError("Only a forecast verified against CHIRPS is compared further")
+        start = datetime.fromisoformat(record["valid_start"]).date()
+        days = chirps.window_days(start)
+        grid = operational.authoritative_grid()
+        run: ForecastRun | None = None
+        results = []
+        for source in daily_references.REFERENCES:
+            key = f"{forecast_id}-{source}"
+            try:
+                held = self.repo.get(REFERENCE_KIND, key)
+                if held["status"] == "available":
+                    results.append(held)
+                    continue
+            except KeyError:
+                pass
+            name = daily_references.NAMES[source]
+            base = {"forecast_id": forecast_id, "source": source, "name": name}
+            if not daily_references.window_published(source, days):
+                comparison = {**base, "status": "waiting", "reason": f"{name} lags a few days"}
+            else:
+                try:
+                    total, origin = daily_references.days_total(
+                        source, days, self.data_root() / source / "daily"
+                    )
+                except (daily_references.ReferenceUnavailable, ValueError) as exc:
+                    comparison = {**base, "status": "unavailable", "reason": str(exc)}
+                else:
+                    run = run or packages.load_run(self.directory(forecast_id))
+                    observed = grid.to_cells(daily_references.on_grid(total, grid))
+                    result = verify(run, observed, grid, settings(), {"source": name, **origin})
+                    comparison = {
+                        **base,
+                        "status": "available",
+                        "domain": result["domain"],
+                        "season": result["season"],
+                        "licence": daily_references.settings(source)["licence"],
+                    }
+            comparison.update(checked_at=now(), checked_by=actor)
+            self.repo.save(REFERENCE_KIND, comparison, key)
+            results.append(comparison)
+        return results
 
     def chirps_inputs(self) -> list[dict[str, Any]]:
         return sorted(self.repo.list(CHIRPS_KIND), key=lambda r: r["valid_start"], reverse=True)
@@ -797,6 +871,30 @@ class ForecastService:
                 continue
             records.append(record)
         return model_id, records, skipped
+
+    def verified_models(self, include_protected: bool) -> list[dict[str, Any]]:
+        """Each model with verified forecasts and how many, so a page can say that the
+        model now in use has none yet and show an earlier model's scores, by name."""
+        counts: dict[str, int] = {}
+        for record in self.runs():
+            if record.get("verification_status") != "available":
+                continue
+            if record["protected_test_period"] and not include_protected:
+                continue
+            counts[record["model_id"]] = counts.get(record["model_id"], 0) + 1
+        names = {
+            m["model_id"]: m.get("model_name") or "An earlier model"
+            for m in self.repo.list("model")
+            if operational.is_operational(m)
+        }
+        return [
+            {
+                "model_id": model_id,
+                "model_name": names.get(model_id, "An earlier model"),
+                "cases": n,
+            }
+            for model_id, n in counts.items()
+        ]
 
     def seasonal(self, model_id: str | None = None, include_protected: bool = False) -> dict:
         """Metrics pooled over every verified forecast of each season (valid-window start).
@@ -821,6 +919,7 @@ class ForecastService:
             },
             "forecasts": [record["forecast_id"] for record in records],
             "excluded_protected_period": skipped,
+            "models": self.verified_models(include_protected),
             "scope": "cell-based metrics pooled over the verified forecasts of each season",
             "use": "display only" if include_protected else "monitoring",
         }
@@ -842,6 +941,7 @@ class ForecastService:
             "default_variant": "hybrid" if counts["hybrid"] else "mbc",
             "forecasts": [record["forecast_id"] for record in records],
             "excluded_protected_period": skipped,
+            "models": self.verified_models(include_protected),
             "metrics": {
                 name: {
                     "title": title,
@@ -871,7 +971,7 @@ class ForecastService:
         if len(records) < MAP_MIN_CASES[metric]:
             raise Unavailable(
                 f"{VERIFICATION_MAPS[metric][1]} needs {MAP_MIN_CASES[metric]} verified "
-                f"forecasts of the model in use; {len(records)} available"
+                f"forecasts of the model; {len(records)} available"
             )
         key = (
             metric,

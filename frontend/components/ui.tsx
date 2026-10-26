@@ -317,9 +317,27 @@ export function MapFigure({
   const [outcome, setOutcome] = useState<{ src: string; ok: boolean } | null>(
     null,
   );
+  // A map the busy service could not render yet is asked for again, three times.
+  const [attempt, setAttempt] = useState<{ src: string; n: number }>({
+    src,
+    n: 0,
+  });
+  const tries = attempt.src === src ? attempt.n : 0;
+  const url = tries
+    ? `${src}${src.includes("?") ? "&" : "?"}attempt=${tries}`
+    : src;
   const state =
     outcome?.src !== src ? "loading" : outcome.ok ? "ready" : "failed";
-  const settle = (ok: boolean) => setOutcome({ src, ok });
+  const settle = (ok: boolean) => {
+    if (!ok && tries < 3) {
+      window.setTimeout(
+        () => setAttempt({ src, n: tries + 1 }),
+        2500 * (tries + 1),
+      );
+      return;
+    }
+    setOutcome({ src, ok });
+  };
   return (
     <figure className="figure">
       {state === "loading" && <Skeleton height={420} />}
@@ -327,7 +345,7 @@ export function MapFigure({
         <Notice tone="red">This map could not be rendered.</Notice>
       ) : (
         <img
-          src={src}
+          src={url}
           alt={alt}
           ref={(img) => {
             if (img?.complete && img.naturalWidth > 0 && state === "loading")

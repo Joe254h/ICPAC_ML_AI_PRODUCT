@@ -1,6 +1,6 @@
 "use client";
-/** Rainfall monitoring: observed rainfall of the latest dekad from CHIRPS or TAMSAT, by
- * country. */
+/** Rainfall monitoring: observed rainfall of the latest dekad from CHIRPS, TAMSAT, ARC 2.0,
+ * RFE 2.0 or GPM IMERG, by country. */
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
@@ -17,13 +17,14 @@ import {
   Stat,
 } from "@/components/ui";
 import { useActor } from "@/lib/actor";
-import { num, period, shortPeriod } from "@/lib/format";
+import { dateTime, num, period, sentence, shortPeriod } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
-import type { Dekad } from "@/types/operational";
+import type { Dekad, Estimate, RainfallEstimate } from "@/types/operational";
 
 type Product = "total" | "percent";
-type Source = "chirps" | "tamsat";
+type Source = RainfallEstimate;
+const ORDER: Source[] = ["chirps", "tamsat", "arc2", "rfe2", "imerg"];
 
 const SOURCES: Record<
   Source,
@@ -55,10 +56,50 @@ const SOURCES: Record<
       </p>
     ),
   },
+  arc2: {
+    name: "ARC 2.0",
+    product: "ARC 2.0 daily totals",
+    credit: "Observed: ARC 2.0, NOAA Climate Prediction Center",
+    about: (
+      <p>
+        ARC 2.0, NOAA&apos;s African Rainfall Climatology, merges Meteosat
+        infrared estimates with daily rain-gauge reports at 0.1° (about 11 km).
+        Its dekad here is the sum of the dekad&apos;s daily files; it is shown
+        once every day of the dekad is published.
+      </p>
+    ),
+  },
+  rfe2: {
+    name: "RFE 2.0",
+    product: "RFE 2.0 daily totals",
+    credit: "Observed: RFE 2.0, NOAA Climate Prediction Center",
+    about: (
+      <p>
+        RFE 2.0, NOAA&apos;s African Rainfall Estimate, merges Meteosat
+        infrared, passive-microwave and rain-gauge data at 0.1° (about 11 km).
+        Its dekad here is the sum of the dekad&apos;s daily files; it is shown
+        once every day of the dekad is published.
+      </p>
+    ),
+  },
+  imerg: {
+    name: "GPM IMERG",
+    product: "GPM IMERG Late Run daily totals",
+    credit: "Observed: GPM IMERG, NASA GES DISC",
+    about: (
+      <p>
+        GPM IMERG combines the microwave and infrared satellites of the Global
+        Precipitation Measurement constellation at 0.1° (about 11 km). The Late
+        Run is out about a day after each day, without the monthly gauge
+        correction of the later Final Run. Its dekad here is the sum of the
+        dekad&apos;s daily files.
+      </p>
+    ),
+  },
 };
 
 function sourceOf(dekad: Dekad): Source {
-  return dekad.source === "tamsat" ? "tamsat" : "chirps";
+  return dekad.source && dekad.source in SOURCES ? dekad.source : "chirps";
 }
 
 const CLASSES: Record<
@@ -152,20 +193,29 @@ function DekadMap({ dekad }: { dekad: Dekad }) {
   );
 }
 
-function Compare({ dekad, other }: { dekad: Dekad; other?: Dekad }) {
-  const both = (["chirps", "tamsat"] as Source[])
-    .map((key) => [dekad, other].find((d) => d && sourceOf(d) === key))
-    .filter((item): item is Dekad => Boolean(item));
-  const same = other && other.dekad === dekad.dekad;
+function Compare({
+  dekad,
+  estimates,
+}: {
+  dekad: Dekad;
+  estimates?: Estimate[];
+}) {
+  const rows = ORDER.map((key) => {
+    const entry = estimates?.find((estimate) => estimate.source === key);
+    const latest = key === sourceOf(dekad) ? dekad : entry?.latest;
+    return { key, latest: latest ?? undefined, entry };
+  });
+  const held = rows.filter((row) => row.latest);
+  const same = held.every((row) => row.latest?.dekad === dekad.dekad);
   return (
     <Card
-      title="CHIRPS and TAMSAT"
+      title="The estimates compared"
       subtitle={
-        same
-          ? "The two estimates of the same dekad."
-          : other
-            ? "The latest dekad of each; they cover different dekads."
-            : `No ${SOURCES[sourceOf(dekad) === "chirps" ? "tamsat" : "chirps"].name} dekad yet to compare with.`
+        held.length < 2
+          ? "No other estimate is downloaded yet to compare with."
+          : same
+            ? "Each estimate of the same dekad."
+            : "The latest dekad of each; not every estimate covers the same dekad."
       }
     >
       <div className="table-wrap">
@@ -179,14 +229,24 @@ function Compare({ dekad, other }: { dekad: Dekad; other?: Dekad }) {
             </tr>
           </thead>
           <tbody>
-            {both.map((item) => (
-              <tr key={sourceOf(item)}>
-                <td className="strong">{SOURCES[sourceOf(item)].name}</td>
-                <td>{shortPeriod(item.start, item.end)}</td>
-                <td className="num">{num(item.region.mean_mm)}</td>
-                <td className="num">
-                  {Math.round(item.region.dry_fraction * 100)}%
-                </td>
+            {rows.map(({ key, latest, entry }) => (
+              <tr key={key}>
+                <td className="strong">{SOURCES[key].name}</td>
+                {latest ? (
+                  <>
+                    <td>{shortPeriod(latest.start, latest.end)}</td>
+                    <td className="num">{num(latest.region.mean_mm)}</td>
+                    <td className="num">
+                      {Math.round(latest.region.dry_fraction * 100)}%
+                    </td>
+                  </>
+                ) : (
+                  <td colSpan={3} style={{ color: "var(--muted)" }}>
+                    {entry?.last_check?.status === "failed"
+                      ? sentence(entry.last_check.reason ?? "Not available")
+                      : "Not downloaded yet"}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -199,11 +259,11 @@ function Compare({ dekad, other }: { dekad: Dekad; other?: Dekad }) {
 function Body({
   dekad,
   history,
-  other,
+  estimates,
 }: {
   dekad: Dekad;
   history?: Dekad[];
-  other?: Dekad;
+  estimates?: Estimate[];
 }) {
   const rows = [...dekad.countries].sort((a, b) => b.mean_mm - a.mean_mm);
   const percent = dekad.percent_of_normal.status === "available";
@@ -274,7 +334,7 @@ function Body({
           </div>
         </Card>
         <div style={{ display: "grid", gap: 20 }}>
-          <Compare dekad={dekad} other={other} />
+          <Compare dekad={dekad} estimates={estimates} />
           {!percent && (
             <InProgress title="Percent of normal">
               {dekad.percent_of_normal.reason ??
@@ -294,7 +354,8 @@ function Body({
           <Card title={`About ${source.name}`}>
             {source.about}
             <p>
-              Forecasts are verified against the daily CHIRPS files, see{" "}
+              Forecasts are verified against the daily CHIRPS files, and also
+              compared with ARC 2.0, RFE 2.0 and GPM IMERG, see{" "}
               <Link href="/verification">Verification</Link>.
             </p>
           </Card>
@@ -339,23 +400,21 @@ function Body({
 
 function initialSource(): Source {
   if (typeof window === "undefined") return "chirps";
-  return new URLSearchParams(window.location.search).get("source") === "tamsat"
-    ? "tamsat"
-    : "chirps";
+  const asked = new URLSearchParams(window.location.search).get("source");
+  return ORDER.find((key) => key === asked) ?? "chirps";
 }
 
 export default function Monitoring() {
   const [source, setSource] = useState<Source>("chirps");
   useEffect(() => setSource(initialSource()), []);
-  const other: Source = source === "chirps" ? "tamsat" : "chirps";
   const latest = useApi<Dekad>(`/monitoring/dekads/latest?source=${source}`);
   const history = useApi<Dekad[]>(`/monitoring/dekads?source=${source}`);
-  const compare = useApi<Dekad>(`/monitoring/dekads/latest?source=${other}`);
+  const estimates = useApi<Estimate[]>("/monitoring/estimates");
   const [actor] = useActor();
   const { operation, error, running, start } = useOperation(() => {
     latest.reload();
     history.reload();
-    compare.reload();
+    estimates.reload();
   });
   const check = () => start("update_chirps", actor || "Forecaster");
   const choose = (next: Source) => {
@@ -367,6 +426,9 @@ export default function Monitoring() {
   };
   const dekad =
     latest.data && sourceOf(latest.data) === source ? latest.data : undefined;
+  const lastCheck = estimates.data?.find(
+    (e) => e.source === source,
+  )?.last_check;
   const outcome = operation?.messages
     .map((m) => m.text)
     .filter((text) => !/^(Started|Finished|Looking for)/.test(text))
@@ -377,7 +439,7 @@ export default function Monitoring() {
         <PageBanner
           title="Rainfall Monitoring"
           crumbs={[{ label: "Monitoring" }]}
-          subtitle="Observed rainfall over the Greater Horn of Africa, dekad by dekad, from two satellite estimates: CHIRPS and TAMSAT."
+          subtitle="Observed rainfall over the Greater Horn of Africa, dekad by dekad, from five satellite estimates: CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG."
           actions={
             <Button variant="amber" disabled={running} onClick={check}>
               <RefreshCw size={17} className={running ? "spin" : undefined} />
@@ -391,7 +453,7 @@ export default function Monitoring() {
             role="group"
             aria-label="Rainfall estimate"
           >
-            {(["chirps", "tamsat"] as Source[]).map((key) => (
+            {ORDER.map((key) => (
               <button
                 key={key}
                 type="button"
@@ -435,8 +497,9 @@ export default function Monitoring() {
             }
           >
             <p style={{ margin: 0 }}>
-              The newest CHIRPS and TAMSAT dekads are downloaded by the weekly
-              cycle and the daily task, or now with the button.
+              {lastCheck?.status === "failed"
+                ? `Last check ${dateTime(lastCheck.checked_at)}: ${sentence(lastCheck.reason ?? "it failed")}`
+                : "The newest dekad of each estimate is downloaded by the weekly cycle and the daily task, or now with the button."}
             </p>
           </EmptyState>
         )}
@@ -444,7 +507,11 @@ export default function Monitoring() {
           <ErrorState message={latest.error} retry={latest.reload} />
         )}
         {dekad && (
-          <Body dekad={dekad} history={history.data} other={compare.data} />
+          <Body
+            dekad={dekad}
+            history={history.data}
+            estimates={estimates.data}
+          />
         )}
       </div>
     </div>

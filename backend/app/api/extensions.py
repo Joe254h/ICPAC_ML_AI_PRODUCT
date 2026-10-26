@@ -5,6 +5,7 @@ from fastapi.responses import Response
 
 from backend.app.api.access import (
     Principal,
+    acting_name,
     chat_slot,
     owned_session,
     principal,
@@ -25,7 +26,7 @@ from backend.app.schemas import (
 )
 from backend.app.services import bulletin_mail
 from backend.app.services.bulletin_export import WeeklyHTMLExporter
-from backend.app.services.bulletins import WEEKLY, BulletinService, review_label
+from backend.app.services.bulletins import WEEKLY, BulletinService, decision_label
 from backend.app.services.registry import ModelRegistry
 from chatbot.providers import warm_up
 from chatbot.retrieval import ReferenceIndex
@@ -42,7 +43,7 @@ def install(app: FastAPI, dependency):
         user: Principal = Depends(require_admin),
     ) -> dict:
         """Operational models register from a reviewed descriptor."""
-        return ModelRegistry(platform).register_descriptor(body.descriptor, user.name)
+        return ModelRegistry(platform).register_descriptor(body.descriptor, acting_name(user))
 
     @app.post("/models/{id}/independent-test")
     def independent_test(
@@ -52,7 +53,7 @@ def install(app: FastAPI, dependency):
         user: Principal = Depends(require_admin),
     ) -> dict:
         return ModelRegistry(platform).record_independent_test(
-            id, body.model_copy(update={"actor": user.name})
+            id, body.model_copy(update={"actor": acting_name(user, body.actor)})
         )
 
     @app.post("/models/{id}/realtime-review")
@@ -66,7 +67,7 @@ def install(app: FastAPI, dependency):
         if not body.withdraw and not body.forecast_id:
             raise HTTPException(422, "Name the forecast run whose input checks all passed")
         return ModelRegistry(platform).review_realtime_feed(
-            id, body.model_copy(update={"actor": user.name})
+            id, body.model_copy(update={"actor": acting_name(user, body.actor)})
         )
 
     @app.post("/models/{id}/validate")
@@ -74,7 +75,7 @@ def install(app: FastAPI, dependency):
         id: str, platform=Depends(dependency), user: Principal = Depends(require_admin)
     ) -> dict:
         """Re-verify the model's artifacts and rerun its inference check."""
-        return ModelRegistry(platform).validate(id, user.name)
+        return ModelRegistry(platform).validate(id, acting_name(user))
 
     @app.post("/models/{id}/{action}")
     def model_action(
@@ -85,7 +86,7 @@ def install(app: FastAPI, dependency):
         user: Principal = Depends(require_admin),
     ) -> dict:
         return ModelRegistry(platform).transition(
-            id, action, body.model_copy(update={"actor": user.name})
+            id, action, body.model_copy(update={"actor": acting_name(user, body.actor)})
         )
 
     @app.post("/chat", dependencies=[Depends(chat_slot)])
@@ -182,7 +183,7 @@ def install(app: FastAPI, dependency):
         user: Principal = Depends(require_operator),
     ) -> dict:
         """The weekly bulletin draft of a forecast (the latest by default)."""
-        return BulletinService(platform).generate(body.forecast_id, parent_id, user.name)
+        return BulletinService(platform).generate(body.forecast_id, parent_id, acting_name(user))
 
     @app.get("/bulletins/email-status")
     def bulletin_email_status() -> dict:
@@ -236,7 +237,7 @@ def install(app: FastAPI, dependency):
                 media_type=DOCX,
                 headers={"Content-Disposition": f'attachment; filename="{name}.docx"'},
             )
-        label = review_label(bulletin) or bulletin["facts"]["label"]
+        label = decision_label(bulletin) or bulletin["facts"]["label"]
         content = WeeklyHTMLExporter().export({**bulletin, "id": id, "page_label": label}, document)
         disposition = "inline" if inline else f'attachment; filename="{name}.html"'
         return Response(
@@ -252,7 +253,9 @@ def install(app: FastAPI, dependency):
     ) -> dict:
         """Send the email of the bulletin's current step again (new links)."""
         bulletin = platform.repo.get("bulletin", id)
-        platform.repo.audit("bulletin_email_resent", user.name, id, {"status": bulletin["status"]})
+        platform.repo.audit(
+            "bulletin_email_resent", acting_name(user), id, {"status": bulletin["status"]}
+        )
         return bulletin_mail.notify(platform, bulletin)
 
     @app.post("/bulletins/{id}/{action}")
@@ -273,7 +276,7 @@ def install(app: FastAPI, dependency):
         if "admin" not in user.roles and role not in user.roles:
             raise HTTPException(403, f"The {role} role is required.")
         return BulletinService(platform).transition(
-            id, action, body.model_copy(update={"actor": user.name})
+            id, action, body.model_copy(update={"actor": acting_name(user, body.actor)})
         )
 
     @app.get("/audit")
