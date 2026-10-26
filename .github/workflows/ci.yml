@@ -51,7 +51,9 @@ jobs:
           TEST_POSTGRES_URL: postgresql://icpac_test:local-ci-test-only@127.0.0.1:5432/icpac_test
       - name: Test PowerShell deployment guards without cloud access
         shell: pwsh
-        run: ./deploy/azure/tests/backend.Tests.ps1
+        run: |
+          ./deploy/azure/tests/backend.Tests.ps1
+          ./deploy/azure/tests/operate.Tests.ps1
       - uses: pnpm/action-setup@v4
         with: {version: '11.19.0'}
       - uses: actions/setup-node@v4

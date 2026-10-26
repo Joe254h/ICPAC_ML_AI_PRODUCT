@@ -190,6 +190,24 @@ current service. **System status → Copilot language model** asks the service t
 the way each question does and quotes its reason when it refuses (for example, no credits
 left).
 
+## Routine operations in one go
+
+`deploy/azure/operate.ps1` does from Cloud Shell what the website's buttons do, in order:
+update the rainfall monitoring (all five estimates), verify finished forecasts, check ECMWF
+and run the weekly cycle, then print System status. When the newest forecast waits for the
+one-time real-time confirmation and every input check passed, it lists the checks and
+records your confirmation only if you type `CONFIRM` (then runs the forecast again with
+the AI/ML correction). It needs public evaluation access and reads no secret:
+
+```powershell
+$Ops = Join-Path ([IO.Path]::GetTempPath()) 'icpac-operate.ps1'
+Invoke-WebRequest "https://raw.githubusercontent.com/Joe254h/ICPAC_ML_AI_PRODUCT/main/deploy/azure/operate.ps1" -OutFile $Ops
+& $Ops -Reviewer Joe254h
+```
+
+`-SkipCycle` leaves out the weekly cycle. Once the daily schedule is on (`-EnableAutomation`
+on the deployment script), the same work runs every day without it.
+
 ## Further rainfall estimates
 
 TAMSAT, ARC 2.0 and RFE 2.0 need no account. GPM IMERG downloads need a free NASA
