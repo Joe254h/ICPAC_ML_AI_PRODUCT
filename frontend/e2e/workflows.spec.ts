@@ -133,7 +133,10 @@ test("the model registry shows the candidate and guards promotion", async ({
     page.getByRole("heading", { name: "MBC + Atmos37 CatBoost" }),
   ).toBeVisible();
   await expect(page.getByText("AI/ML layer in progress.")).toBeVisible();
-  await page.getByRole("button", { name: "Promote to production" }).click();
+  await page
+    .getByRole("button", { name: "Promote to production" })
+    .first()
+    .click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   await dialog.getByRole("button", { name: "Cancel" }).click();
@@ -154,30 +157,36 @@ test("operations lists the weekly cycle with who ran it", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("the frozen pre-refit models are registered but not put in use", async ({
+test("the decided pre-refit model is in use and the earlier one a click away", async ({
   page,
 }) => {
   await page.goto("/models");
-  const name = "MBC + CatBoost residual (full correction)";
-  const card = page
-    .locator("section.card")
-    .filter({ has: page.getByRole("heading", { name, exact: true }) });
-  await expect(card).toBeVisible();
-  await expect(card.getByText("Integrity verified")).toBeVisible();
-  await expect(card.getByText("In use for forecasts")).toHaveCount(0);
+  const card = (name: string) =>
+    page
+      .locator("section.card")
+      .filter({ has: page.getByRole("heading", { name, exact: true }) });
+  // The recorded decision approved and activated the full-correction policy, once.
+  const decided = card("MBC + CatBoost residual (full correction)");
+  await expect(decided).toContainText("In use for forecasts");
+  await expect(decided.getByText(/RMSE 15\.204 mm\/week/)).toBeVisible();
   await expect(
-    card.getByRole("button", { name: "Approve for operational use" }),
+    decided.getByRole("button", { name: "Make this the model in use" }),
+  ).toHaveCount(0);
+  const history = card("Model in use");
+  await expect(history).toContainText("Joe254h");
+  await expect(history).toContainText("MBC + Atmos37 CatBoost");
+  // The other policies stay experimental: approving one does not put it in use.
+  const other = card("MBC + 75% CatBoost residual");
+  await expect(other.getByText("Integrity verified")).toBeVisible();
+  await expect(
+    other.getByRole("button", { name: "Approve for operational use" }),
   ).toBeVisible();
   await expect(
-    card.getByRole("button", { name: "Make this the model in use" }),
+    other.getByRole("button", { name: "Make this the model in use" }),
   ).toHaveCount(0);
-  await expect(card.getByText(/RMSE 15\.204 mm\/week/)).toBeVisible();
-  // The model in use stays the Atmos37 candidate.
-  const inUse = page
-    .locator("section.card")
-    .filter({ hasText: "In use for forecasts" });
-  await expect(inUse).toHaveCount(1);
-  await expect(inUse).toContainText("MBC + Atmos37 CatBoost");
+  await expect(
+    page.locator("section.card").filter({ hasText: "In use for forecasts" }),
+  ).toHaveCount(1);
 });
 
 test("the experimental verification keeps the frozen results apart", async ({

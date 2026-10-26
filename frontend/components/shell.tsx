@@ -1,11 +1,11 @@
 "use client";
 /**
- * Site shell: the organisation bar (service status, icpac.net), the white header with the
- * IGAD seal, the service's name and search, the green menu bar with drop-down panels, the
- * page header and the footer.
+ * Site shell: the white header with the IGAD seal, the service's name, search, service
+ * status and staff access, the green menu bar with drop-down panels, the page header and
+ * the footer.
  */
 import Link from "next/link";
-import BulletinAccess from "@/components/bulletin-access";
+import StaffAccess from "@/components/bulletin-access";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
@@ -202,25 +202,14 @@ function SearchDialog({ close }: { close: () => void }) {
 }
 
 function StatusDot({ health }: { health: Loaded<Health> }) {
-  const colour = health.error
-    ? "#f87171"
+  const tone = health.error
+    ? "bad"
     : health.data?.status === "Healthy"
-      ? "#4ade80"
+      ? "ok"
       : health.data
-        ? "#fbbf24"
-        : "rgba(255,255,255,.6)";
-  return (
-    <span
-      aria-hidden
-      style={{
-        width: 9,
-        height: 9,
-        borderRadius: "50%",
-        background: colour,
-        boxShadow: "0 0 0 2px rgba(255,255,255,.14)",
-      }}
-    />
-  );
+        ? "warn"
+        : "unknown";
+  return <span aria-hidden className={cx("status-dot", tone)} />;
 }
 
 /**
@@ -332,29 +321,13 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         Skip to content
       </a>
       <header className={cx("site-top", home && "home")}>
-        <div className="topbar">
-          <div className="wrap">
-            <span className="topbar-org">
-              IGAD Climate Prediction and Applications Centre · WMO Regional
-              Climate Centre for Eastern Africa
-            </span>
-            <div className="topbar-links">
-              <Link href="/system">
-                Service status <StatusDot health={health} />
-              </Link>
-              <a href="https://www.icpac.net" target="_blank" rel="noreferrer">
-                icpac.net <ExternalLink size={12} aria-hidden />
-              </a>
-            </div>
-          </div>
-        </div>
         <div className="wrap brandbar">
           <Link
             className="brand"
             href="/"
             aria-label="ICPAC Week-2 forecasts, home"
           >
-            <img src="/igad-seal.png" alt="" width={54} height={54} />
+            <img src="/igad-seal.png" alt="" width={44} height={44} />
             <div className="brand-name">
               <b>ICPAC</b>
               <small>IGAD Climate Prediction and Applications Centre</small>
@@ -374,6 +347,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               <span className="label">Search</span>
               <kbd aria-hidden>/</kbd>
             </button>
+            <Link
+              href="/system"
+              className="status-link"
+              title="Service status"
+              aria-label="Service status"
+            >
+              <StatusDot health={health} />
+              <span className="label">Status</span>
+            </Link>
+            {health.data && health.data.access_mode !== "public" && (
+              <StaffAccess />
+            )}
             <button
               type="button"
               className="menu-toggle"
@@ -414,12 +399,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         )}
       </header>
       <ServiceNotice health={health} />
-      {health.data && health.data.access_mode !== "public" && (
-        <details className="wrap" style={{ paddingBlock: 12 }}>
-          <summary>Staff access</summary>
-          <BulletinAccess />
-        </details>
-      )}
       <BannerSlot.Provider value={slot}>
         <main id="content" key={accessVersion}>
           {children}
@@ -461,13 +440,16 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <h4>Organisation</h4>
             {ORGANISATION.map(([label, url]) => (
               <a key={url} href={url} target="_blank" rel="noreferrer">
-                {label}
+                {label} <ExternalLink size={12} aria-hidden />
               </a>
             ))}
           </div>
         </div>
         <div className="wrap legal">
-          <span>© ICPAC {new Date().getUTCFullYear()}</span>
+          <span>
+            © ICPAC {new Date().getUTCFullYear()} · WMO Regional Climate Centre
+            for Eastern Africa
+          </span>
           <span>
             Forecast data: ECMWF Open Data (CC BY 4.0) · Observations: CHIRPS,
             TAMSAT

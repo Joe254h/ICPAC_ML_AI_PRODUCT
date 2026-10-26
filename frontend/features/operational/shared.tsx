@@ -67,6 +67,14 @@ export function layerText(
   return family === "hybrid7_pc17" ? PREREFIT_TEXT : LAYER_TEXT;
 }
 
+/** The family of the model that issued a forecast. A run issued from MBC alone records
+ * "MBC" as its own method, so the registered model's family comes first. */
+export function familyOf(
+  detail: Pick<ForecastRun, "family"> & { model?: { family?: string } },
+): string | undefined {
+  return detail.model?.family ?? detail.family;
+}
+
 /** The forecast named in the URL (?id=), else the latest one. */
 export function useForecast(id?: string) {
   return useApi<ForecastDetail>(id ? "/forecasts/" + id : "/forecasts/latest");
@@ -128,8 +136,9 @@ export function productReason(product?: ProductStatus): string {
   return `Waiting for ${product.reason}.`;
 }
 
-export function ProductStatusList({ detail }: { detail: ForecastRun }) {
+export function ProductStatusList({ detail }: { detail: ForecastDetail }) {
   const products = detail.products ?? {};
+  const text = layerText(familyOf(detail));
   return (
     <div className="grid-3">
       {VARIANTS.map((variant) => {
@@ -143,11 +152,11 @@ export function ProductStatusList({ detail }: { detail: ForecastRun }) {
             style={{ borderStyle: "solid", background: "#fff" }}
           >
             <Status tone="ok">Available</Status>
-            <h3>{LAYER_TEXT[variant].title}</h3>
-            <p>{LAYER_TEXT[variant].method}</p>
+            <h3>{text[variant].title}</h3>
+            <p>{text[variant].method}</p>
           </div>
         ) : (
-          <InProgress key={variant} title={LAYER_TEXT[variant].title}>
+          <InProgress key={variant} title={text[variant].title}>
             {productReason(products[variant])}
           </InProgress>
         );

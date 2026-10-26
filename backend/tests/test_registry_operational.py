@@ -255,6 +255,48 @@ def test_startup_registers_the_committed_candidate_from_real_artifacts(tmp_path,
     assert len([m for m in again.repo.list("model") if operational.is_operational(m)]) == 5
 
 
+def test_startup_applies_the_recorded_decision_on_the_model_in_use_once(tmp_path, monkeypatch):
+    """config/model_in_use.yaml names the pre-refit model: startup approves and activates
+    it as the named decider, once; a later Models page activation then stands."""
+    monkeypatch.delenv("ARTIFACT_ROOT", raising=False)
+    monkeypatch.delenv("MODEL_DECISION_PATH")
+    operational.authoritative_grid.cache_clear()
+    platform = Platform(
+        Repository(f"sqlite:///{tmp_path / 'db.sqlite'}"), register_descriptors=True
+    )
+    assert platform.repo.list("registration_issue") == []
+    registry = ModelRegistry(platform)
+    current = registry.current()
+    assert current["model"]["model_id"] == "icpac_week2_catboost_prerefit_v1"
+    assert (
+        current["model"]["status"] == "candidate" and current["model"]["policy"] == "catboost_full"
+    )
+    assert current["activation"]["actor"] == "Joe254h"
+    assert "2026-10-26-prerefit" in current["activation"]["comment"]
+    # The earlier model in use is one click away (rollback).
+    assert current["activation"]["history"][0]["model_id"] == "mbc_atmos37_catboost_candidate_v1"
+    actions = {(a["action"], a["entity"], a["actor"]) for a in platform.repo.list("approval")}
+    assert ("candidate", "icpac_week2_catboost_prerefit_v1", "Joe254h") in actions
+    assert ("activate", "icpac_week2_catboost_prerefit_v1", "Joe254h") in actions
+    # A reviewer switches back on the Models page; restarting does not undo it.
+    registry.transition("mbc_atmos37_catboost_candidate_v1", "activate", REVIEW)
+    Platform(platform.repo, register_descriptors=True)
+    assert registry.current()["model"]["model_id"] == "mbc_atmos37_catboost_candidate_v1"
+    assert platform.repo.list("registration_issue") == []
+    # A decision that cannot be applied is a registration issue, never skipped silently.
+    other = tmp_path / "decision.yaml"
+    other.write_text(
+        "decision:\n  id: later\n  model_id: not_registered_v9\n"
+        "  decided_by: Joe254h\n  reason: test\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODEL_DECISION_PATH", str(other))
+    Platform(platform.repo, register_descriptors=True)
+    issues = [i for i in platform.repo.list("registration_issue") if i["current"]]
+    assert len(issues) == 1 and "not_registered_v9 is not registered" in issues[0]["error"]
+    assert registry.current()["model"]["model_id"] == "mbc_atmos37_catboost_candidate_v1"
+
+
 @pytest.mark.parametrize(
     "descriptor",
     [
@@ -350,6 +392,7 @@ def test_activation_in_a_production_release_needs_the_production_gate(setup, mon
 
 def test_a_realtime_review_needs_a_run_whose_checks_all_passed(setup):
     from backend.app.schemas import RealtimeReviewRequest
+    from backend.app.services.forecasts import KIND
 
     platform, registry, paths, root, tmp = setup
     model_id = registry.register_descriptor(str(write_descriptor(tmp / "a.yaml", paths, root)))[
@@ -362,9 +405,11 @@ def test_a_realtime_review_needs_a_run_whose_checks_all_passed(setup):
         "realtime_gate_required": True,
         "input_checks": checks,
     }
-    platform.repo.save("forecast", run, "w2-2026-10-19-0000000a")
+    platform.repo.save(KIND, run, "w2-2026-10-19-0000000a")
     failed = {**run, "input_checks": [{**checks[0], "status": "failed"}]}
-    platform.repo.save("forecast", failed, "w2-2026-10-19-0000000b")
+    platform.repo.save(KIND, failed, "w2-2026-10-19-0000000b")
+    # A record of another kind is never evidence.
+    platform.repo.save("audit", run, "w2-2026-10-19-0000000c")
     body = RealtimeReviewRequest(
         source="ecmwf_opendata",
         forecast_id="w2-2026-10-19-0000000b",
@@ -374,6 +419,10 @@ def test_a_realtime_review_needs_a_run_whose_checks_all_passed(setup):
     )
     with pytest.raises(ValueError, match="not every input check passed"):
         registry.review_realtime_feed(model_id, body)
+    with pytest.raises(ValueError, match="Name a forecast run"):
+        registry.review_realtime_feed(
+            model_id, body.model_copy(update={"forecast_id": "w2-2026-10-19-0000000c"})
+        )
     with pytest.raises(ValueError, match="another input source"):
         registry.review_realtime_feed(
             model_id,

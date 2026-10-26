@@ -43,14 +43,10 @@ def system_health(platform) -> dict:
         if os.getenv("RELEASE_MODE", "evaluation") == "production"
         else "Warning · evaluation release; candidate forecasts are not a production release"
     )
-    models = [m for m in platform.repo.list("model") if operational.is_operational(m)]
-    in_use = [m for m in models if m["status"] == "production"] or sorted(
-        (m for m in models if m["status"] == "candidate"), key=lambda m: m["created_at"]
-    )[-1:]
-    if not in_use:
+    model = forecasts.current_record(platform)
+    if model is None:
         components["Operational model"] = "Unavailable · no operational model registered"
     else:
-        model = in_use[-1]
         healthy = operational.OperationalModel(model).health_check()
         production = model["status"] == "production"
         name = model.get("model_name") or "The registered model"
@@ -70,10 +66,15 @@ def system_health(platform) -> dict:
         components["Model registration"] = (
             "Unavailable · a model descriptor could not be registered; see the server log"
         )
-    hybrid = forecasts.hybrid_status()
+    hybrid = forecasts.hybrid_status(model)
     components["MBC + AI/ML forecast"] = (
         "Healthy · hybrid layer produced"
         if hybrid["status"] == "available"
+        else "Warning · the model in use issues MBC alone"
+        if hybrid["status"] == "not_produced"
+        else "In progress · forecasts provide raw ECMWF and MBC until a reviewer confirms "
+        "the real-time ECMWF input"
+        if hybrid["reason"] == forecasts.REALTIME_CONFIRMATION
         else "In progress · forecasts provide raw ECMWF and MBC until the AI/ML model's "
         "upper-air inputs are supplied"
     )

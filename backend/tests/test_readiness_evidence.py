@@ -112,3 +112,22 @@ def test_a_map_downloads_as_pdf(env):
     assert "icpac-week2-mbc.pdf" in response.headers["content-disposition"]
     bad = env.client.get(f"/forecasts/{record['forecast_id']}/map?layer=mbc&format=svg")
     assert bad.status_code == 422
+
+
+def test_the_hybrid_status_follows_the_model_in_use():
+    """A frozen bundle states its own upper-air hours; from 2025 its AI/ML layer waits for
+    the reviewer's real-time confirmation; the MBC-only policy never produces one."""
+    from backend.app.services.forecasts import REALTIME_CONFIRMATION, hybrid_status
+
+    bundle = {
+        "policy": "catboost_full",
+        "pressure_steps_hours": [192, 216, 240, 264, 288, 312, 336],
+        "model_info": {"realtime_gate_from": "2025-01-01"},
+    }
+    assert hybrid_status(bundle) == {"status": "in_progress", "reason": REALTIME_CONFIRMATION}
+    confirmed = {**bundle, "realtime_reviews": {"ecmwf_opendata": {"actor": "Joe254h"}}}
+    assert hybrid_status(confirmed) == {"status": "available", "reason": None}
+    assert hybrid_status({**bundle, "policy": "mbc_only"})["status"] == "not_produced"
+    # A model without its own hours needs the configured ones (unset in this release).
+    assert hybrid_status({"policy": None})["status"] == "in_progress"
+    assert hybrid_status()["status"] == "in_progress"

@@ -72,6 +72,16 @@ export function getBulletinOperatorKey() {
   return bulletinOperatorKey;
 }
 
+/** The person signed in with the staff key in this tab, if any. */
+export type StaffUser = { name: string; roles: string[] };
+let staffUser: StaffUser | null = null;
+export function setStaffUser(user: StaffUser | null) {
+  staffUser = user;
+}
+export function getStaffUser() {
+  return staffUser;
+}
+
 export function mutate<T>(path: string, body: unknown) {
   return request<T>(path, {
     method: "POST",

@@ -22,9 +22,11 @@ import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import yaml
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -32,6 +34,7 @@ from sqlalchemy.orm import Session
 from backend.app.db import Record, now
 from backend.app.schemas import IndependentTestRequest, ReviewRequest
 from backend.app.services import operational
+from climate_engine.core import ROOT
 from climate_engine.models.descriptor import VALIDATION_SCORES, validation_scores
 from climate_engine.provenance import code_version
 
@@ -39,6 +42,8 @@ DEMO_TASK = "week2_precipitation"
 ACTIVE_KIND = "active_model"
 ACTIVE_ID = f"active-{operational.TASK}"
 REVIEW_SOURCES = {"ecmwf_opendata", "ecmwf_files"}
+DECISION_KIND = "model_decision"
+DECISION_FIELDS = ("id", "model_id", "decided_by", "reason")
 LIFECYCLE = (
     "uploaded",
     "integrity_verified",
@@ -70,6 +75,24 @@ def lifecycle(record: dict[str, Any], active_id: str | None) -> dict[str, Any]:
         else next(name for name in reversed(LIFECYCLE[:-1]) if states[name])
     )
     return {"stage": stage, "states": states}
+
+
+def model_decision() -> dict[str, str] | None:
+    """A named person's recorded decision on the model in use (config/model_in_use.yaml).
+    MODEL_DECISION_PATH names another file; an empty value turns decisions off."""
+    path = os.getenv("MODEL_DECISION_PATH")
+    if path == "":
+        return None
+    file = Path(path) if path else ROOT / "config" / "model_in_use.yaml"
+    if not file.is_file():
+        return None
+    decision = (yaml.safe_load(file.read_text(encoding="utf-8")) or {}).get("decision")
+    if not decision:
+        return None
+    missing = [k for k in DECISION_FIELDS if not str(decision.get(k) or "").strip()]
+    if missing:
+        raise ValueError(f"The decision on the model in use is missing {', '.join(missing)}")
+    return {k: " ".join(str(decision[k]).split()) for k in DECISION_FIELDS}
 
 
 def task_of(record: dict[str, Any]) -> str:
@@ -281,6 +304,42 @@ class ModelRegistry:
 
     # ------------------------------------------------------------------ transitions
 
+    def apply_decision(self, decision: dict[str, str]) -> bool:
+        """Apply a recorded decision on the model in use once, as its named decider: approve
+        the model for operational use if it is still experimental, then activate it. A
+        later activation on the Models page stands until a decision with a new id. Returns
+        whether the decision was applied now."""
+        marker = f"decision-{decision['id']}"
+        try:
+            self.repo.get(DECISION_KIND, marker)
+            return False
+        except KeyError:
+            pass
+        model_id = decision["model_id"]
+        try:
+            record = self.repo.get("model", model_id)
+        except KeyError:
+            raise ValueError(f"{model_id} is not registered") from None
+        if not operational.is_operational(record):
+            raise ValueError(f"{model_id} is not an operational model")
+        review = ReviewRequest(
+            actor=decision["decided_by"],
+            confirmed=True,
+            comment=f"{decision['reason']} (decision {decision['id']}, recorded in the service "
+            "configuration)",
+        )
+        if record["status"] == "experimental":
+            self.transition(model_id, "candidate", review)
+        if self.current()["model"]["model_id"] != model_id:
+            try:
+                self.transition(model_id, "activate", review)
+            except ValueError:
+                # Another process starting at the same time may have applied it first.
+                if self.current()["model"]["model_id"] != model_id:
+                    raise
+        self.repo.save(DECISION_KIND, {**decision, "applied_at": now()}, marker)
+        return True
+
     def current(self) -> dict[str, Any]:
         """The operational model forecasts use: the explicitly activated model; before any
         activation, production if one exists, else the newest candidate."""
@@ -339,7 +398,8 @@ class ModelRegistry:
         pointer = {
             "id": ACTIVE_ID,
             "model_id": legacy["model_id"],
-            "since": stamp,
+            # In use since it was deployed (production) or registered, not since the pin.
+            "since": legacy.get("deployment_date") or legacy.get("created_at") or stamp,
             "actor": "registry",
             "comment": "The model in use when explicit activation began; kept unchanged.",
             "history": [],
@@ -411,8 +471,10 @@ class ModelRegistry:
                 reviews.pop(body.source)
                 action = "realtime_review_withdrawn"
             else:
+                from backend.app.services.forecasts import KIND as FORECAST_KIND
+
                 evidence = session.get(Record, body.forecast_id)
-                if evidence is None or evidence.kind != "forecast":
+                if evidence is None or evidence.kind != FORECAST_KIND:
                     raise ValueError("Name a forecast run of this model as the evidence")
                 run = json.loads(evidence.payload)
                 checks = list(run.get("input_checks") or [])

@@ -256,3 +256,75 @@ def test_the_pipeline_applies_the_realtime_gate(tmp_path, grid, loaded):
     np.testing.assert_allclose(
         fallback.dataset["mbc"].values[grid.mask], reforecast.dataset["mbc"].values[grid.mask]
     )
+
+
+def test_the_decided_model_issues_the_hybrid_once_the_realtime_input_is_confirmed(
+    tmp_path, monkeypatch
+):
+    """Through the API, with the committed decision on the model in use: the first 2026
+    run of the pre-refit model passes every input check and waits for the reviewer; after
+    the confirmation the weekly run issues a new forecast with the MBC + AI/ML layer."""
+    from fastapi.testclient import TestClient
+
+    from backend.app.main import create_app
+    from backend.tests import ecmwf_mirror
+    from backend.tests.test_forecasts import PNG
+    from backend.tests.test_inputs import wait
+    from climate_engine.cartography import icpac_maps
+
+    key = "test-bulletin-operator-key-00000000"
+    for name, value in {
+        "BULLETIN_OPERATOR_KEY": key,
+        "AUTO_REGISTER_MODELS": "true",
+        "RUN_ROOT": tmp_path / "runs",
+        "FORECAST_INPUT_ROOT": tmp_path / "inputs",
+        "DATA_ROOT": tmp_path / "observations",
+    }.items():
+        monkeypatch.setenv(name, str(value))
+    monkeypatch.delenv("MODEL_DECISION_PATH")
+    monkeypatch.delenv("ARTIFACT_ROOT", raising=False)
+    monkeypatch.setattr(
+        "climate_engine.inputs.ecmwf_opendata.member_numbers", lambda: [*range(1, 11)]
+    )
+    monkeypatch.setattr(icpac_maps, "render_png", lambda *args, **kwargs: PNG)
+    steps = (192, 216, 240, 264, 288, 312, 336)
+    ecmwf_mirror.build(tmp_path / "mirror", date(2026, 10, 25), 10, pressure_steps=steps)
+    model_id = "icpac_week2_catboost_prerefit_v1"
+    weekly = {"action": "run_forecast", "initialization": "2026-10-25", "actor": "Joe254h"}
+    with ecmwf_mirror.serve(tmp_path / "mirror") as url:
+        monkeypatch.setenv("ECMWF_OPENDATA_MIRRORS", url)
+        app = create_app(f"sqlite:///{tmp_path / 'db.sqlite'}")
+        with TestClient(app, headers={"Authorization": f"Bearer {key}"}) as client:
+            assert client.get("/models/current").json()["model"]["model_id"] == model_id
+            done = wait(client, client.post("/operations", json=weekly).json(), 600)
+            assert done["status"] == "complete", done
+            waiting = client.get(f"/forecasts/{done['result']['forecast_id']}").json()
+            assert waiting["model_id"] == model_id and waiting["primary_layer"] == "mbc"
+            assert waiting["products"]["hybrid"] == {
+                "status": "in_progress",
+                "reason": REALTIME_REVIEW,
+            }
+            checks = waiting["provenance"]["input_checks"]
+            assert len(checks) == 26 and {c["status"] for c in checks} == {"passed"}
+
+            review = client.post(
+                f"/models/{model_id}/realtime-review",
+                json={
+                    "source": "ecmwf_opendata",
+                    "forecast_id": waiting["forecast_id"],
+                    "actor": "Joe254h",
+                    "confirmed": True,
+                    "comment": "Every input check passed on the 25 October run",
+                },
+            )
+            assert review.status_code == 200, review.text
+
+            done = wait(client, client.post("/operations", json=weekly).json(), 600)
+            issued = client.get(f"/forecasts/{done['result']['forecast_id']}").json()
+            assert issued["forecast_id"] != waiting["forecast_id"]
+            assert issued["primary_layer"] == "hybrid"
+            assert issued["products"]["hybrid"] == {"status": "available"}
+            assert issued["provenance"]["realtime_gate"]["review"]["actor"] == "Joe254h"
+            # The confirmed run is the one the week keeps: a retry reuses it.
+            again = wait(client, client.post("/operations", json=weekly).json(), 600)
+            assert again["result"]["forecast_id"] == issued["forecast_id"]

@@ -1,0 +1,19 @@
+# The model forecasts use, as decided by a named person.
+#
+# On startup the server applies a decision once, through the same approval and activation a
+# reviewer makes on the Models page, and records it in the model's approval and audit
+# history. A later activation on the Models page then stands until a new decision (a new
+# id) is written here. Remove the decision to leave the choice to the Models page alone.
+#
+# A decision that cannot be applied (the model is not registered or failed an integrity
+# check, or a production release names a model that is not production) is recorded as a
+# registration issue: a cloud deployment then refuses to start rather than serve another
+# model than the one decided.
+decision:
+  id: 2026-10-26-prerefit
+  model_id: icpac_week2_catboost_prerefit_v1
+  decided_by: Joe254h
+  reason: >-
+    Use the uploaded pre-refit model (MBC + CatBoost residual, full policy) for the
+    MBC + AI/ML forecast until the refit has completed, passed its integrity checks and
+    been approved.

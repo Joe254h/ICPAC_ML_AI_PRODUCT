@@ -288,16 +288,24 @@ class OperationService:
 
     def _issued(self, initialization: date) -> Sequence[dict[str, Any]]:
         """Forecasts already issued from this run by the model in use: a retry or a second
-        cycle reuses them; a newly activated model issues its own."""
+        cycle reuses them; a newly activated model issues its own, and so does a run held
+        for a real-time input confirmation that a reviewer has since recorded."""
         try:
-            model_id = ModelRegistry(self.platform).current()["model"]["model_id"]
+            model = ModelRegistry(self.platform).current()["model"]
         except KeyError:
-            model_id = None
+            model = {}
+        model_id = model.get("model_id")
+        reviewed = set(model.get("realtime_reviews") or {})
         return [
             r
             for r in self._forecasts().runs()
             if r["initialization"][:10] == initialization.isoformat()
             and (model_id is None or r.get("model_id") == model_id)
+            and not (
+                r.get("realtime_gate_required")
+                and not r.get("realtime_reviewed")
+                and r.get("input_source") in reviewed
+            )
         ]
 
     def _latest_retrievable(self, operation_id: str, body: OperationRequest, newest: date) -> date:

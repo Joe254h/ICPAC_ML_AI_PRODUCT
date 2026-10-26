@@ -10,7 +10,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from backend.app.db import now
 from backend.app.schemas import OperationRequest
-from backend.app.services.forecasts import ForecastService, hybrid_status
+from backend.app.services.forecasts import ForecastService, current_record, hybrid_status
 
 CAPABILITIES = (
     (1, "ECMWF acquisition", "/data/ecmwf", "acquisition"),
@@ -83,7 +83,7 @@ class AutomationService:
             if r.get("verification_status") == "available" and not r.get("synthetic")
         ]
         layers = (latest or {}).get("layers", [])
-        hybrid = hybrid_status()
+        hybrid = hybrid_status(current_record(self.platform))
         cfg = scheduler_settings()
         stamp = datetime.now(timezone.utc)
         due = stamp.replace(hour=cfg["hour_utc"], minute=0, second=0, microsecond=0)

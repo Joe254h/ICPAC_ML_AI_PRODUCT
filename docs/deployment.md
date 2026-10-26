@@ -208,15 +208,21 @@ multi-team use.
 The backend image carries the committed artifacts, including the frozen pre-refit bundle
 (about 20 MB more) and its verification evidence. At start-up every descriptor in
 `config/model_registry/` is checked and registered; the four pre-refit policies arrive
-**experimental** and the model in use does not change. No new environment variable is
-needed. To use the pre-refit model on the live site, after deploying:
+**experimental**. No new environment variable is needed.
 
-1. Models › *MBC + CatBoost residual (full correction)* (or another policy) › **Record
-   independent test**, if the reviewers accept the HPC report.
-2. **Approve for operational use**, then **Make this the model in use**.
-3. Operations › run the weekly cycle. The background run downloads the upper-air fields.
-4. Data & Tools › ECMWF ensemble shows every input check. For runs from 2025, review them
-   and **Confirm the real-time input** on the Models page; the next run adds the AI/ML layer.
+`config/model_in_use.yaml` records Joe254h's decision (26 October 2026) to issue the
+MBC + AI/ML forecast with the pre-refit model (full CatBoost policy) until the refit is
+approved: the first start-up of this release approves and activates it once, as Joe254h
+(see docs/operational_models.md). After deploying:
+
+1. Open the site, sign in with **Staff access**, and run the weekly cycle (Operations), or
+   wait for the scheduled one. The run downloads the upper-air fields at the seven leads.
+2. The latest forecast's page then asks for the one-time real-time confirmation: check the
+   input checks (Data & Tools › ECMWF ensemble) and click **Review and confirm**. The
+   forecast is run again and issues the MBC + AI/ML layer.
+
+Without the decision file, the same is done by hand on the Models page: **Approve for
+operational use**, then **Make this the model in use**.
 
 To go back, open Models and reactivate the earlier model from the activation history.
 `RELEASE_MODE=production` additionally requires a production model (passed independent

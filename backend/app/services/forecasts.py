@@ -94,9 +94,25 @@ def package_root() -> Path:
     return default_run_root() / "forecasts"
 
 
-def hybrid_status() -> dict[str, Any]:
-    """Whether new runs can produce the MBC + AI/ML (hybrid) layer, and why not."""
-    if settings()["ecmwf"]["pressure"].get("week2_steps_hours") is None:
+REALTIME_CONFIRMATION = (
+    "It waits for a reviewer's one-time confirmation, on the latest forecast's page, that "
+    "the real-time ECMWF input matches the reforecasts the model was trained on. Until "
+    "then, forecasts are issued from MBC."
+)
+
+
+def hybrid_status(model: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Whether new runs of the model in use (``model``, its registry record) can produce
+    the MBC + AI/ML (hybrid) layer, and why not. A frozen bundle states its own upper-air
+    forecast hours; other models need the configured ones."""
+    if model is not None and model.get("policy") == "mbc_only":
+        return {
+            "status": "not_produced",
+            "reason": "The model in use issues MBC alone (its fallback policy), without an "
+            "AI/ML correction.",
+        }
+    own_steps = bool((model or {}).get("pressure_steps_hours"))
+    if not own_steps and settings()["ecmwf"]["pressure"].get("week2_steps_hours") is None:
         return {
             "status": "in_progress",
             "reason": "The AI/ML model needs two inputs that have not been supplied yet: the "
@@ -104,10 +120,23 @@ def hybrid_status() -> dict[str, Any]:
             "and those fields from the ECMWF ensemble. Until then, forecasts are issued from "
             "MBC.",
         }
+    gated = bool(((model or {}).get("model_info") or {}).get("realtime_gate_from"))
+    if gated and "ecmwf_opendata" not in ((model or {}).get("realtime_reviews") or {}):
+        return {"status": "in_progress", "reason": REALTIME_CONFIRMATION}
     return {"status": "available", "reason": None}
 
 
-def capabilities() -> dict[str, Any]:
+def current_record(platform) -> dict[str, Any] | None:
+    """The registry record of the model forecasts use, if any is registered."""
+    from backend.app.services.registry import ModelRegistry
+
+    try:
+        return ModelRegistry(platform).current()["model"]
+    except KeyError:
+        return None
+
+
+def capabilities(model: dict[str, Any] | None = None) -> dict[str, Any]:
     """What this deployment can do, for the interface (no secrets, no paths)."""
     try:
         countries = list(operational.authoritative_grid().country_names)
@@ -116,7 +145,7 @@ def capabilities() -> dict[str, Any]:
     return {
         "pressure_steps_configured": settings()["ecmwf"]["pressure"].get("week2_steps_hours")
         is not None,
-        "hybrid": hybrid_status(),
+        "hybrid": hybrid_status(model),
         "input_sources": ["ecmwf_opendata", "ecmwf_files"],
         "map_layers": list(packages.MAP_LAYERS),
         "verification_maps": {name: title for name, (_, title) in VERIFICATION_MAPS.items()},
@@ -396,6 +425,7 @@ class ForecastService:
             "input_checks": p.get("input_checks") or [],
             "hybrid_policy": p.get("hybrid_policy"),
             "realtime_gate_required": bool((p.get("realtime_gate") or {}).get("required")),
+            "realtime_reviewed": bool((p.get("realtime_gate") or {}).get("review")),
             "protected_test_period": p["protected_test_period"],
             "verification_status": (run.verification or packages.NO_VERIFICATION)["status"],
             "created_at": now(),

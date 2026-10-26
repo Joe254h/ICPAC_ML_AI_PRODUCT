@@ -18,6 +18,7 @@ import { useApp } from "@/components/shell";
 import type { ForecastDetail, Variant } from "@/types/operational";
 import {
   LAYER_TEXT,
+  familyOf,
   NoForecast,
   layerText,
   forecastFacts,
@@ -69,10 +70,9 @@ function Body({
   variant: Variant;
 }) {
   const { config } = useApp();
-  const text = layerText(detail.family)[variant];
-  const steps = (detail.family === "hybrid7_pc17" ? PREREFIT_STEPS : STEPS)[
-    variant
-  ];
+  const family = familyOf(detail);
+  const text = layerText(family)[variant];
+  const steps = (family === "hybrid7_pc17" ? PREREFIT_STEPS : STEPS)[variant];
   const available = layersOf(detail).includes(variant);
   const reason =
     detail.products?.hybrid?.reason ??

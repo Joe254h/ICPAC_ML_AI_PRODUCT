@@ -196,7 +196,7 @@ test("the hybrid layer says what it still needs", async ({ page }) => {
     page.getByRole("heading", { name: "What is needed to complete it" }),
   ).toBeVisible();
   await expect(
-    page.getByText(/upper-air \(pressure-level\) fields/).first(),
+    page.getByText(/upper-air \(pressure-level\)/).first(),
   ).toBeVisible();
 });
 
@@ -240,7 +240,9 @@ test("system status reports the downloaded input and the issued forecast", async
 }) => {
   await page.goto("/system");
   const row = (name: string) =>
-    page.locator(".health-row").filter({ hasText: name });
+    page
+      .locator(".health-row")
+      .filter({ has: page.getByText(name, { exact: true }) });
   await expect(row("ECMWF input")).toContainText("Healthy");
   await expect(row("Operational forecasts")).toContainText("Healthy");
   await expect(row("MBC + AI/ML forecast")).toContainText("In progress");

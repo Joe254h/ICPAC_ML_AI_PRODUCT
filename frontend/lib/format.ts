@@ -140,3 +140,8 @@ export function versionLabel(version: string): string {
   const match = /^(\d+\.\d+\.\d+)-([a-z]+)\.(\d+)$/.exec(version);
   return match ? `${match[1]} (${match[2]} ${match[3]})` : version;
 }
+
+/** Text with its first letter capitalised, for labels that come lower case. */
+export function sentence(text: string): string {
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+}

@@ -1,3 +1,7 @@
+# Load Python's own SQLite before any GRIB library: an eccodes wheel can bundle an older
+# libsqlite3 (no UPDATE ... RETURNING), and the first one loaded serves the whole process.
+import sqlite3  # noqa: F401
+
 import pytest
 
 
@@ -5,6 +9,8 @@ import pytest
 def _no_startup_registration(monkeypatch):
     """Apps built in tests skip startup descriptor registration unless a test opts in."""
     monkeypatch.setenv("AUTO_REGISTER_MODELS", "false")
+    # Nor do they apply the deployment's decision on the model in use.
+    monkeypatch.setenv("MODEL_DECISION_PATH", "")
     # Unit/API mirrors deliberately contain three members. Production requests ten;
     # browser mirrors use the actual production member count.
     monkeypatch.setattr("climate_engine.inputs.ecmwf_opendata.member_numbers", lambda: [1, 2, 3])

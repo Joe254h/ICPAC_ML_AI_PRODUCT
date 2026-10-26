@@ -100,6 +100,24 @@ runs a test prediction first; in `RELEASE_MODE=production` only a production mod
 independent test) can be activated. The activation history lists each earlier model with
 its dates: reactivating one is the rollback. Every step is an approval and audit record.
 
+### A recorded decision on the model in use
+
+`config/model_in_use.yaml` can hold a named person's decision on the model forecasts use
+(id, model, decided by, reason). At start-up the service applies it **once**, through the
+same approval and activation as the Models page and as that person, and records it in the
+approval and audit history; the earlier model stays one click away in the activation
+history. A later activation on the Models page then stands across restarts until a decision
+with a new id is written. A decision that cannot be applied (model not registered, failed
+integrity check, or a production release naming a non-production model) is a registration
+issue: a cloud deployment refuses to start rather than serve another model than the one
+decided. Remove the decision to leave the choice to the Models page alone.
+
+The current decision (2026-10-26, Joe254h): the frozen pre-refit model with the full
+CatBoost policy (`icpac_week2_catboost_prerefit_v1`) issues the MBC + AI/ML forecast until
+the refit has completed, passed its integrity checks and been approved. It is approved for
+operational (evaluation) use only: its independent test is not recorded by this decision,
+and it is not a production model.
+
 API: `POST /models/{id}/candidate`, `POST /models/{id}/activate`, `POST /models/{id}/promote`
 (production, also activates), `POST /models/{id}/retire`, each with `{"actor", "confirmed":
 true, "comment"}`; `GET /models` returns `lifecycle` for each model and `GET /models/current`
@@ -196,10 +214,13 @@ are left out of scores; zero rainfall is a value.
 
 The bundle refuses real-time inputs until their compatibility with the reforecasts is
 confirmed. For initializations from 2025-01-01 the service runs every check, then withholds
-the AI/ML layer until a reviewer confirms the input source on the Models page (**Confirm
-the real-time input**), naming a run of that model whose checks all passed
-(`POST /models/{id}/realtime-review`). The confirmation can be withdrawn. Confirmed runs
-say that the 2022–2024 scores describe reforecasts, not this real-time skill.
+the AI/ML layer until a reviewer confirms the input source, naming a run of that model whose
+checks all passed (`POST /models/{id}/realtime-review`). The latest forecast's page offers
+this to signed-in staff (**Review and confirm**): it records the confirmation with that run
+as the evidence and runs the forecast again, which then issues the AI/ML layer (a run held
+for the confirmation is not reused once it is recorded). The Models page offers the same
+confirmation and its withdrawal. Confirmed runs say that the 2022–2024 scores describe
+reforecasts, not this real-time skill.
 
 ### Using it
 
@@ -208,8 +229,11 @@ say that the 2022–2024 scores describe reforecasts, not this real-time skill.
 2. **Approve for operational use**, then **Make this the model in use**.
 3. Run the weekly cycle (Operations). Background runs download the upper-air fields at the
    seven leads from ECMWF Open Data; the ECMWF page then shows every input check.
-4. For a run from 2025 on, review the checks and **Confirm the real-time input**; the next
-   run produces the AI/ML layer. Rollback: reactivate the earlier model from the history.
+4. For a run from 2025 on, review the checks and confirm the real-time input (on the
+   forecast page, or the Models page); the forecast is run again with the AI/ML layer.
+   Rollback: reactivate the earlier model from the history.
+
+Steps 1–2 are replaced by the recorded decision above while it names this model.
 
 `scripts/run_operational.py --descriptor config/model_registry/icpac_week2_..._v1.yaml`
 runs the same chain on the HPC with S2S files; it has no reviewer identity, so real-time

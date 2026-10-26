@@ -349,10 +349,17 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8998)
     parser.add_argument("--date", type=date.fromisoformat, default=None)
     parser.add_argument("--members", type=int, default=10)
+    parser.add_argument(
+        "--pressure-steps",
+        type=int,
+        nargs="*",
+        default=[],
+        help="also serve the newest run's upper-air fields at these forecast hours",
+    )
     args = parser.parse_args()
     day = args.date or datetime.now(timezone.utc).date() - timedelta(days=1)
     shutil.rmtree(args.root, ignore_errors=True)
-    build(args.root, day, args.members)
+    build(args.root, day, args.members, pressure_steps=tuple(args.pressure_steps))
     past = [day - timedelta(days=14 + 7 * week) for week in range(PAST_WEEKS)]
     for run in past:
         build(args.root, run, args.members, wetness=wetness(run))

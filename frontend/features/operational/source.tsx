@@ -23,6 +23,7 @@ import {
   day,
   num,
   period,
+  sentence,
   validDays,
   versionLabel,
 } from "@/lib/format";
@@ -354,7 +355,7 @@ function Readiness({
               <tbody>
                 {checks.map((c, i) => (
                   <tr key={`${c.check}-${i}`}>
-                    <td className="strong">{c.check}</td>
+                    <td className="strong">{sentence(c.check)}</td>
                     <td>
                       <Status
                         tone={
@@ -365,7 +366,7 @@ function Readiness({
                               : "bad"
                         }
                       >
-                        {c.status === "note" ? "noted" : c.status}
+                        {c.status === "note" ? "Noted" : sentence(c.status)}
                       </Status>
                     </td>
                     <td>{c.detail}</td>

@@ -43,7 +43,10 @@ export function ModelStatus({ status }: { status?: string }) {
         : status === "retired"
           ? "planned"
           : "progress";
-  return <Status tone={tone}>{status ?? "unknown"}</Status>;
+  const label = status
+    ? status.charAt(0).toUpperCase() + status.slice(1)
+    : "Unknown";
+  return <Status tone={tone}>{label}</Status>;
 }
 
 type ButtonVariant =

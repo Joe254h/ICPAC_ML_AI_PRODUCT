@@ -11,7 +11,12 @@ from fastapi.responses import JSONResponse
 from backend.app.api.forecasts import install as install_forecasts
 from backend.app.db import Repository
 from backend.app.services import operational
-from backend.app.services.forecasts import RunInProgress, Unavailable, capabilities
+from backend.app.services.forecasts import (
+    RunInProgress,
+    Unavailable,
+    capabilities,
+    current_record,
+)
 from backend.app.services.health import system_health
 from backend.app.services.operations import OperationService
 from backend.app.services.platform import Platform
@@ -134,7 +139,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     @app.get("/config")
     def settings(p: Platform = Depends(platform)) -> dict:
         return {
-            "operational": capabilities(),
+            "operational": capabilities(current_record(p)),
             "models": [m for m in p.repo.list("model") if operational.is_operational(m)],
             "data_sources": sources(),
         }

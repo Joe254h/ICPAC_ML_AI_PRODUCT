@@ -198,7 +198,7 @@ def test_catalogue_is_read_only_and_never_claims_missing_hybrid_is_available(pla
     monkeypatch.setattr(
         automation,
         "hybrid_status",
-        lambda: {"status": "in_progress", "reason": "Frozen upper-air steps missing"},
+        lambda model=None: {"status": "in_progress", "reason": "Frozen upper-air steps missing"},
     )
     status = AutomationService(platform).status()
     assert [item["id"] for item in status["capabilities"]] == list(range(1, 21))

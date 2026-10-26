@@ -20,6 +20,7 @@ import { useApi } from "@/services/hooks";
 import type { ForecastDetail, MapsStatus, Variant } from "@/types/operational";
 import {
   NoForecast,
+  familyOf,
   forecastFacts,
   layersOf,
   layerText,
@@ -82,7 +83,7 @@ function RainfallMaps({ detail }: { detail: ForecastDetail }) {
             <Card
               key={variant}
               eyebrow={SERIES[variant].label}
-              title={layerText(detail.family)[variant].title}
+              title={layerText(familyOf(detail))[variant].title}
               action={
                 <a
                   className="btn btn-outline btn-sm"
@@ -94,14 +95,14 @@ function RainfallMaps({ detail }: { detail: ForecastDetail }) {
             >
               <MapFigure
                 src={mapUrl(detail, variant, country || undefined)}
-                alt={`${layerText(detail.family)[variant].title} Week-2 rainfall${country ? ` over ${country}` : ""}`}
+                alt={`${layerText(familyOf(detail))[variant].title} Week-2 rainfall${country ? ` over ${country}` : ""}`}
                 caption={`Valid ${validDays(detail.valid_start, detail.valid_end)}`}
               />
             </Card>
           ) : (
             <InProgress
               key={variant}
-              title={layerText(detail.family)[variant].title}
+              title={layerText(familyOf(detail))[variant].title}
             >
               {productReason(detail.products?.[variant])}
             </InProgress>

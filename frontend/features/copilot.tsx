@@ -10,6 +10,7 @@ import {
   ArrowUp,
   Ellipsis,
   FileText,
+  KeyRound,
   LoaderCircle,
   PanelLeftClose,
   PanelLeftOpen,
@@ -17,12 +18,14 @@ import {
   SquarePen,
   Trash2,
 } from "lucide-react";
+import { openStaffAccess } from "@/components/bulletin-access";
 import { Button, Notice, PageBanner } from "@/components/ui";
 import { cx } from "@/components/ui";
 import { LAYER_TEXT, layersOf } from "@/features/operational/shared";
 import { relativeDay, shortPeriod } from "@/lib/format";
 import { mutate, request } from "@/services/api";
 import { useApi } from "@/services/hooks";
+import { useStaff } from "@/services/staff";
 import type { ForecastDetail, Variant } from "@/types/operational";
 import type {
   ChatAnswer,
@@ -157,6 +160,9 @@ export default function Copilot() {
   const composer = useRef<HTMLTextAreaElement>(null);
   const stickToBottom = useRef(true);
   const latest = useApi<ForecastDetail>("/forecasts/latest");
+  // In staff mode the Copilot answers signed-in staff only: before signing in there is
+  // nothing to restore and nothing to retry, only a way to sign in.
+  const signInNeeded = useStaff().needsSignIn;
 
   const adopt = (data: ChatSession) => {
     setSession(data.id);
@@ -215,6 +221,8 @@ export default function Copilot() {
       .catch((e) => {
         if (!mounted) return;
         if (e.status === 404) localStorage.removeItem(STORAGE);
+        // Signed out: the conversation is still saved and returns after signing in.
+        else if (e.status === 401 || e.status === 403) return;
         else {
           setRestoreFailed(true);
           setSession(id);
@@ -408,7 +416,7 @@ export default function Copilot() {
   const countries = forecast?.countries.map((row) => row.country) ?? [];
   if (country !== REGION && !countries.includes(country))
     countries.push(country);
-  const locked = pending || restoring;
+  const locked = pending || restoring || signInNeeded;
   const span =
     pinned?.valid_start && pinned.valid_end
       ? [pinned.valid_start, pinned.valid_end]
@@ -687,7 +695,21 @@ export default function Copilot() {
                 setAwayFromBottom(!stickToBottom.current);
               }}
             >
-              {restoring ? (
+              {signInNeeded ? (
+                <div className="chat-welcome chat-locked">
+                  <span className="modal-icon" aria-hidden>
+                    <KeyRound size={20} />
+                  </span>
+                  <h2>Sign in to use the Copilot</h2>
+                  <p>
+                    The Copilot answers questions about this week&apos;s
+                    forecast, observed rainfall and verification for ICPAC
+                    staff. Sign in with your personal key; your conversations
+                    stay private to it.
+                  </p>
+                  <Button onClick={openStaffAccess}>Sign in</Button>
+                </div>
+              ) : restoring ? (
                 <p role="status" className="chat-status">
                   <LoaderCircle size={16} className="spin" /> Loading the
                   conversation…
@@ -768,8 +790,12 @@ export default function Copilot() {
                 id="copilot-question"
                 rows={1}
                 maxLength={2000}
-                disabled={restoring || restoreFailed}
-                placeholder="Ask about the forecast"
+                disabled={restoring || restoreFailed || signInNeeded}
+                placeholder={
+                  signInNeeded
+                    ? "Sign in to ask the Copilot"
+                    : "Ask about the forecast"
+                }
                 value={input}
                 onChange={(e) => {
                   setInput(e.target.value);
@@ -792,7 +818,11 @@ export default function Copilot() {
                 className="chat-send"
                 aria-label="Send"
                 disabled={
-                  pending || restoring || restoreFailed || !input.trim()
+                  pending ||
+                  restoring ||
+                  restoreFailed ||
+                  signInNeeded ||
+                  !input.trim()
                 }
               >
                 <ArrowUp size={18} />

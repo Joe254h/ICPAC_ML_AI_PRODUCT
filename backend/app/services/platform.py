@@ -14,6 +14,7 @@ class Platform:
         self.repo = repository
         if register_descriptors:
             self.register_descriptors()
+            self.apply_model_decision()
 
     def register_descriptors(self) -> list[dict]:
         """Register reviewed descriptors not yet in the registry; failures are recorded,
@@ -40,3 +41,25 @@ class Platform:
                 }
                 issues.append(self.repo.save("registration_issue", issue))
         return issues
+
+    def apply_model_decision(self) -> None:
+        """Apply the recorded decision on the model in use (config/model_in_use.yaml) once.
+        A decision that cannot be applied is a registration issue, never skipped silently."""
+        from backend.app.services.registry import ModelRegistry, model_decision
+
+        decision: dict[str, str] | None = None
+        try:
+            decision = model_decision()
+            if decision and ModelRegistry(self).apply_decision(decision):
+                logger.info("model_decision_applied", extra={"model": decision["model_id"]})
+        except (ImportError, OSError, ValueError, KeyError) as exc:
+            logger.error("model_decision_failed", extra={"model": (decision or {}).get("model_id")})
+            self.repo.save(
+                "registration_issue",
+                {
+                    "model_id": (decision or {}).get("model_id", "model decision"),
+                    "error": f"The decision on the model in use was not applied: {exc}",
+                    "timestamp": now(),
+                    "current": True,
+                },
+            )
