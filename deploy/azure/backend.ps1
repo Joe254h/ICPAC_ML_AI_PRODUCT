@@ -137,14 +137,22 @@ if ($VerifyOnly) {
 }
 $secrets = @(Invoke-Azure @('containerapp', 'secret', 'list', '--name', $AppName, '--resource-group', $ResourceGroup, '--show-values'))
 $variables = @{}
-foreach ($item in $app.properties.template.containers[0].env) { $variables[$item.name] = $item }
+foreach ($item in $app.properties.template.containers[0].env) {
+    # `az containerapp update` stores an empty value beside each secret reference; the
+    # reference holds the setting, so the empty value is dropped rather than read or sent.
+    if ($item['secretRef']) { $item.Remove('value') | Out-Null }
+    $variables[$item.name] = $item
+}
 
 function Get-Setting([string]$Name) {
     if (-not $variables.ContainsKey($Name)) { return '' }
     $item = $variables[$Name]
+    if ($item['secretRef']) {
+        $entry = @($secrets | Where-Object name -EQ $item.secretRef)
+        if ($entry.Count -and $entry[0].ContainsKey('value')) { return [string]$entry[0].value }
+        return ''
+    }
     if ($item.ContainsKey('value')) { return [string]$item.value }
-    $entry = @($secrets | Where-Object name -EQ $item.secretRef)
-    if ($entry.Count -and $entry[0].ContainsKey('value')) { return [string]$entry[0].value }
     return ''
 }
 function Set-Value([string]$Name, [string]$Value) { $variables[$Name] = @{ name = $Name; value = $Value } }
