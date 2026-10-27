@@ -16,6 +16,8 @@ in progress.
 import json
 import os
 import threading
+import time
+from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -59,6 +61,9 @@ CHIRPS_KIND = "chirps_week2"
 REFERENCE_KIND = "reference_comparison"
 #: Verified forecasts whose further comparisons are (re)tried in each pass.
 REFERENCE_RECENT = 8
+#: How long one pass may spend starting further comparisons: they never hold up the
+#: forecast or its CHIRPS verification, and the rest continue in the next pass.
+REFERENCE_BUDGET_SECONDS = 600
 MEDIA_TYPES = {
     ".json": "application/json",
     ".csv": "text/csv",
@@ -183,6 +188,13 @@ def input_files(initialization: date) -> tuple[Path, Path | None]:
             "FORECAST_INPUT_ROOT (format: docs/forecast_input_format.md)"
         )
     return rainfall, find("pl")
+
+
+def _week(start: date) -> str:
+    """A Week-2 window in words, such as 13 to 19 October 2026."""
+    end = chirps.window_days(start)[-1]
+    first = f"{start.day} {start:%B}" if start.month != end.month else str(start.day)
+    return f"{first} to {end.day} {end:%B %Y}"
 
 
 class ForecastService:
@@ -760,8 +772,13 @@ class ForecastService:
             forecast_id, VerificationRequest(observation=f"chirps/{name}", actor=actor)
         )
 
-    def verify_due(self, actor: str) -> dict[str, Any]:
-        """Verify every unverified forecast whose window CHIRPS should now cover."""
+    def verify_due(
+        self, actor: str, progress: Callable[[str], None] | None = None
+    ) -> dict[str, Any]:
+        """Verify every unverified forecast whose window CHIRPS should now cover, then
+        compare recent verified forecasts with the further references. ``progress`` hears
+        each step, so a slow download shows where the pass is."""
+        say = progress or (lambda _text: None)
         verified, waiting, failed = [], [], []
         server = chirps.Server()  # one set of directory listings for the whole pass
         for record in self.runs():
@@ -771,6 +788,7 @@ class ForecastService:
             if not chirps.window_complete(start):
                 waiting.append(record["forecast_id"])
                 continue
+            say(f"Downloading CHIRPS for {_week(start)} and verifying its forecast")
             try:
                 self.verify_with_chirps(record["forecast_id"], actor, server)
                 verified.append(record["forecast_id"])
@@ -780,7 +798,19 @@ class ForecastService:
                 failed.append(f"{record['forecast_id']}: {type(exc).__name__}: {exc}")
         compared = 0
         recent = [r for r in self.runs() if r.get("verification_status") == "available"]
+        began = time.monotonic()
         for record in recent[:REFERENCE_RECENT]:
+            held = self.references(record["forecast_id"])
+            if len(held) == len(daily_references.REFERENCES) and all(
+                c["status"] == "available" for c in held
+            ):
+                compared += len(held)
+                continue
+            if time.monotonic() - began > REFERENCE_BUDGET_SECONDS:
+                say("The other comparisons continue in the next pass")
+                break
+            start = datetime.fromisoformat(record["valid_start"]).date()
+            say(f"Comparing the forecast for {_week(start)} with ARC 2.0, RFE 2.0 and GPM IMERG")
             try:
                 compared += sum(
                     c["status"] == "available"

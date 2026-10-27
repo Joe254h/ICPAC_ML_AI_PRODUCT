@@ -378,7 +378,9 @@ class OperationService:
 
     def _verify_due(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
         self._log(operation_id, "Checking forecasts whose Week-2 window has ended")
-        result = self._forecasts().verify_due(body.actor)
+        result = self._forecasts().verify_due(
+            body.actor, progress=lambda text: self._log(operation_id, text)
+        )
         self._log(
             operation_id,
             f"{len(result['verified'])} verified, {len(result['waiting'])} waiting for CHIRPS, "

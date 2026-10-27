@@ -372,9 +372,12 @@ def test_finished_forecasts_are_verified_against_chirps(env, fast_maps, monkeypa
     monkeypatch.setattr(chirps, "download", chc(week(date(2026, 9, 21))))
     seen_from(monkeypatch, date(2026, 10, 15))  # the 2026-10-05 run's window is unfinished
     service = forecasts.ForecastService(env.platform)
-    result = service.verify_due("Joe N")
+    heard: list[str] = []
+    result = service.verify_due("Joe N", progress=heard.append)
     assert result["verified"] == [record["forecast_id"]]
     assert result["waiting"] == [future["forecast_id"]]
+    # Each slow step is announced, so a long pass shows where it is.
+    assert "Downloading CHIRPS for 21 to 27 September 2026 and verifying its forecast" in heard
     verified = env.client.get(f"/forecasts/{record['forecast_id']}/verification").json()
     assert verified["status"] == "available"
     assert verified["observation"]["file"] == "chirps_week2_2026-09-21.nc"
