@@ -8,12 +8,15 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  BarChart3,
   Ellipsis,
   FileText,
+  FileUp,
   KeyRound,
   LoaderCircle,
   PanelLeftClose,
   PanelLeftOpen,
+  Paperclip,
   RefreshCw,
   SquarePen,
   Trash2,
@@ -22,13 +25,16 @@ import { openStaffAccess } from "@/components/bulletin-access";
 import { Button, Notice, PageBanner } from "@/components/ui";
 import { cx } from "@/components/ui";
 import { LAYER_TEXT, layersOf } from "@/features/operational/shared";
-import { relativeDay, shortPeriod } from "@/lib/format";
-import { mutate, request } from "@/services/api";
+import { num, relativeDay, shortPeriod, signed } from "@/lib/format";
+import { mutate, request, upload } from "@/services/api";
 import { useApi } from "@/services/hooks";
 import { useStaff } from "@/services/staff";
 import type { ForecastDetail, Variant } from "@/types/operational";
+import { useActor } from "@/lib/actor";
 import type {
   ChatAnswer,
+  ChatBulletin,
+  ChatComparison,
   ChatContext,
   ChatMessage,
   ChatSession,
@@ -38,10 +44,162 @@ import type {
 const SUGGESTIONS = [
   "Summarise this week's forecast for the region.",
   "Explain the forecast for Kenya.",
-  "Show the rainfall map for Somalia.",
+  "Show this week's bulletin.",
   "How does El Niño affect the October–December rains?",
 ];
+const BULLETIN_STATUS: Record<ChatBulletin["status"], string> = {
+  draft: "Draft",
+  under_review: "Under review",
+  approved: "Approved",
+  published: "Published",
+  rejected: "Rejected",
+};
+
+/** A weekly bulletin draft in the conversation: what a new version changed is marked. */
+/** Another model's forecast next to ICPAC's and, once observed, both against CHIRPS. */
+function ComparisonCard({ comparison }: { comparison: ChatComparison }) {
+  return (
+    <section
+      className="chat-bulletin chat-comparison"
+      aria-label={`${comparison.name} compared with ICPAC`}
+    >
+      <header>
+        <BarChart3 size={16} aria-hidden />
+        <strong>{comparison.name}</strong>
+        <span className="chat-bulletin-meta">
+          {comparison.period} ·{" "}
+          {comparison.status === "available"
+            ? "Verified against CHIRPS"
+            : "Waiting for observations"}
+        </span>
+      </header>
+      <p className="chat-bulletin-change">{comparison.verdict}</p>
+      {comparison.scores.length > 0 && (
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Forecast</th>
+                <th className="num">MAE</th>
+                <th className="num">RMSE</th>
+                <th className="num">Bias</th>
+                <th className="num">r</th>
+              </tr>
+            </thead>
+            <tbody>
+              {comparison.scores.map((score) => (
+                <tr key={score.label}>
+                  <td className="strong">
+                    {score.label}{" "}
+                    {score.closest && (
+                      <span className="chat-bulletin-tag">Closest</span>
+                    )}
+                  </td>
+                  <td className="num">{num(score.mae_mm, 2)} mm</td>
+                  <td className="num">{num(score.rmse_mm, 2)} mm</td>
+                  <td className="num">{signed(score.bias_mm, 2)} mm</td>
+                  <td className="num">{num(score.correlation, 3)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {comparison.countries.length > 0 && (
+        <details className="chat-details chat-comparison-countries">
+          <summary>Country by country</summary>
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Country</th>
+                  <th className="num">{comparison.name} (mm)</th>
+                  <th className="num">
+                    ICPAC {comparison.versus?.main_layer ?? ""} (mm)
+                  </th>
+                  {comparison.status === "available" && (
+                    <>
+                      <th className="num">Observed (mm)</th>
+                      <th>Closer</th>
+                    </>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {comparison.countries.map((row) => (
+                  <tr key={row.country}>
+                    <td className="strong">{row.country}</td>
+                    <td className="num">{num(row.theirs_mean_mm, 1)}</td>
+                    <td className="num">{num(row.ours_mean_mm, 1)}</td>
+                    {comparison.status === "available" && (
+                      <>
+                        <td className="num">{num(row.observed_mean_mm, 1)}</td>
+                        <td>
+                          {row.closer === "theirs"
+                            ? comparison.name
+                            : row.closer === "ours"
+                              ? "ICPAC"
+                              : "—"}
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function BulletinCard({ bulletin }: { bulletin: ChatBulletin }) {
+  return (
+    <section
+      className="chat-bulletin"
+      aria-label={`${bulletin.title}, version ${bulletin.version}`}
+    >
+      <header>
+        <FileText size={16} aria-hidden />
+        <strong>{bulletin.title}</strong>
+        <span className="chat-bulletin-meta">
+          Version {bulletin.version} · {BULLETIN_STATUS[bulletin.status]}
+        </span>
+      </header>
+      {bulletin.edited?.summary && (
+        <p className="chat-bulletin-change">{bulletin.edited.summary}</p>
+      )}
+      {bulletin.sections.map((section) => (
+        <div
+          key={section.key}
+          className={cx("chat-bulletin-section", section.changed && "changed")}
+        >
+          <h4>
+            {section.title}
+            {section.changed && (
+              <span className="chat-bulletin-tag">
+                {section.note ? "Added" : "Changed"}
+              </span>
+            )}
+          </h4>
+          {section.why && <p className="why">{section.why}</p>}
+          {section.text.map((paragraph, index) => (
+            <p key={index}>{paragraph}</p>
+          ))}
+        </div>
+      ))}
+      <p className="chat-bulletin-foot">
+        The country table and the forecast note are in the Word document. Each
+        version is checked and submitted by a forecaster; approval and
+        publication need named reviewers.
+      </p>
+    </section>
+  );
+}
 const STORAGE = "icpac-copilot-session";
+const MODEL_NAME = "icpac-upload-model";
+const UPLOAD_LIMIT = 4 * 1024 * 1024;
 const SIDEBAR = "icpac-copilot-sidebar";
 const REGION = "GHA";
 
@@ -98,6 +256,10 @@ function Message({ message }: { message: ChatMessage }) {
       <div className="chat-bubble">
         <div className="chat-who">{user ? "You" : "Copilot"}</div>
         <div className="chat-text">{message.text}</div>
+        {message.bulletin && <BulletinCard bulletin={message.bulletin} />}
+        {message.comparison && (
+          <ComparisonCard comparison={message.comparison} />
+        )}
         {message.images?.map((image) => (
           <img
             key={image.url}
@@ -133,6 +295,7 @@ function Message({ message }: { message: ChatMessage }) {
 }
 
 export default function Copilot() {
+  const [actor] = useActor();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [session, setSession] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -160,6 +323,12 @@ export default function Copilot() {
   const [removing, setRemoving] = useState(false);
   const stream = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  /** Another model's forecast chosen for upload, with its name and (if undated) week. */
+  const [attached, setAttached] = useState<File | null>(null);
+  const [modelName, setModelName] = useState("");
+  const [weekStart, setWeekStart] = useState("");
+  const [uploading, setUploading] = useState(false);
   const stickToBottom = useRef(true);
   const latest = useApi<ForecastDetail>("/forecasts/latest");
   // In staff mode the Copilot answers signed-in staff only: before signing in there is
@@ -360,7 +529,45 @@ export default function Copilot() {
     composer.current?.focus();
   }
 
-  async function send(text: string) {
+  async function sendUpload() {
+    if (!attached) return;
+    setError("");
+    if (attached.size > UPLOAD_LIMIT) {
+      setError(
+        `The file is ${(attached.size / 1024 / 1024).toFixed(1)} MB; the limit is 4 MB. Upload the Week-2 total only (one rainfall field over the region).`,
+      );
+      return;
+    }
+    setUploading(true);
+    try {
+      const params = new URLSearchParams({
+        name: modelName.trim(),
+        file_name: attached.name,
+        ...(weekStart ? { valid_start: weekStart } : {}),
+      });
+      const record = await upload<{ id: string; name: string }>(
+        `/external-forecasts?${params}`,
+        attached,
+      );
+      try {
+        localStorage.setItem(MODEL_NAME, modelName.trim());
+      } catch {
+        // private window: the name is asked again next time
+      }
+      setAttached(null);
+      setWeekStart("");
+      await send(
+        `Compare the forecast I uploaded (${record.name}) with ICPAC's forecast.`,
+        { external_id: record.id },
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function send(text: string, extra: { external_id?: string } = {}) {
     const message = text.trim();
     if (!message || pending || restoring || restoreFailed) return;
     setPending(true);
@@ -377,6 +584,8 @@ export default function Copilot() {
         country,
         variant: variant || null,
         reset_context: resetContext,
+        actor: actor || null,
+        ...extra,
       });
       setMessages((old) => [...old, { ...answer, role: "assistant" }]);
       setSession(answer.session_id);
@@ -777,6 +986,60 @@ export default function Copilot() {
                 )}
               </div>
             )}
+            {attached && (
+              <div
+                className="chat-upload"
+                role="group"
+                aria-label="Upload another model's forecast"
+              >
+                <p className="chat-upload-file">
+                  <FileUp size={16} aria-hidden />{" "}
+                  <strong>{attached.name}</strong>
+                  <span>{(attached.size / 1024 / 1024).toFixed(1)} MB</span>
+                </p>
+                <label>
+                  Model name
+                  <input
+                    value={modelName}
+                    maxLength={80}
+                    placeholder="For example: Colleague CNN v2"
+                    onChange={(e) => setModelName(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Week starts
+                  <input
+                    type="date"
+                    value={weekStart}
+                    onChange={(e) => setWeekStart(e.target.value)}
+                  />
+                  <small>Only needed if the file has no dates</small>
+                </label>
+                <div className="chat-upload-actions">
+                  <Button
+                    size="sm"
+                    onClick={sendUpload}
+                    disabled={uploading || modelName.trim().length < 2}
+                  >
+                    {uploading ? "Reading the file…" : "Upload and compare"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={uploading}
+                    onClick={() => setAttached(null)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+                <p className="chat-upload-note">
+                  A NetCDF file with the Week-2 rainfall total, or its seven
+                  daily totals, on a latitude-longitude grid; up to 4 MB. It is
+                  compared with ICPAC&apos;s forecast of the same week and, once
+                  CHIRPS covers the week, both are scored against it.
+                </p>
+              </div>
+            )}
             <form
               className="chat-compose"
               onSubmit={(e) => {
@@ -784,6 +1047,42 @@ export default function Copilot() {
                 send(input);
               }}
             >
+              <button
+                type="button"
+                className="chat-attach"
+                aria-label="Upload another model's forecast (NetCDF)"
+                title="Upload another model's forecast (NetCDF)"
+                disabled={
+                  pending ||
+                  uploading ||
+                  restoring ||
+                  restoreFailed ||
+                  signInNeeded
+                }
+                onClick={() => fileInput.current?.click()}
+              >
+                <Paperclip size={18} />
+              </button>
+              <input
+                ref={fileInput}
+                type="file"
+                accept=".nc,.nc4,.netcdf,application/x-netcdf"
+                hidden
+                data-testid="forecast-file"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  setAttached(file);
+                  try {
+                    setModelName(
+                      (name) => name || localStorage.getItem(MODEL_NAME) || "",
+                    );
+                  } catch {
+                    // private window: the name is typed each time
+                  }
+                }}
+              />
               <label className="sr-only" htmlFor="copilot-question">
                 Ask Forecaster Copilot
               </label>

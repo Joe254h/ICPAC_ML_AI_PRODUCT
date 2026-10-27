@@ -30,14 +30,22 @@ async function proxy(request: NextRequest, segments: string[]) {
   try {
     const authorization = request.headers.get("authorization");
     const visitor = request.headers.get("x-visitor-id");
+    // JSON is passed as text; an uploaded file (a NetCDF forecast) byte for byte.
+    const type = request.headers.get("content-type") ?? "application/json";
+    const json = type.startsWith("application/json");
     const upstream = await fetch(target, {
       method: request.method,
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": json ? "application/json" : type,
         ...(authorization ? { Authorization: authorization } : {}),
         ...(visitor ? { "X-Visitor-Id": visitor } : {}),
       },
-      body: request.method === "GET" ? undefined : await request.text(),
+      body:
+        request.method === "GET"
+          ? undefined
+          : json
+            ? await request.text()
+            : await request.arrayBuffer(),
       cache: "no-store",
       // Forecast runs and verification compute on the full 800 x 700 grid; other requests
       // allow for a serverless backend starting from zero (image, model registration).

@@ -1,7 +1,10 @@
 """Operational forecast endpoints: input data, rainfall monitoring, background operations,
 runs, packages, maps, countries and verification."""
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Query
+import asyncio
+from datetime import date
+
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import Response
 
 from backend.app.api.access import Principal, acting_name, require_operator
@@ -38,6 +41,67 @@ def pdf_of(png: bytes) -> bytes:
 
 
 def install(app: FastAPI, dependency) -> None:
+    @app.post("/external-forecasts", status_code=201)
+    async def upload_external_forecast(
+        request: Request,
+        name: str = Query(min_length=2, max_length=80),
+        valid_start: date | None = None,
+        file_name: str = Query("", max_length=200),
+        platform=Depends(dependency),
+        user: Principal = Depends(require_operator),
+    ) -> dict:
+        """Another model's Week-2 forecast as a NetCDF file (the request body), compared with
+        ICPAC's forecast of the same week and, once observed, verified with it."""
+        from backend.app.services.external import ExternalForecasts
+        from climate_engine.inputs.external_forecast import MAX_BYTES
+
+        limit = f"The file is larger than {MAX_BYTES // 1024**2} MB: upload the Week-2 total only."
+        if int(request.headers.get("content-length") or 0) > MAX_BYTES:
+            raise HTTPException(413, limit)
+        data = bytearray()
+        async for chunk in request.stream():
+            data += chunk
+            if len(data) > MAX_BYTES:
+                raise HTTPException(413, limit)
+        return await asyncio.to_thread(
+            ExternalForecasts(platform).upload,
+            bytes(data),
+            name,
+            acting_name(user),
+            valid_start,
+            file_name,
+        )
+
+    @app.get("/external-forecasts")
+    def external_forecasts(platform=Depends(dependency)) -> list[dict]:
+        """Uploaded forecasts of other models, newest first, with their comparisons."""
+        from backend.app.services.external import ExternalForecasts, card
+
+        return [card(record) for record in ExternalForecasts(platform).list()]
+
+    @app.get("/external-forecasts/{identifier}")
+    def external_forecast(
+        identifier: str = Path(pattern=r"^[0-9a-f-]{36}$"), platform=Depends(dependency)
+    ) -> dict:
+        from backend.app.services.external import ExternalForecasts
+
+        return ExternalForecasts(platform).get(identifier)
+
+    @app.delete("/external-forecasts/{identifier}", status_code=204)
+    def delete_external_forecast(
+        identifier: str = Path(pattern=r"^[0-9a-f-]{36}$"),
+        platform=Depends(dependency),
+        user: Principal = Depends(require_operator),
+    ) -> Response:
+        from backend.app.services.external import ExternalForecasts
+
+        service = ExternalForecasts(platform)
+        service.get(identifier)
+        platform.repo.delete("external_forecast", identifier)
+        service.root().joinpath(f"{identifier}.nc").unlink(missing_ok=True)
+        platform.repo.audit("external_forecast_deleted", acting_name(user), identifier, {})
+        return Response(status_code=204)
+
     @app.get("/automations")
     def automations(platform=Depends(dependency)) -> dict:
         from backend.app.services.automation import AutomationService

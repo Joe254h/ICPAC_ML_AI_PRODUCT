@@ -788,7 +788,19 @@ class ForecastService:
                 )
             except Exception:  # the further comparisons never hold up verification
                 continue
-        return {"verified": verified, "waiting": waiting, "failed": failed, "compared": compared}
+        from backend.app.services.external import ExternalForecasts
+
+        try:  # other models' uploaded forecasts whose week is now observed
+            uploads = ExternalForecasts(self.platform).verify_due()
+        except Exception:
+            uploads = 0
+        return {
+            "verified": verified,
+            "waiting": waiting,
+            "failed": failed,
+            "compared": compared,
+            "uploads_verified": uploads,
+        }
 
     def references(self, forecast_id: str) -> list[dict[str, Any]]:
         """A forecast's comparisons with the further references, in their order."""

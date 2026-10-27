@@ -269,3 +269,56 @@ test("conversations are archived, restored and deleted", async ({ page }) => {
   await page.reload();
   await expect(page.getByText("What is RMSE?")).toHaveCount(0);
 });
+
+test("the bulletin is shown in the conversation", async ({ page }) => {
+  await page.goto("/copilot");
+  await page
+    .getByRole("button", { name: "Show this week's bulletin.", exact: true })
+    .click();
+  const card = page.locator(".chat-message.assistant .chat-bulletin").last();
+  await expect(card).toBeVisible({ timeout: 60_000 });
+  await expect(card).toContainText("Version 1");
+  await expect(card).toContainText("Headline");
+  await expect(
+    page
+      .locator(".chat-message.assistant")
+      .last()
+      .getByRole("link", {
+        name: /Review this draft/,
+      }),
+  ).toBeVisible();
+});
+
+test("another model's forecast is uploaded in the chat and compared with ICPAC's", async ({
+  page,
+  request,
+}) => {
+  const latest = await (await request.get("/api/forecasts/latest")).json();
+  await page.goto("/copilot");
+  await page
+    .getByTestId("forecast-file")
+    .setInputFiles(`${process.cwd()}/e2e/fixtures/colleague_week2.nc`);
+  const form = page.getByRole("group", {
+    name: "Upload another model's forecast",
+  });
+  await expect(form).toContainText("colleague_week2.nc");
+  await form.getByLabel("Model name").fill("Colleague CNN");
+  // The file has no dates: the week is given.
+  await form
+    .getByLabel("Week starts")
+    .fill(String(latest.valid_start).slice(0, 10));
+  await form.getByRole("button", { name: "Upload and compare" }).click();
+  const card = page.locator(".chat-message.assistant .chat-comparison").last();
+  await expect(card).toBeVisible({ timeout: 60_000 });
+  await expect(card).toContainText("Colleague CNN");
+  await expect(card).toContainText("Waiting for observations");
+  await expect(card).toContainText("forecast of the same week");
+  await card.getByText("Country by country").click();
+  await expect(card.locator("tbody tr").first()).toBeVisible();
+  await page.goto("/verification");
+  const listed = page.locator(".card").filter({
+    has: page.getByRole("heading", { name: "Other models' forecasts" }),
+  });
+  await expect(listed).toContainText("Colleague CNN");
+  await expect(listed).toContainText("Awaiting CHIRPS");
+});

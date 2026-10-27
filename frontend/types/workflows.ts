@@ -29,6 +29,65 @@ export type ChatMessage = {
   kind?: "forecast" | "general";
   /** What the answer is based on, in words. */
   evidence?: string[];
+  /** The weekly bulletin draft the answer shows (or the new version it wrote). */
+  bulletin?: ChatBulletin | null;
+  /** An uploaded forecast of another model compared with ICPAC's. */
+  comparison?: ChatComparison | null;
+};
+/** Who asked for a draft's changes, and what changed. */
+export type BulletinEdit = {
+  by: string;
+  with?: string;
+  request?: string;
+  summary?: string;
+  changed?: string[];
+  at?: string;
+};
+/** Another model's uploaded forecast next to ICPAC's, and both against the observations. */
+export type ChatComparison = {
+  id: string;
+  name: string;
+  period: string;
+  uploaded_by: string;
+  status: "available" | "waiting";
+  waiting_for?: string | null;
+  versus: {
+    main_layer: string;
+    region_theirs_mm: number | null;
+    region_ours_mm: number | null;
+    pattern_correlation: number | null;
+  } | null;
+  scores: {
+    label: string;
+    mae_mm: number;
+    rmse_mm: number;
+    bias_mm: number;
+    correlation: number | null;
+    closest: boolean;
+  }[];
+  countries: {
+    country: string;
+    theirs_mean_mm: number | null;
+    ours_mean_mm: number | null;
+    observed_mean_mm?: number | null;
+    closer: "theirs" | "ours" | null;
+  }[];
+  verdict: string;
+};
+export type ChatBulletin = {
+  id: string;
+  title: string;
+  version: number;
+  status: "draft" | "under_review" | "approved" | "published" | "rejected";
+  edited?: BulletinEdit | null;
+  sections: {
+    key: string;
+    title: string;
+    text: string[];
+    why?: string;
+    note: boolean;
+    changed: boolean;
+  }[];
 };
 export type ChatContext = {
   mode: "operational" | "demonstration";
@@ -75,6 +134,9 @@ export type Bulletin = {
   text: string;
   facts_checksum: string;
   parent_id: string | null;
+  /** Version 1 is a forecast's first draft; each revision adds one. */
+  version?: number;
+  edited?: BulletinEdit | null;
   consistency: { status: string; errors: string[] };
   facts: {
     title: string;

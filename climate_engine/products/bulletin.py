@@ -63,6 +63,13 @@ FOCUS_MAPS = "171EEC30"  # the reference's rainfall and temperature maps, side b
 FOCUS_LAST = "4C49DE8B"  # the focus's last rainfall bullet; the forecast note follows it
 # 5.5 x 3.2 inches at most, in the map's own shape: the focus section then shares a page
 FOCUS_MAP_MAX_EMU = (5029200, 2926080)
+#: The reference paragraphs each section fills, in reading order.
+SECTION_SLOTS: dict[str, list[str]] = {}
+for _paragraph, (_key, _index) in TEXT_SLOTS.items():
+    SECTION_SLOTS.setdefault(_key, []).append(_paragraph)
+#: The sections a forecaster may reword; the country table, the forecast note and the
+#: supplementary products stay as computed.
+EDITABLE = ("headline", "decision_support", "rainfall", "focus")
 
 
 def trimmed(png: bytes, margin: int = 24) -> bytes:
@@ -259,6 +266,46 @@ def insert_after(document: str, paragraph_id: str, xml: str) -> str:
     return document[: match.end()] + xml + document[match.end() :]
 
 
+def clone_after(document: str, paragraph_id: str, new_id: str) -> str:
+    """A copy of a reference paragraph (with its formatting, a bullet for instance) under a
+    new paragraph ID, placed right after it."""
+    match = re.search(_paragraph_pattern(paragraph_id), document, re.S)
+    if match is None:
+        raise ValueError(f"Template paragraph {paragraph_id} not found")
+    copy = re.sub(r'(w14:(?:paraId|textId))="[0-9A-Fa-f]{8}"', rf'\1="{new_id}"', match[0])
+    return document[: match.end()] + copy + document[match.end() :]
+
+
+def fresh_ids(document: str):
+    """Paragraph IDs the document does not use yet (Word's IDs are below 0x80000000)."""
+    used = set(re.findall(r'w14:paraId="([0-9A-Fa-f]{8})"', document))
+    candidate = 0x0A000000
+    while True:
+        identifier = f"{candidate:08X}"
+        candidate += 1
+        if identifier not in used:
+            yield identifier
+
+
+def section_segments(section: dict[str, Any], index: int) -> list[tuple[str, str]]:
+    """A section's paragraph as bold lead and regular text; a reworded paragraph that no
+    longer opens with its lead is all regular text."""
+    text = section["text"][index]
+    leads = section.get("leads") or []
+    lead = leads[index] if index < len(leads) and text.startswith(leads[index]) else ""
+    return lead_segments(lead, text[len(lead) :])
+
+
+def notes_xml(notes: list[dict[str, Any]]) -> str:
+    """The forecaster's own sections (an advisory, impacts), in the body style."""
+    return "".join(
+        paragraph_xml([("", False)])
+        + paragraph_xml([(note["title"], True)], after=120, keep_next=True)
+        + "".join(paragraph_xml([(text, False)], after=120) for text in note["text"])
+        for note in notes
+    )
+
+
 def _run(text: str, bold: bool = False, size: int | None = None) -> str:
     props = ARIAL + ('<w:b w:val="1" /><w:bCs w:val="1" />' if bold else "")
     props += '<w:color w:val="000000" />'
@@ -441,10 +488,23 @@ class WordTemplateGenerator(BulletinGenerator):
             "layout_validation": "Pages follow the reference layout; check pagination in Word before release",
         }
 
-    def render_bytes(self, inputs: BulletinInputs) -> bytes:
+    def render_bytes(
+        self, inputs: BulletinInputs, sections: list[dict[str, Any]] | None = None
+    ) -> bytes:
+        """The Word bulletin of a package; ``sections``, a draft's frozen sections, carry a
+        forecaster's rewording of the editable sections and their own notes."""
         if self.status()["status"] != "ready":
             raise MissingDependency(self.status()["missing_dependency"])
         content = {s["key"]: s for s in weekly.sections(inputs)}
+        notes: list[dict[str, Any]] = []
+        for section in sections or []:
+            if section.get("note"):
+                notes.append(section)
+            elif section["key"] in EDITABLE and section["key"] in content:
+                content[section["key"]] = {
+                    **content[section["key"]],
+                    **{k: section[k] for k in ("text", "leads", "why") if k in section},
+                }
         title = "Weekly Forecast for " + weekly.valid_period(inputs)
         with zipfile.ZipFile(self.template) as source:
             infos = source.infolist()
@@ -464,21 +524,37 @@ class WordTemplateGenerator(BulletinGenerator):
             document = fill_paragraph(document, FOCUS_HEADING, [(focus["title"], "bold")])
             why = paragraph_xml([(focus["why"], False)], after=120, keep_next=True)
             document = insert_after(document, FOCUS_HEADING, why)
+        unused: list[str] = []
+        last: dict[str, str] = {}
+        ids = fresh_ids(document)
         for paragraph_id, (key, index) in TEXT_SLOTS.items():
             if key == "title":
-                segments = [(title, "bold")]
-            elif key in content:
-                section = content[key]
-                lead = section["leads"][index]
-                segments = lead_segments(lead, section["text"][index][len(lead) :])
-            else:
+                document = fill_paragraph(document, paragraph_id, [(title, "bold")])
                 continue
-            document = fill_paragraph(document, paragraph_id, segments)
+            if key not in content:
+                continue
+            section = content[key]
+            if index >= len(section["text"]):  # a reworded section with fewer paragraphs
+                unused.append(paragraph_id)
+                continue
+            document = fill_paragraph(document, paragraph_id, section_segments(section, index))
+            last[key] = paragraph_id
+            if index == len(SECTION_SLOTS[key]) - 1:  # further paragraphs follow the last
+                for extra in range(index + 1, len(section["text"])):
+                    new_id = next(ids)
+                    document = clone_after(document, last[key], new_id)
+                    document = fill_paragraph(document, new_id, section_segments(section, extra))
+                    last[key] = new_id
         if "countries" in content:
             document = insert_after(document, RAINFALL_MAP, countries_xml(content["countries"]))
-        document = insert_after(document, FOCUS_LAST, about_xml(content["about"]))
+        # The forecaster's notes, then the forecast note, after the focus's last paragraph.
+        anchor = last.get("focus", FOCUS_LAST) if focus else FOCUS_LAST
+        if anchor in FOCUS:
+            anchor = FOCUS_LAST
+        document = insert_after(document, anchor, notes_xml(notes) + about_xml(content["about"]))
         if not focus:
             document = omit_paragraphs(document, FOCUS)
+        document = omit_paragraphs(document, unused)
         parts["word/document.xml"] = document.encode("utf-8")
         parts = drop_unused_media(parts, document)
         header = parts["word/header1.xml"].decode("utf-8-sig")

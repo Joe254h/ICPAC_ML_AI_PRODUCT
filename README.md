@@ -124,6 +124,7 @@ candidate with the refitted model is described in
 | Weekly cycle and its steps | `POST /operations` (`cycle`, `fetch_ecmwf`, `run_forecast`, `verify_due`, `verify_forecast`, `update_chirps`), `GET /operations`, `GET /operations/{id}` |
 | Rainfall monitoring (CHIRPS, TAMSAT, ARC 2.0, RFE 2.0, GPM IMERG dekads) | `GET /monitoring/estimates`, `GET /monitoring/dekads`, `GET /monitoring/dekads/latest`, `GET /monitoring/dekads/{dekad}`, `/overlay?product=total\|percent`; each takes `?source=chirps\|tamsat\|arc2\|rfe2\|imerg` |
 | Further comparisons of a verified forecast | `GET /forecasts/{id}/references` (ARC 2.0, RFE 2.0, GPM IMERG) |
+| Other models' forecasts | `POST /external-forecasts?name=&valid_start=` (NetCDF body), `GET /external-forecasts`, `GET`/`DELETE /external-forecasts/{id}` |
 | Forecaster Copilot | `POST /chat`, `GET /chat/sessions`, `GET /chat/sessions/{id}` |
 | Data sources | `GET /data/sources`, `GET /data/ecmwf`, `GET /data/chirps` |
 | Forecasts | `GET /forecasts`, `GET /forecasts/latest`, `POST /forecasts/run`, `POST /forecasts/import` |

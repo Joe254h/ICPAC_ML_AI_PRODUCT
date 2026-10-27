@@ -305,8 +305,20 @@ function Detail({
             ["Document header", documentHeader(draft)],
             [
               "Revision",
-              draft.parent_id ? "Revision of an earlier draft" : "First draft",
+              draft.parent_id
+                ? `Version ${draft.version ?? 2}, a revision of an earlier draft`
+                : "First draft",
             ],
+            ...(draft.edited
+              ? ([
+                  [
+                    "Changed with the Copilot",
+                    `${draft.edited.summary ?? "Wording changed"} (asked by ${personName(draft.edited.by)}; ${
+                      draft.edited.changed?.join(", ") ?? ""
+                    })`,
+                  ],
+                ] as [string, string][])
+              : []),
           ]}
         />
         {draft.reviews.length > 0 && (

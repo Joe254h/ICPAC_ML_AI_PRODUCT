@@ -21,7 +21,12 @@ from backend.app.db import Record, now
 from backend.app.schemas import ReviewRequest
 from climate_engine.core import ROOT, checksum
 from climate_engine.products import weekly_bulletin as weekly
-from climate_engine.products.bulletin import BulletinInputs, WordTemplateGenerator, stamp_header
+from climate_engine.products.bulletin import (
+    EDITABLE,
+    BulletinInputs,
+    WordTemplateGenerator,
+    stamp_header,
+)
 from climate_engine.products.store import package_store
 from climate_engine.provenance import file_checksum
 
@@ -32,6 +37,14 @@ LOST_MAP = (
     "a new draft: new drafts keep their map in storage."
 )
 LOST_DOCUMENT = LOST_MAP.replace("frozen map", "frozen Word document")
+#: A forecaster's own sections in a draft (an advisory, impacts), at most this many.
+MAX_NOTES = 4
+MAX_PARAGRAPHS = 8
+MAX_PARAGRAPH_CHARS = 700
+
+
+class RevisionRefused(ValueError):
+    """A requested change to a draft cannot be made; the reason is for the forecaster."""
 
 
 def checksum_bytes(data: bytes) -> str:
@@ -141,9 +154,16 @@ class BulletinService:
         return self.generate_weekly(forecast_id, parent_id, actor)
 
     def generate_weekly(
-        self, forecast_id: str, parent_id: str | None = None, actor: str = "forecaster"
+        self,
+        forecast_id: str,
+        parent_id: str | None = None,
+        actor: str = "forecaster",
+        revised: list[dict[str, Any]] | None = None,
+        edited: dict[str, Any] | None = None,
     ) -> dict:
-        """Freeze the ICPAC weekly bulletin of one forecast package for review."""
+        """Freeze the ICPAC weekly bulletin of one forecast package for review; ``revised``,
+        a revision's sections (``edited`` says who asked for what), replaces the computed
+        wording of the editable sections and adds the forecaster's notes."""
         from backend.app.services.forecasts import ForecastService
 
         service = ForecastService(self.platform)
@@ -152,9 +172,15 @@ class BulletinService:
         from backend.app.services.supplemental import SupplementalService
         from climate_engine.products import supplemental_document
 
+        parent = self.repo.get("bulletin", parent_id) if parent_id else None
         supplemental_service = SupplementalService(self.platform)
-        extra = supplemental_service.appendix(forecast_id)
-        sections = [
+        # A revision keeps its parent's supplementary products, so words and pages agree.
+        extra = (
+            parent["facts"].get("supplemental")
+            if revised is not None and parent
+            else supplemental_service.appendix(forecast_id)
+        )
+        sections: list[dict[str, Any]] = [
             {
                 k: section[k]
                 for k in (
@@ -174,6 +200,8 @@ class BulletinService:
         title = "Weekly Forecast for " + weekly.valid_period(inputs)
         if extra:
             sections.extend(supplemental_document.sections(extra))
+        if revised is not None:
+            sections = revised
         facts = {
             "kind": WEEKLY,
             "format": weekly.FORMAT_VERSION,
@@ -205,7 +233,7 @@ class BulletinService:
         output.mkdir(parents=True, exist_ok=True)
         image, document = output / "map.png", output / "bulletin.docx"
         image.write_bytes(weekly.rainfall_png(inputs))
-        word_bytes = WordTemplateGenerator().render_bytes(inputs)
+        word_bytes = WordTemplateGenerator().render_bytes(inputs, revised)
         if extra:
             extra_record = self.repo.get("supplemental_product", extra["record_id"])
             extra_maps = {
@@ -236,6 +264,8 @@ class BulletinService:
             "document_checksum": file_checksum(document),
             "reviews": [],
             "created_by": actor,
+            "version": int((parent or {}).get("version") or 1) + 1 if parent else 1,
+            "edited": edited,
             "publication_scope": "recorded in this service; ICPAC disseminates the approved "
             "bulletin through its own channels",
         }
@@ -244,6 +274,109 @@ class BulletinService:
             raise ValueError("Draft consistency check failed")
         record = self.repo.save("bulletin", bulletin, identifier)
         self.repo.audit("generate_bulletin_draft", actor, identifier, {"forecast": forecast_id})
+        return record
+
+    def latest(self, forecast_id: str) -> dict | None:
+        """The newest weekly draft of a forecast, whatever its review state."""
+        drafts = [
+            b
+            for b in self.repo.list("bulletin")
+            if b.get("kind") == WEEKLY and b.get("forecast_id") == forecast_id
+        ]
+        return max(drafts, key=lambda b: b["created_at"]) if drafts else None
+
+    def revise(
+        self,
+        forecast_id: str,
+        changes: list[dict[str, Any]],
+        notes: list[dict[str, Any]],
+        remove_notes: list[str],
+        actor: str,
+        edited: dict[str, Any],
+    ) -> dict:
+        """A new draft version of a forecast's bulletin with the editable sections reworded
+        and the forecaster's notes added, changed or removed. The newest draft is revised
+        (made first from the forecast if there is none); approving and publishing the new
+        version stay with the reviewers."""
+        base = self.latest(forecast_id) or self.generate_weekly(forecast_id, actor=actor)
+        sections = json.loads(json.dumps(base["facts"]["sections"]))
+        by_key = {s["key"]: s for s in sections}
+        changed: list[str] = []
+        for change in changes:
+            key = change.get("section")
+            if key not in EDITABLE:
+                raise RevisionRefused(
+                    "Only the headline, the decision-support note, the regional rainfall "
+                    "statements and the country focus can be reworded; the country table and "
+                    "the forecast note come from the forecast itself."
+                )
+            if key not in by_key:
+                raise RevisionRefused("This bulletin has no country focus this week.")
+            section = by_key[key]
+            paragraphs = _paragraphs(change.get("paragraphs"), section["title"])
+            # A paragraph keeps its bold lead when it still opens with one of the leads.
+            leads = [
+                next((lead for lead in section.get("leads", []) if lead and p.startswith(lead)), "")
+                for p in paragraphs
+            ]
+            if paragraphs != section["text"]:
+                section.update(text=paragraphs, leads=leads, edited=True)
+                changed.append(section["title"])
+            if key == "focus" and change.get("why"):
+                why = _paragraphs([change["why"]], "the focus explanation")[0]
+                if why != section.get("why"):
+                    section.update(why=why, edited=True)
+                    if section["title"] not in changed:
+                        changed.append(section["title"])
+        removing = {t.strip().lower() for t in remove_notes}
+        kept = [s for s in sections if not (s.get("note") and s["title"].lower() in removing)]
+        changed += [s["title"] for s in sections if s not in kept]
+        sections = kept
+        for note in notes:
+            title = " ".join(str(note.get("title") or "").split())[:80]
+            if len(title) < 3:
+                raise RevisionRefused("Give each added section a short title.")
+            paragraphs = _paragraphs(note.get("paragraphs"), title)
+            existing = next(
+                (s for s in sections if s.get("note") and s["title"].lower() == title.lower()),
+                None,
+            )
+            if existing is not None:
+                if existing["text"] != paragraphs:
+                    existing.update(text=paragraphs, leads=[""] * len(paragraphs))
+                    changed.append(title)
+                continue
+            if sum(1 for s in sections if s.get("note")) >= MAX_NOTES:
+                raise RevisionRefused(f"A bulletin holds at most {MAX_NOTES} added sections.")
+            position = next(
+                (i for i, s in enumerate(sections) if s["key"] == "about"), len(sections)
+            )
+            sections.insert(
+                position,
+                {
+                    "key": f"note-{uuid4().hex[:8]}",
+                    "title": title,
+                    "text": paragraphs,
+                    "leads": [""] * len(paragraphs),
+                    "note": True,
+                },
+            )
+            changed.append(title)
+        if not changed:
+            raise RevisionRefused("The requested wording is the same as the current draft.")
+        record = self.generate_weekly(
+            forecast_id,
+            base["id"],
+            actor,
+            revised=sections,
+            edited={**edited, "changed": list(dict.fromkeys(changed)), "at": now()},
+        )
+        self.repo.audit(
+            "revise_bulletin_draft",
+            actor,
+            record["id"],
+            {"parent": base["id"], "changed": record["edited"]["changed"]},
+        )
         return record
 
     def transition(self, identifier: str, action: str, review: ReviewRequest) -> dict:
@@ -389,7 +522,8 @@ class BulletinService:
         inputs = BulletinInputs.from_package(directory)
         if checksum_key == "map_checksum":
             return weekly.rainfall_png(inputs)
-        return WordTemplateGenerator().render_bytes(inputs)
+        revised = bulletin["facts"]["sections"] if bulletin.get("edited") else None
+        return WordTemplateGenerator().render_bytes(inputs, revised)
 
     def compare(self, left_id: str, right_id: str) -> dict:
         left, right = self.repo.get("bulletin", left_id), self.repo.get("bulletin", right_id)
@@ -402,3 +536,19 @@ class BulletinService:
             if left.get("forecast_id") != right.get("forecast_id")
             else [],
         }
+
+
+def _paragraphs(value: Any, where: str) -> list[str]:
+    """A section's new paragraphs: plain text, a few of them, none empty."""
+    from chatbot.tone import tidy
+
+    if not isinstance(value, list) or not value:
+        raise RevisionRefused(f"Give the new wording of {where} as one or more paragraphs.")
+    paragraphs = [tidy(str(p)) for p in value if str(p).strip()]
+    if not paragraphs or len(paragraphs) > MAX_PARAGRAPHS:
+        raise RevisionRefused(f"Give {where} between 1 and {MAX_PARAGRAPHS} paragraphs.")
+    if any(len(p) > MAX_PARAGRAPH_CHARS for p in paragraphs):
+        raise RevisionRefused(
+            f"Keep each paragraph of {where} under {MAX_PARAGRAPH_CHARS} characters."
+        )
+    return paragraphs

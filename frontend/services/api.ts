@@ -82,6 +82,15 @@ export function getStaffUser() {
   return staffUser;
 }
 
+/** A file sent as it is (not JSON), for example a NetCDF forecast. */
+export function upload<T>(path: string, file: File) {
+  return request<T>(path, {
+    method: "POST",
+    body: file,
+    headers: { "Content-Type": "application/x-netcdf" },
+  });
+}
+
 export function mutate<T>(path: string, body: unknown) {
   return request<T>(path, {
     method: "POST",

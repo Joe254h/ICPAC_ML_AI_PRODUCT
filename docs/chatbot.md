@@ -112,6 +112,49 @@ require their signed, expiring, single-use token. See [manual access setup](depl
 Operator review names remain self-reported. Per-person role-based login and authenticated
 access to the remaining model, operation and chat APIs are still production integrations.
 
+## Changing the bulletin in the conversation
+
+Ask the Copilot to show this week's bulletin and it appears in the conversation as a card:
+version, review status and sections. Ask for a change ("make the headline about western
+Kenya", "add an advisory for farmers", "drop the impacts note") and the Copilot writes a new
+draft version with `revise_bulletin`. The newest draft of the forecast is revised (one is
+made first if there is none). The new version shows in the conversation with the changed
+sections marked, a link to review it and its Word document.
+
+- What can change: the headline, the decision-support note, the regional rainfall
+  statements, the country focus and its explanation, and up to four sections of the
+  forecaster's own (an advisory, impacts, guidance for a sector), added before the forecast
+  note. The country table and the forecast note come from the forecast and stay as they are.
+- Figures: every number in new wording must come from the forecast, the tools' results or
+  the forecaster's own messages in the conversation; a figure from nowhere is sent back to the
+  model and the draft is not made.
+- Tone: the paragraphs are checked against the humanizer patterns (Wikipedia's "Signs of AI
+  writing"): dashes used as punctuation, stock AI and sales words, inflated importance,
+  chatbot phrases, filler, emojis and markdown (chatbot/tone.py). Flagged paragraphs go back
+  to the model to rewrite; quotes and spacing are fixed directly. The same rules are in the
+  model's instructions.
+- Review: each version is an ordinary draft with its own frozen Word document, checksum and
+  consistency check, the asker's name and their request. Submitting, approving and publishing
+  stay on the Bulletin page with named reviewers; the Copilot has no tool for them.
+
+## Comparing another model's forecast
+
+The paperclip in the Copilot uploads another model's Week-2 forecast: a NetCDF file (up to
+4 MB through the website) with the week's total rainfall, or its seven daily totals, on a
+regular latitude-longitude grid. Name the model, and give the week's first day if the file
+has no dates. The file is read in a separate process with no secrets in its environment and
+limits on time, memory and output (climate_engine/inputs/external_forecast.py). Units in mm,
+kg m-2 or m are accepted, daily amounts are summed over seven steps, and ensemble members are
+averaged. Rates per second, other time lengths and curvilinear grids are refused with the
+reason. The field is put bilinearly on the 0.05 degree model grid.
+
+The Copilot then compares it with ICPAC's forecast of the same week (regional and country
+means, pattern correlation). Once CHIRPS covers the week, the verification pass scores both
+forecasts against CHIRPS on the same cells (MAE, RMSE, bias, correlation), and against ARC
+2.0, RFE 2.0 and GPM IMERG where held. It says which came closer, for the region and country
+by country. The Verification page lists every upload with its scores. One week is one case:
+compare several weeks before concluding that one model is better.
+
 Copilot forecast dates distinguish `valid:YYYY-MM-DD` (any day inside the valid week,
 end date exclusive) from `run:YYYY-MM-DD` (ECMWF initialization). An ambiguous bare date
 requests clarification. The fixed-answer fallback keeps both countries and selected

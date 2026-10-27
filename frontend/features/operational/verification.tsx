@@ -14,7 +14,16 @@ import {
   Status,
 } from "@/components/ui";
 import { useActor } from "@/lib/actor";
-import { SERIES, day, num, sentence, signed, validDays } from "@/lib/format";
+import {
+  SERIES,
+  day,
+  num,
+  personName,
+  sentence,
+  signed,
+  validDays,
+} from "@/lib/format";
+import type { ChatComparison } from "@/types/workflows";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
 import type {
@@ -170,6 +179,67 @@ function OtherObservations({
         </div>
       )}
     </div>
+  );
+}
+
+/** Other models' forecasts uploaded in the Copilot, scored with ICPAC's once observed. */
+function OtherModels() {
+  const uploads = useApi<ChatComparison[]>("/external-forecasts");
+  if (!uploads.data?.length) return null;
+  return (
+    <Card
+      title="Other models' forecasts"
+      subtitle="Forecasts uploaded in the Copilot, compared with ICPAC's forecast of the same week and scored against CHIRPS once it covers the week. One week is one case: compare several before drawing conclusions."
+    >
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Week</th>
+              <th>Uploaded by</th>
+              <th className="num">Its MAE</th>
+              <th className="num">ICPAC MAE</th>
+              <th>Closer to CHIRPS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {uploads.data.map((upload) => {
+              const theirs = upload.scores.find((s) => s.label === upload.name);
+              const ours = upload.scores.find(
+                (s) => s.label === `ICPAC ${upload.versus?.main_layer}`,
+              );
+              return (
+                <tr key={upload.id}>
+                  <td className="strong">{upload.name}</td>
+                  <td>{upload.period}</td>
+                  <td>{personName(upload.uploaded_by)}</td>
+                  <td className="num">
+                    {theirs ? `${num(theirs.mae_mm, 2)} mm` : "—"}
+                  </td>
+                  <td className="num">
+                    {ours ? `${num(ours.mae_mm, 2)} mm` : "—"}
+                  </td>
+                  <td>
+                    {upload.status !== "available" ? (
+                      <Status tone="progress">Awaiting CHIRPS</Status>
+                    ) : theirs && ours ? (
+                      theirs.mae_mm < ours.mae_mm ? (
+                        upload.name
+                      ) : (
+                        `ICPAC ${upload.versus?.main_layer}`
+                      )
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }
 
@@ -435,6 +505,7 @@ export default function Verification() {
             </div>
           </Card>
         )}
+        <OtherModels />
         <ExperimentalSummary />
       </div>
     </div>

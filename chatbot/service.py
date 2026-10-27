@@ -108,7 +108,9 @@ class Copilot:
         self.references = ReferenceIndex()
 
     @request_budget
-    def answer(self, body: ChatRequest, owner: str | None = None) -> dict:
+    def answer(
+        self, body: ChatRequest, owner: str | None = None, actor: str = "Forecaster"
+    ) -> dict:
         session: dict = (
             self.platform.repo.get("chat_session", body.session_id)
             if body.session_id
@@ -129,6 +131,8 @@ class Copilot:
             previous = {} if body.reset_context else dict(session.get("context") or {})
             if body.forecast_id:
                 previous["forecast_id"] = body.forecast_id
+            if body.external_id:
+                previous["external_id"] = body.external_id
             try:
                 result = agent.answer(
                     self.platform,
@@ -137,6 +141,7 @@ class Copilot:
                     session["messages"],
                     previous,
                     selection(body),
+                    actor,
                 )
                 response = {**result, "created_at": now(), "grounding": GROUNDING}
                 session["context"] = response["context"]
@@ -168,6 +173,8 @@ class Copilot:
     def _fixed(
         self, body: ChatRequest, session: dict, fallback: str | None, reason: str | None = None
     ) -> dict:
+        if body.external_id:
+            return self._fixed_comparison(body, session, fallback, reason)
         history = session["messages"]
         evidence = OperationalConversation(self.platform).compose(body, session)
         tools = {t["tool"] for t in evidence["tool_trace"]}
@@ -181,6 +188,13 @@ class Copilot:
             sentences = {"general": GENERAL_UNAVAILABLE}
         required = [key for key in REQUIRED_SENTENCES if key in sentences]
         rendered = render_grounded(body.message, sentences, references, history, required)
+        if "get_bulletin_context" in tools and evidence.get("context", {}).get("forecast_id"):
+            from backend.app.services.bulletins import BulletinService
+
+            draft = BulletinService(self.platform).latest(evidence["context"]["forecast_id"])
+            if draft is not None:  # the newest draft, as the tool-using answer shows it
+                evidence["bulletin"] = agent.bulletin_card(draft)
+                evidence["links"] = agent.bulletin_links(draft)
         response = {
             **rendered,
             **evidence,
@@ -194,6 +208,38 @@ class Copilot:
             "grounding": GROUNDING,
         }
         session["context"] = response["context"]
+        return self._save(body, session, response)
+
+    def _fixed_comparison(
+        self, body: ChatRequest, session: dict, fallback: str | None, reason: str | None
+    ) -> dict:
+        """An uploaded forecast's comparison in fixed sentences, when the AI does not answer."""
+        from backend.app.services.external import ExternalForecasts, card, describe
+
+        service = ExternalForecasts(self.platform)
+        record = service.get(str(body.external_id))
+        if record.get("verification_status") != "available":
+            record = service.compare(record["id"])
+        context = {**(session.get("context") or {}), "external_id": record["id"]}
+        context.setdefault("mode", "operational")
+        context.setdefault("country", "GHA")
+        response = {
+            "text": describe(record),
+            "kind": "forecast",
+            "evidence": ["Uploaded forecast comparison"],
+            "provider": "fixed",
+            "fallback": fallback,
+            "fallback_reason": reason,
+            "tool_trace": [{"tool": "compare_uploaded_forecast", "arguments": {}}],
+            "images": [],
+            "links": [],
+            "sources": [],
+            "comparison": card(record),
+            "context": context,
+            "created_at": now(),
+            "grounding": GROUNDING,
+        }
+        session["context"] = context
         return self._save(body, session, response)
 
     def _save(self, body: ChatRequest, session: dict, response: dict) -> dict:

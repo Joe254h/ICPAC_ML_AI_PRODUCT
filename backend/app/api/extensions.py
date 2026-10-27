@@ -98,7 +98,7 @@ def install(app: FastAPI, dependency):
             if len(session["messages"]) >= 100:
                 raise HTTPException(422, "Start a new conversation after 50 questions.")
         platform.repo.chat_allowance(user.name)
-        return Copilot(platform).answer(body, owner=user.name)
+        return Copilot(platform).answer(body, owner=user.name, actor=acting_name(user, body.actor))
 
     def first_question(session: dict) -> str:
         """Older conversations have no title: name them by their first question."""

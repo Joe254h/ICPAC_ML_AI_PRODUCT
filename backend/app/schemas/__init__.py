@@ -13,6 +13,10 @@ class ChatRequest(BaseModel):
     country: str | None = Field(default=None, max_length=80)
     variant: Literal["hybrid", "mbc", "raw"] | None = None
     reset_context: bool = False
+    #: The name the person gave, for the drafts the Copilot writes at their request.
+    actor: str | None = Field(default=None, max_length=80)
+    #: An uploaded forecast of another model the question is about.
+    external_id: str | None = Field(default=None, pattern=r"^[0-9a-f-]{36}$")
 
     @field_validator("message")
     @classmethod

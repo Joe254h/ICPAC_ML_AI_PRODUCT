@@ -228,6 +228,14 @@ class WeeklyHTMLExporter:
             )
             if key == "rainfall" and (countries := sections.get("countries")):
                 body.append(_countries(countries))
+        # The forecaster's own sections (an advisory, impacts), before the forecast note.
+        for note in (s for s in facts["sections"] if s.get("note")):
+            body.append(
+                '<section class="card"><p class="label">Forecaster note</p>'
+                f"<h2>{escape(note['title'])}</h2>"
+                + "".join(f"<p>{p}</p>" for p in _paragraphs(note))
+                + "</section>"
+            )
         if about := sections.get("about"):
             body.append(
                 '<section class="card about"><h2>About this forecast</h2>'
