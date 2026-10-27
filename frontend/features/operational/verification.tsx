@@ -25,6 +25,7 @@ import {
 } from "@/lib/format";
 import type { ChatComparison } from "@/types/workflows";
 import { useApi } from "@/services/hooks";
+import type { Loaded } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
 import type {
   ExperimentalEvidence,
@@ -243,9 +244,46 @@ function OtherModels() {
   );
 }
 
+/** The answer first: how much the correction improves on raw ECMWF on the independent
+ * test, and how many live weeks are scored. */
+function Answer({
+  evidence,
+  verified,
+}: {
+  evidence?: ExperimentalEvidence;
+  verified: number;
+}) {
+  const scores = evidence?.regional ?? [];
+  const hybrid = scores.find((s) => s.model === "CatBoost");
+  const mbc = scores.find((s) => s.model === "MBC");
+  if (!evidence || hybrid?.skill_vs_raw == null || mbc?.skill_vs_raw == null)
+    return null;
+  const percent = (value: number) => `${Math.round(value * 100)}%`;
+  return (
+    <section className="card answer-card" aria-label="Verification in brief">
+      <p className="answer">
+        On {evidence.scope.cases} independent reforecast cases from 2022 to
+        2024, the MBC + CatBoost correction had{" "}
+        <strong>{percent(hybrid.skill_vs_raw)} lower error</strong> than raw
+        ECMWF, and MBC alone {percent(mbc.skill_vs_raw)} lower.
+      </p>
+      <p className="answer-sub">
+        Error here is the root-mean-square difference from CHIRPS in weekly
+        rainfall.{" "}
+        {verified > 0
+          ? `${verified} live ${verified === 1 ? "week has" : "weeks have"} been scored so far; their scores follow.`
+          : "Live weeks are scored below as soon as CHIRPS has observed them."}
+      </p>
+    </section>
+  );
+}
+
 /** The frozen 551-case evaluation, kept apart from the live verification above. */
-function ExperimentalSummary() {
-  const evidence = useApi<ExperimentalEvidence>("/verification/experimental");
+function ExperimentalSummary({
+  evidence,
+}: {
+  evidence: Loaded<ExperimentalEvidence>;
+}) {
   return (
     <Card
       title="Experimental evidence: the independent 2022–2024 test"
@@ -372,6 +410,13 @@ export default function Verification() {
   const issued = latestRuns(runs.data ?? []);
   const verified = issued.filter((r) => r.verification_status === "available");
   const waiting = issued.filter((r) => r.verification_status !== "available");
+  const evidence = useApi<ExperimentalEvidence>("/verification/experimental");
+  // CHIRPS covers a week about two days after it ends.
+  const nextScores = waiting
+    .map((r) =>
+      new Date(Date.parse(r.valid_end) + 2 * 86_400_000).toISOString(),
+    )
+    .sort()[0];
   return (
     <div className="page">
       <div className="wrap">
@@ -400,6 +445,7 @@ export default function Verification() {
           </Notice>
         )}
         {error && <ErrorState message={error} />}
+        <Answer evidence={evidence.data} verified={verified.length} />
         <div className="stats">
           <div className="stat">
             <div className="label">Verified forecasts</div>
@@ -412,11 +458,15 @@ export default function Verification() {
             <div className="hint">CHIRPS lags about two days</div>
           </div>
           <div className="stat">
-            <div className="label">Metrics</div>
+            <div className="label">Next scores</div>
             <div className="value" style={{ fontSize: 22 }}>
-              MAE · RMSE · bias · r
+              {nextScores ? day(nextScores) : "—"}
             </div>
-            <div className="hint">Per week, pooled by season</div>
+            <div className="hint">
+              {nextScores
+                ? "When CHIRPS covers the next forecast week"
+                : "No forecast is waiting"}
+            </div>
           </div>
         </div>
         {runs.loading && <Skeleton height={240} />}
@@ -506,7 +556,7 @@ export default function Verification() {
           </Card>
         )}
         <OtherModels />
-        <ExperimentalSummary />
+        <ExperimentalSummary evidence={evidence} />
       </div>
     </div>
   );

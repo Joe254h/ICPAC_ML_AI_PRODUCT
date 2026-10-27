@@ -5,6 +5,7 @@ import { useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   Clock3,
   Info,
   RotateCw,
@@ -146,6 +147,30 @@ export function Card({
       )}
       {children}
     </section>
+  );
+}
+
+/** A card folded away by default: detail a reader opens when they want it. */
+export function Disclosure({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="card disclosure">
+      <summary>
+        <span>
+          <h2>{title}</h2>
+          {subtitle && <small>{subtitle}</small>}
+        </span>
+        <ChevronDown size={20} aria-hidden className="chevron" />
+      </summary>
+      <div className="disclosure-body">{children}</div>
+    </details>
   );
 }
 

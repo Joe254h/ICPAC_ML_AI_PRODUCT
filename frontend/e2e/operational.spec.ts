@@ -33,12 +33,18 @@ test("the home page leads with this week's outlook", async ({ page }) => {
     layers.getByRole("button", { name: /MBC \+ AI\/ML/ }),
   ).toBeDisabled();
   await expect(page.locator(".country-card")).toHaveCount(11);
-  await expect(
-    page.getByRole("heading", { name: "Observed rainfall" }),
-  ).toBeVisible();
   await expect(page.getByText("Wettest country").first()).toBeVisible();
+  // Why it can be trusted: the independent test's figure, from the verification data.
+  const trust = page.locator("section.trust");
   await expect(
-    page.getByRole("heading", { name: "From the ensemble to the bulletin" }),
+    trust.getByRole("heading", {
+      name: "Corrected, checked and reviewed every week",
+    }),
+  ).toBeVisible();
+  await expect(trust).toContainText(/\d+% lower error than raw ECMWF/);
+  await expect(trust).toContainText("551 independent forecast cases");
+  await expect(
+    page.getByRole("heading", { name: "How each week's forecast is made" }),
   ).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await noHorizontalScroll(page);
@@ -61,14 +67,17 @@ test("a header menu opens on click and its pages are links", async ({
   await archive.click();
   await expect(page).toHaveURL(/\/forecasts\/archive$/);
   // A second click closes it; Escape does too.
-  const tools = nav.getByRole("button", { name: "Data & Tools" });
+  const tools = nav.getByRole("button", { name: "Operations" });
   await tools.click();
-  await expect(nav.getByRole("link", { name: "TAMSAT" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Data sources" })).toBeVisible();
   await tools.click();
-  await expect(nav.getByRole("link", { name: "TAMSAT" })).toBeHidden();
+  await expect(nav.getByRole("link", { name: "Data sources" })).toBeHidden();
   await tools.click();
   await page.keyboard.press("Escape");
   await expect(tools).toHaveAttribute("aria-expanded", "false");
+  // Countries is one page; each member state opens from it.
+  await nav.getByRole("link", { name: "Countries" }).click();
+  await expect(page).toHaveURL(/\/countries$/);
 });
 
 test("rainfall monitoring shows the newest dekad of all five estimates", async ({

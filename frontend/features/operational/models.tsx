@@ -617,7 +617,10 @@ export default function Models() {
       <div className="wrap">
         <PageBanner
           title="Model Registry"
-          crumbs={[{ label: "Models" }]}
+          crumbs={[
+            { label: "Operations", href: "/data/runs" },
+            { label: "Model registry" },
+          ]}
           subtitle="Every operational model version with its evidence and reviewed status. A newly registered model is never used automatically: a reviewer approves it, then activates it."
         />
         {hybrid?.status === "in_progress" && (

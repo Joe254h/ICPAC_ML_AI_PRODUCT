@@ -56,7 +56,10 @@ function RainfallMaps({ detail }: { detail: ForecastDetail }) {
     <>
       <PageBanner
         title="Rainfall Maps"
-        crumbs={[{ label: "Maps" }, { label: "Rainfall" }]}
+        crumbs={[
+          { label: "Forecasts", href: "/forecasts" },
+          { label: "Rainfall maps" },
+        ]}
         subtitle="Week-2 total rainfall in the ICPAC weekly bulletin's colour classes, for the region or one member state."
         facts={forecastFacts(detail)}
       />
@@ -143,11 +146,22 @@ function VerificationMap({ metric }: { metric: string }) {
       <PageBanner
         title={`${info.title} Maps`}
         crumbs={[
-          { label: "Maps", href: "/maps/rainfall" },
-          { label: info.title },
+          { label: "Verification", href: "/verification" },
+          { label: "Error and skill maps" },
         ]}
         subtitle={info.text}
       />
+      <nav className="tabs" aria-label="Verification map">
+        {Object.entries(METRICS).map(([key, { title }]) => (
+          <Link
+            key={key}
+            href={`/maps/${key}`}
+            aria-current={key === metric ? "page" : undefined}
+          >
+            {title}
+          </Link>
+        ))}
+      </nav>
       {status.loading && <Skeleton height={420} />}
       {status.error && (
         <ErrorState message={status.error} retry={status.reload} />
@@ -245,7 +259,10 @@ export default function Maps({ route, id }: PageProps) {
               <>
                 <PageBanner
                   title="Rainfall Maps"
-                  crumbs={[{ label: "Maps" }]}
+                  crumbs={[
+                    { label: "Forecasts", href: "/forecasts" },
+                    { label: "Rainfall maps" },
+                  ]}
                 />
                 <NoForecast />
               </>

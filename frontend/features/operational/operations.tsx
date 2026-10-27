@@ -141,10 +141,7 @@ export default function Operations() {
       <div className="wrap">
         <PageBanner
           title="Operations"
-          crumbs={[
-            { label: "Data & Tools", href: "/data" },
-            { label: "Operations" },
-          ]}
+          crumbs={[{ label: "Operations" }, { label: "Run the weekly cycle" }]}
           subtitle="Run the weekly Week-2 cycle: download the newest ECMWF ensemble, issue the forecast and verify finished forecasts against CHIRPS. Every task is recorded with who started it."
         />
         <div className="split" style={{ alignItems: "stretch" }}>

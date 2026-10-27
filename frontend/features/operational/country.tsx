@@ -45,7 +45,10 @@ function Body({
     <>
       <PageBanner
         title={country}
-        crumbs={[{ label: "Countries" }, { label: country }]}
+        crumbs={[
+          { label: "Countries", href: "/countries" },
+          { label: country },
+        ]}
         subtitle={`Week-2 (days 8–14) rainfall outlook for ${country}, valid ${validDays(detail.valid_start, detail.valid_end)}.`}
         facts={forecastFacts(detail)}
       />
@@ -148,7 +151,10 @@ export default function Country({ route, id }: PageProps) {
           <>
             <PageBanner
               title={country}
-              crumbs={[{ label: "Countries" }, { label: country }]}
+              crumbs={[
+                { label: "Countries", href: "/countries" },
+                { label: country },
+              ]}
             />
             <NoForecast />
           </>

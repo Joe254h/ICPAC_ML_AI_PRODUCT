@@ -6,7 +6,6 @@ import { Download } from "lucide-react";
 import Chart from "@/components/chart";
 import { useApp } from "@/components/shell";
 import {
-  Card,
   EmptyState,
   InProgress,
   KeyValues,
@@ -573,20 +572,5 @@ export function ProvenanceList({ detail }: { detail: ForecastDetail }) {
         ["Input", detail.input_label],
       ]}
     />
-  );
-}
-
-export function NotesCard({ detail }: { detail: ForecastDetail }) {
-  if (!detail.notes?.length) return null;
-  return (
-    <Card title="Notes on this forecast">
-      <ul style={{ margin: 0, paddingLeft: 20 }}>
-        {detail.notes.map((note) => (
-          <li key={note} style={{ marginBottom: 6 }}>
-            {note}
-          </li>
-        ))}
-      </ul>
-    </Card>
   );
 }

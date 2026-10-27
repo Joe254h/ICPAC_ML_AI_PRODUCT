@@ -49,7 +49,7 @@ function basemap(theme: "light" | "dark"): string | StyleSpecification {
         id: "background",
         type: "background",
         paint: {
-          "background-color": theme === "dark" ? "#0e1a24" : "#aad3f7",
+          "background-color": theme === "dark" ? "#0c1a14" : "#aad3f7",
         },
       },
       { id: "carto", type: "raster", source: "carto" },
@@ -295,7 +295,7 @@ export default function RainMap({
           type: "fill",
           source: "outside",
           paint: {
-            "fill-color": theme === "dark" ? "#0e1a24" : "#eef1f3",
+            "fill-color": theme === "dark" ? "#0c1a14" : "#eef1f3",
             "fill-opacity": theme === "dark" ? 0.86 : 0.9,
             "fill-antialias": false,
           },

@@ -15,6 +15,18 @@ test("every header menu has pages", () => {
     expect(menuRoutes(menu).length, menu).toBeGreaterThan(0);
 });
 
+test("header menus stay short; the rest is reached from its page and search", () => {
+  for (const menu of MENUS)
+    expect(menuRoutes(menu).length, menu).toBeLessThanOrEqual(6);
+  // Each country, layer and data source has a page, outside the menus.
+  for (const path of ["countries/kenya", "forecasts/raw", "data/tamsat"]) {
+    const route = findRoute(path);
+    expect(route?.sub, path).toBe(true);
+    expect(menuRoutes(route!.menu)).not.toContain(route);
+  }
+  expect(menuRoutes("Countries").map((r) => r.path)).toEqual(["countries"]);
+});
+
 test("the eleven member states each have a country page", () => {
   expect(COUNTRIES).toHaveLength(11);
   for (const name of COUNTRIES)

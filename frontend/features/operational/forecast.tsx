@@ -11,6 +11,7 @@ import { useApp } from "@/components/shell";
 import {
   Button,
   Card,
+  Disclosure,
   ErrorState,
   LinkButton,
   MapFigure,
@@ -38,7 +39,6 @@ import {
   EarlierModelNotice,
   ForecastFacts,
   NoForecast,
-  NotesCard,
   ProductStatusList,
   ProvenanceList,
   VerificationSummary,
@@ -353,12 +353,6 @@ function Body({
         </Card>
       </div>
       <Card
-        title="Forecast products"
-        subtitle="Each layer and what it is made from."
-      >
-        <ProductStatusList detail={detail} />
-      </Card>
-      <Card
         title="Country outlook"
         subtitle="Area means and ranges of Week-2 rainfall (mm) per member state."
       >
@@ -367,21 +361,45 @@ function Body({
           <CountryChart rows={detail.countries} layers={layers} />
         </div>
       </Card>
-      <Card title="Verification">
-        <VerificationSummary detail={detail} />
+      <Card
+        title="Forecast products"
+        subtitle="Each layer and what it is made from."
+      >
+        <ProductStatusList detail={detail} />
       </Card>
       <div className="grid-2">
-        <Card title="Forecast details">
-          <ForecastFacts detail={detail} />
+        <Card title="Verification">
+          <VerificationSummary detail={detail} />
         </Card>
         <Card title="Downloads" subtitle="This forecast's data and maps.">
           <Downloads detail={detail} />
         </Card>
       </div>
-      <NotesCard detail={detail} />
-      <Card title="How this forecast was made">
-        <ProvenanceList detail={detail} />
-      </Card>
+      <Disclosure
+        title="How this forecast was made"
+        subtitle="The run, the inputs, the grid and the correction."
+      >
+        <div>
+          <h3>Forecast details</h3>
+          <ForecastFacts detail={detail} />
+        </div>
+        {!!detail.notes?.length && (
+          <div>
+            <h3>Notes on this forecast</h3>
+            <ul style={{ margin: 0, paddingLeft: 20 }}>
+              {detail.notes.map((note) => (
+                <li key={note} style={{ marginBottom: 6 }}>
+                  {note}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <div>
+          <h3>Method</h3>
+          <ProvenanceList detail={detail} />
+        </div>
+      </Disclosure>
     </>
   );
 }

@@ -1,8 +1,9 @@
 "use client";
 /**
  * Home: this week's outlook first. A full-width live map of the Week-2 forecast with its
- * headline, the key figures, every member state at a glance, the weekly bulletin, the
- * latest observed rainfall and the state of the operational chain.
+ * headline, the key figures, why the forecast can be trusted (its independent test, its
+ * reach and its verification), every member state at a glance, the weekly bulletin and how
+ * each week's forecast is made, with the live state of each step.
  */
 import Link from "next/link";
 import { useState } from "react";
@@ -15,9 +16,11 @@ import {
   CloudRain,
   Cpu,
   FileText,
+  Gauge,
   Play,
   Satellite,
   Target,
+  UserCheck,
 } from "lucide-react";
 import RainMap, { LegendBar } from "@/components/rain-map";
 import {
@@ -36,7 +39,9 @@ import type {
   BulletinStatus,
   DataSource,
   Dekad,
+  ExperimentalEvidence,
   ForecastDetail,
+  ForecastRun,
   Variant,
 } from "@/types/operational";
 import type { Bulletin } from "@/types/workflows";
@@ -192,7 +197,7 @@ function OutlookHero({
                 Explore the forecast <ArrowRight size={17} />
               </LinkButton>
               <LinkButton href="/bulletin" variant="ghost-light">
-                <FileText size={17} /> Weekly bulletin
+                <FileText size={17} /> Read the bulletin
               </LinkButton>
             </div>
           </div>
@@ -358,98 +363,101 @@ function BulletinPreview({
   );
 }
 
-// ------------------------------------------------------------------ monitoring
+// ------------------------------------------------------------------ trust
 
-const DEKAD_CLASSES: [string, string][] = [
-  ["#ffffff", "<1"],
-  ["#c0c0c0", "1–5"],
-  ["#ff8c00", "5–10"],
-  ["#ffff00", "10–25"],
-  ["#98fb98", "25–50"],
-  ["#00fa9a", "50–100"],
-  ["#00ff00", "100–200"],
-  ["#006400", ">200"],
-];
-
-function ObservedRainfall() {
-  const latest = useApi<Dekad>("/monitoring/dekads/latest");
-  const dekad = latest.data;
-  if (latest.loading) return null;
-  const wettest = dekad
-    ? [...dekad.countries].sort((a, b) => b.mean_mm - a.mean_mm)[0]
-    : undefined;
+/** Why the forecast can be trusted: it is corrected, checked and reviewed, each claim
+ * with its evidence. */
+function Trust({ detail }: { detail: ForecastDetail }) {
+  const evidence = useApi<ExperimentalEvidence>("/verification/experimental");
+  const runs = useApi<ForecastRun[]>("/forecasts");
+  // The correction the service issues: MBC + CatBoost, else MBC alone.
+  const scores = evidence.data?.regional ?? [];
+  const best =
+    scores.find((s) => s.model === "CatBoost") ??
+    scores.find((s) => s.model === "MBC");
+  const cases = evidence.data?.scope.cases;
+  const verified =
+    runs.data?.filter((r) => r.verification_status === "available").length ?? 0;
+  const end = new Date(new Date(detail.valid_end).getTime() + 2 * 86_400_000);
   return (
-    <section className="section">
-      <div className="wrap observed">
-        <div className="observed-text">
-          <p className="kicker-text">Climate monitoring</p>
-          <h2 className="section-title left">Observed rainfall</h2>
-          {dekad ? (
-            <>
-              <p className="section-sub left">
-                CHIRPS satellite and station rainfall for the latest dekad,{" "}
-                <strong>{period(dekad.start, dekad.end)}</strong> (preliminary).
-              </p>
-              <dl className="observed-figures">
-                <div>
-                  <dt>Regional mean</dt>
-                  <dd>{num(dekad.region.mean_mm)} mm</dd>
-                </div>
-                {wettest && (
-                  <div>
-                    <dt>Wettest country</dt>
-                    <dd>
-                      {wettest.country} · {num(wettest.mean_mm)} mm
-                    </dd>
-                  </div>
-                )}
-                <div>
-                  <dt>Area below 1 mm</dt>
-                  <dd>{Math.round(dekad.region.dry_fraction * 100)}%</dd>
-                </div>
-                <div>
-                  <dt>Percent of normal</dt>
-                  <dd>
-                    {dekad.region.percent_of_normal != null
-                      ? `${dekad.region.percent_of_normal}%`
-                      : "In progress"}
-                  </dd>
-                </div>
-              </dl>
-              <LinkButton href="/monitoring" variant="green">
-                Rainfall monitoring <ArrowRight size={16} />
-              </LinkButton>
-            </>
-          ) : (
-            <p className="section-sub left">
-              Observed rainfall appears here once the newest CHIRPS dekad has
-              been downloaded; the weekly cycle and the daily task fetch it.
-            </p>
-          )}
+    <section className="section trust" aria-labelledby="trust-title">
+      <div className="wrap trust-grid">
+        <div className="trust-intro">
+          <p className="kicker-text">Why it can be trusted</p>
+          <h2 id="trust-title" className="section-title left">
+            Corrected, checked and reviewed every week
+          </h2>
+          <p className="section-sub left">
+            The service corrects the ECMWF ensemble for its known errors over
+            the region, checks each forecast against the rain that fell, and
+            leaves the release of every bulletin to a forecaster.
+          </p>
         </div>
-        {dekad?.overlays && dekad.overlay_bounds && (
-          <div className="observed-map">
-            <RainMap
-              overlay={dekad.overlays.total}
-              bounds={dekad.overlay_bounds}
-              height={420}
-              credit="Observed: CHIRPS, Climate Hazards Center (UCSB)"
-              padding={{ west: 1, east: 1, south: 1, north: 1 }}
-              hover={(name) => {
-                const row = dekad.countries.find((c) => c.country === name);
-                return row ? `Mean ${num(row.mean_mm)} mm this dekad` : null;
-              }}
-            >
-              <div className="map-legend-corner" data-map-reserve="bottom left">
-                <LegendBar
-                  title="Dekad total"
-                  unit="mm"
-                  classes={DEKAD_CLASSES}
-                />
-              </div>
-            </RainMap>
-          </div>
-        )}
+        <ul className="trust-list">
+          <li>
+            <span className="trust-icon" aria-hidden>
+              <Gauge size={20} />
+            </span>
+            <strong>
+              {best?.skill_vs_raw != null ? (
+                <>
+                  <em>{Math.round(best.skill_vs_raw * 100)}%</em> lower error
+                  than raw ECMWF
+                </>
+              ) : (
+                "Corrected for the region"
+              )}
+            </strong>
+            <span className="trust-text">
+              {best?.skill_vs_raw != null
+                ? `The ${best.model === "MBC" ? "MBC" : "MBC + CatBoost"} correction, measured against CHIRPS on ${cases ?? "the"} independent forecast cases from 2022 to 2024.`
+                : "A bias correction and a machine-learning correction learned from past ECMWF reforecasts and CHIRPS."}
+            </span>
+            <Link href="/verification/experimental">
+              The independent test <ArrowRight size={14} />
+            </Link>
+          </li>
+          <li>
+            <span className="trust-icon" aria-hidden>
+              <Target size={20} />
+            </span>
+            <strong>
+              {verified > 0 ? (
+                <>
+                  <em>{verified}</em>{" "}
+                  {verified === 1 ? "forecast" : "forecasts"} checked against
+                  observed rain
+                </>
+              ) : (
+                "Checked against observed rain"
+              )}
+            </strong>
+            <span className="trust-text">
+              Each forecast is scored against CHIRPS once its week has been
+              observed.{" "}
+              {detail.verification_status === "available"
+                ? "This week's forecast has been scored."
+                : `This week's forecast is scored from ${day(end.toISOString())}.`}
+            </span>
+            <Link href="/verification">
+              Verification <ArrowRight size={14} />
+            </Link>
+          </li>
+          <li>
+            <span className="trust-icon" aria-hidden>
+              <UserCheck size={20} />
+            </span>
+            <strong>Released only after review</strong>
+            <span className="trust-text">
+              The bulletin is drafted in ICPAC&apos;s wording. A forecaster
+              reviews it, can change it with the Copilot, and approves it before
+              it is published.
+            </span>
+            <Link href="/bulletins">
+              Drafts and review <ArrowRight size={14} />
+            </Link>
+          </li>
+        </ul>
       </div>
     </section>
   );
@@ -509,7 +517,7 @@ function Pipeline({ detail }: { detail?: ForecastDetail }) {
     {
       title: "Observed rainfall",
       text: dekad.data
-        ? `Dekad ${period(dekad.data.start, dekad.data.end)}`
+        ? `CHIRPS dekad ${period(dekad.data.start, dekad.data.end)}`
         : "No dekad yet",
       state: dekad.data ? "done" : "waiting",
       href: "/monitoring",
@@ -535,15 +543,16 @@ function Pipeline({ detail }: { detail?: ForecastDetail }) {
   ];
   const Icon = { done: CheckCircle2, waiting: Clock3, progress: CircleDashed };
   return (
-    <section className="section tinted">
+    <section className="section tinted" id="how">
       <div className="wrap">
-        <p className="kicker-text">Operational chain</p>
+        <p className="kicker-text">How it works</p>
         <h2 className="section-title left">
-          From the ensemble to the bulletin
+          How each week&apos;s forecast is made
         </h2>
         <p className="section-sub left">
-          Every step runs in this service and is recorded; the state of each is
-          shown live.
+          Each step runs on a schedule and is recorded. A forecaster reviews and
+          approves the bulletin before it is released. The state of each step is
+          live.
         </p>
         <ol className="pipeline">
           {steps.map((step, index) => {
@@ -581,11 +590,11 @@ export default function Home() {
     <>
       <OutlookHero latest={latest} bulletin={bulletin} />
       {latest.data && <KeyFigures detail={latest.data} />}
+      {latest.data && <Trust detail={latest.data} />}
       {latest.data && <CountryOutlook detail={latest.data} />}
       {latest.data && (
         <BulletinPreview detail={latest.data} bulletin={bulletin} />
       )}
-      <ObservedRainfall />
       <Pipeline detail={latest.data} />
     </>
   );

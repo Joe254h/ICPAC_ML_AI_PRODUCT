@@ -1,8 +1,8 @@
 "use client";
 /**
- * Site shell: the white header with the IGAD seal, the service's name, search, service
- * status and staff access, the green menu bar with drop-down panels, the page header and
- * the footer.
+ * Site shell: one white header with the IGAD seal and the product's name, the menus (the
+ * staff's Operations menu set apart), search, service status and staff access; the page
+ * header; and a short footer with ICPAC's links and the data credits.
  */
 import Link from "next/link";
 import StaffAccess from "@/components/bulletin-access";
@@ -25,7 +25,14 @@ import {
 } from "lucide-react";
 import { BannerSlot } from "@/components/banner";
 import { cx } from "@/components/ui";
-import { MENUS, ROUTES, findRoute, href, menuRoutes } from "@/features/routes";
+import {
+  MENUS,
+  ROUTES,
+  STAFF_MENU,
+  findRoute,
+  href,
+  menuRoutes,
+} from "@/features/routes";
 import type { Menu, Route } from "@/features/routes";
 import { useApi } from "@/services/hooks";
 import type { Loaded } from "@/services/hooks";
@@ -72,6 +79,7 @@ function MenuEntry({
   const open = state.menu === menu;
   const routes = menuRoutes(menu);
   const current = active?.menu === menu;
+  const staff = menu === STAFF_MENU;
   if (routes.length === 1)
     return (
       <li>
@@ -86,7 +94,7 @@ function MenuEntry({
     );
   return (
     <li
-      className={cx(open && "open")}
+      className={cx(open && "open", staff && "staff")}
       onMouseEnter={() => {
         if (!state.pinned || !open) setState({ menu, pinned: false });
       }}
@@ -110,7 +118,7 @@ function MenuEntry({
       >
         {menu} <ChevronDown size={16} aria-hidden className="chevron" />
       </button>
-      <div className={cx("dropdown", menu === "Countries" && "wide")}>
+      <div className="dropdown">
         {routes.map((route) => (
           <Link
             key={route.path}
@@ -201,15 +209,11 @@ function SearchDialog({ close }: { close: () => void }) {
   );
 }
 
-function StatusDot({ health }: { health: Loaded<Health> }) {
-  const tone = health.error
-    ? "bad"
-    : health.data?.status === "Healthy"
-      ? "ok"
-      : health.data
-        ? "warn"
-        : "unknown";
-  return <span aria-hidden className={cx("status-dot", tone)} />;
+function statusOf(health: Loaded<Health>) {
+  if (health.error) return { tone: "bad", text: "not answering" };
+  if (health.data?.status === "Healthy") return { tone: "ok", text: "healthy" };
+  if (health.data) return { tone: "warn", text: "needs attention" };
+  return { tone: "unknown", text: "checking" };
 }
 
 /**
@@ -263,6 +267,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const config = useApi<Config>("/config");
   const current = useApi<CurrentModel>("/models/current");
   const health = useApi<Health>("/health");
+  const status = statusOf(health);
   const [menuState, setMenuState] = useState<MenuState>({
     menu: null,
     pinned: false,
@@ -321,40 +326,52 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         Skip to content
       </a>
       <header className={cx("site-top", home && "home")}>
-        <div className="wrap brandbar">
+        <div className="wrap headbar">
           <Link
             className="brand"
             href="/"
-            aria-label="ICPAC Week-2 forecasts, home"
+            aria-label="ICPAC Week-2 Rainfall Outlook, home"
           >
-            <img src="/igad-seal.png" alt="" width={44} height={44} />
+            <img src="/igad-seal.png" alt="" width={40} height={40} />
             <div className="brand-name">
               <b>ICPAC</b>
-              <small>IGAD Climate Prediction and Applications Centre</small>
-            </div>
-            <div className="brand-product">
-              Week-2 Rainfall Forecasts
-              <small>Days 8–14 · Eastern Africa</small>
+              <small>Week-2 Rainfall Outlook</small>
             </div>
           </Link>
+          <nav
+            ref={nav}
+            className={cx("mainnav", mobile && "mobile-open")}
+            aria-label="Main"
+          >
+            <ul>
+              {MENUS.map((menu) => (
+                <MenuEntry
+                  key={menu}
+                  menu={menu}
+                  active={active}
+                  state={menuState}
+                  setState={setMenuState}
+                />
+              ))}
+            </ul>
+          </nav>
           <div className="utility">
             <button
               type="button"
-              className="search-trigger"
+              className="icon-button"
               onClick={() => setSearch(true)}
+              aria-label="Search"
+              title="Search (press /)"
             >
-              <Search size={16} aria-hidden />
-              <span className="label">Search</span>
-              <kbd aria-hidden>/</kbd>
+              <Search size={18} aria-hidden />
             </button>
             <Link
               href="/system"
-              className="status-link"
-              title="Service status"
-              aria-label="Service status"
+              className="icon-button"
+              title={`Service ${status.text}`}
+              aria-label={`Service status: ${status.text}`}
             >
-              <StatusDot health={health} />
-              <span className="label">Status</span>
+              <span aria-hidden className={cx("status-dot", status.tone)} />
             </Link>
             {health.data && health.data.access_mode !== "public" && (
               <StaffAccess />
@@ -370,23 +387,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         </div>
-        <nav
-          ref={nav}
-          className={cx("mainnav", mobile && "mobile-open")}
-          aria-label="Main"
-        >
-          <ul>
-            {MENUS.map((menu) => (
-              <MenuEntry
-                key={menu}
-                menu={menu}
-                active={active}
-                state={menuState}
-                setState={setMenuState}
-              />
-            ))}
-          </ul>
-        </nav>
         {!home && (
           <div className="banner">
             <div className="wrap">
@@ -405,40 +405,21 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </main>
       </BannerSlot.Provider>
       <footer className="site-footer">
-        <div className="wrap cols">
-          <div className="about">
-            <Link className="brand" href="/">
-              <img src="/igad-seal-white.png" alt="" width={46} height={46} />
-              <div className="brand-name">
-                <b>ICPAC</b>
-                <small>IGAD Climate Prediction and Applications Centre</small>
-              </div>
-            </Link>
-          </div>
-          <div>
-            <h4>Forecasts</h4>
-            <Link href="/forecasts">Latest forecast</Link>
-            <Link href="/maps/rainfall">Rainfall maps</Link>
-            <Link href="/forecasts/archive">Forecast archive</Link>
-            <Link href="/verification">Verification</Link>
-            <Link href="/copilot">Forecaster Copilot</Link>
-          </div>
-          <div>
-            <h4>Products and Data</h4>
-            <Link href="/bulletin">Weekly bulletin</Link>
-            <Link href="/data">Data sources</Link>
-            <Link href="/data/ecmwf">ECMWF ensemble</Link>
-            <Link href="/monitoring">Rainfall monitoring</Link>
-            <Link href="/models">Model registry</Link>
-          </div>
-          <div>
-            <h4>Organisation</h4>
+        <div className="wrap footer-main">
+          <Link className="brand" href="/">
+            <img src="/igad-seal-white.png" alt="" width={42} height={42} />
+            <div className="brand-name">
+              <b>ICPAC</b>
+              <small>IGAD Climate Prediction and Applications Centre</small>
+            </div>
+          </Link>
+          <nav className="footer-links" aria-label="ICPAC">
             {ORGANISATION.map(([label, url]) => (
               <a key={url} href={url} target="_blank" rel="noreferrer">
                 {label} <ExternalLink size={12} aria-hidden />
               </a>
             ))}
-          </div>
+          </nav>
         </div>
         <div className="wrap legal">
           <span>
@@ -446,7 +427,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             for Eastern Africa
           </span>
           <span>
-            Forecast data: ECMWF Open Data (CC BY 4.0) · Observations: CHIRPS,
+            Forecasts: ECMWF Open Data (CC BY 4.0) · Observations: CHIRPS,
             TAMSAT, ARC 2.0, RFE 2.0, GPM IMERG
           </span>
         </div>

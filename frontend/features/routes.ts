@@ -33,6 +33,8 @@ export type Route = {
   param?: string;
   /** Listed in the menus and search; false keeps an older URL working. */
   nav?: boolean;
+  /** Found by search and reached from its parent page, but not listed in the header menu. */
+  sub?: boolean;
   /** Shown as "coming later" (planned data sources). */
   soon?: boolean;
 };
@@ -40,13 +42,12 @@ export type Route = {
 export type Menu =
   | "Home"
   | "Forecasts"
-  | "Monitoring"
-  | "Maps"
   | "Countries"
-  | "Verification"
   | "Bulletin"
-  | "Data & Tools"
-  | "Copilot";
+  | "Verification"
+  | "Monitoring"
+  | "Copilot"
+  | "Operations";
 
 /** ICPAC member states, alphabetical. */
 export const COUNTRIES = [
@@ -66,19 +67,20 @@ export const COUNTRIES = [
 export const countrySlug = (name: string) =>
   name.toLowerCase().replaceAll(" ", "-");
 
-/** Header menus, in the order of the ICPAC website's navigation. */
+/** Header menus: what the service gives, then the staff's own tools. */
 export const MENUS: Menu[] = [
   "Forecasts",
-  "Monitoring",
-  "Maps",
   "Countries",
-  "Verification",
   "Bulletin",
-  "Data & Tools",
+  "Verification",
+  "Monitoring",
   "Copilot",
+  "Operations",
 ];
 
-/** Planned observation sources: listed now, readers come later. */
+/** The menu for the people who run the service, set apart in the header. */
+export const STAFF_MENU: Menu = "Operations";
+
 /** The further rainfall estimates summed from daily files. */
 export const DAILY_SOURCES = [
   { id: "arc2", title: "ARC 2.0" },
@@ -87,13 +89,8 @@ export const DAILY_SOURCES = [
 ] as const;
 
 export const ROUTES: Route[] = [
-  {
-    path: "automations",
-    title: "Automation workspace",
-    menu: "Data & Tools",
-    page: "automations",
-  },
   { path: "", title: "Home", menu: "Home", page: "home" },
+  // Forecasts: this week's outlook, its maps and earlier weeks.
   {
     path: "forecasts",
     title: "Latest forecast",
@@ -101,25 +98,11 @@ export const ROUTES: Route[] = [
     page: "forecast",
   },
   {
-    path: "forecasts/raw",
-    title: "Raw ECMWF",
+    path: "maps/rainfall",
+    title: "Rainfall maps",
     menu: "Forecasts",
-    page: "layer",
-    param: "raw",
-  },
-  {
-    path: "forecasts/mbc",
-    title: "MBC",
-    menu: "Forecasts",
-    page: "layer",
-    param: "mbc",
-  },
-  {
-    path: "forecasts/hybrid",
-    title: "MBC + AI/ML",
-    menu: "Forecasts",
-    page: "layer",
-    param: "hybrid",
+    page: "maps",
+    param: "rainfall",
   },
   {
     path: "forecasts/archive",
@@ -128,40 +111,30 @@ export const ROUTES: Route[] = [
     page: "archive",
   },
   {
-    path: "maps/rainfall",
-    title: "Rainfall maps",
-    menu: "Maps",
-    page: "maps",
-    param: "rainfall",
+    path: "forecasts/raw",
+    title: "Raw ECMWF",
+    menu: "Forecasts",
+    page: "layer",
+    param: "raw",
+    sub: true,
   },
   {
-    path: "maps/bias",
-    title: "Bias",
-    menu: "Maps",
-    page: "maps",
-    param: "bias",
+    path: "forecasts/mbc",
+    title: "MBC",
+    menu: "Forecasts",
+    page: "layer",
+    param: "mbc",
+    sub: true,
   },
   {
-    path: "maps/rmse",
-    title: "RMSE",
-    menu: "Maps",
-    page: "maps",
-    param: "rmse",
+    path: "forecasts/hybrid",
+    title: "MBC + AI/ML",
+    menu: "Forecasts",
+    page: "layer",
+    param: "hybrid",
+    sub: true,
   },
-  {
-    path: "maps/correlation",
-    title: "Correlation",
-    menu: "Maps",
-    page: "maps",
-    param: "correlation",
-  },
-  {
-    path: "maps/skill",
-    title: "Skill",
-    menu: "Maps",
-    page: "maps",
-    param: "skill",
-  },
+  // Countries: one page with all eleven; each opens from it.
   {
     path: "countries",
     title: "All member states",
@@ -174,19 +147,9 @@ export const ROUTES: Route[] = [
     menu: "Countries" as const,
     page: "country" as const,
     param: name,
+    sub: true,
   })),
-  {
-    path: "verification",
-    title: "Verification",
-    menu: "Verification",
-    page: "verification",
-  },
-  {
-    path: "verification/experimental",
-    title: "Experimental verification 2022–2024",
-    menu: "Verification",
-    page: "evidence",
-  },
+  // Bulletin
   {
     path: "bulletin",
     title: "Weekly bulletin",
@@ -206,6 +169,50 @@ export const ROUTES: Route[] = [
     page: "decision",
     nav: false,
   },
+  // Verification: live scores, the independent test and the per-cell maps.
+  {
+    path: "verification",
+    title: "Verification",
+    menu: "Verification",
+    page: "verification",
+  },
+  {
+    path: "verification/experimental",
+    title: "Independent test 2022–2024",
+    menu: "Verification",
+    page: "evidence",
+  },
+  {
+    path: "maps/bias",
+    title: "Error and skill maps",
+    menu: "Verification",
+    page: "maps",
+    param: "bias",
+  },
+  {
+    path: "maps/rmse",
+    title: "RMSE map",
+    menu: "Verification",
+    page: "maps",
+    param: "rmse",
+    sub: true,
+  },
+  {
+    path: "maps/correlation",
+    title: "Correlation map",
+    menu: "Verification",
+    page: "maps",
+    param: "correlation",
+    sub: true,
+  },
+  {
+    path: "maps/skill",
+    title: "Skill map",
+    menu: "Verification",
+    page: "maps",
+    param: "skill",
+    sub: true,
+  },
   {
     path: "monitoring",
     title: "Rainfall monitoring",
@@ -213,71 +220,82 @@ export const ROUTES: Route[] = [
     page: "monitoring",
   },
   {
-    path: "models",
-    title: "Model registry",
-    menu: "Data & Tools",
-    page: "models",
-  },
-  { path: "data", title: "Data sources", menu: "Data & Tools", page: "data" },
-  {
-    path: "data/ecmwf",
-    title: "ECMWF ensemble",
-    menu: "Data & Tools",
-    page: "source",
-    param: "ecmwf",
-  },
-  {
-    path: "data/chirps",
-    title: "CHIRPS",
-    menu: "Data & Tools",
-    page: "source",
-    param: "chirps",
-  },
-  {
-    path: "data/tamsat",
-    title: "TAMSAT",
-    menu: "Data & Tools",
-    page: "source",
-    param: "tamsat",
-  },
-  ...DAILY_SOURCES.map((source) => ({
-    path: "data/" + source.id,
-    title: source.title,
-    menu: "Data & Tools" as const,
-    page: "source" as const,
-    param: source.id,
-  })),
-  {
-    path: "data/runs",
-    title: "Operations",
-    menu: "Data & Tools",
-    page: "operations",
-  },
-  {
-    path: "system",
-    title: "System status",
-    menu: "Data & Tools",
-    page: "system",
-  },
-  {
     path: "copilot",
     title: "Forecaster Copilot",
     menu: "Copilot",
     page: "copilot",
   },
+  // Operations: the staff's tools.
+  {
+    path: "data/runs",
+    title: "Run the weekly cycle",
+    menu: "Operations",
+    page: "operations",
+  },
+  {
+    path: "automations",
+    title: "Automation",
+    menu: "Operations",
+    page: "automations",
+  },
+  { path: "data", title: "Data sources", menu: "Operations", page: "data" },
+  {
+    path: "models",
+    title: "Model registry",
+    menu: "Operations",
+    page: "models",
+  },
+  {
+    path: "system",
+    title: "System status",
+    menu: "Operations",
+    page: "system",
+  },
+  {
+    path: "data/ecmwf",
+    title: "ECMWF ensemble",
+    menu: "Operations",
+    page: "source",
+    param: "ecmwf",
+    sub: true,
+  },
+  {
+    path: "data/chirps",
+    title: "CHIRPS",
+    menu: "Operations",
+    page: "source",
+    param: "chirps",
+    sub: true,
+  },
+  {
+    path: "data/tamsat",
+    title: "TAMSAT",
+    menu: "Operations",
+    page: "source",
+    param: "tamsat",
+    sub: true,
+  },
+  ...DAILY_SOURCES.map((source) => ({
+    path: "data/" + source.id,
+    title: source.title,
+    menu: "Operations" as const,
+    page: "source" as const,
+    param: source.id,
+    sub: true,
+  })),
   // Earlier URLs keep working without a place in the menus.
   ...(
     [
       ["forecasts/week-2", "Forecast archive", "Forecasts", "archive"],
-      ["models/candidate", "Model registry", "Data & Tools", "models"],
-      ["models/production", "Model registry", "Data & Tools", "models"],
-      ["system/data", "System status", "Data & Tools", "system"],
-      ["system/models", "System status", "Data & Tools", "system"],
-      ["system/processing", "System status", "Data & Tools", "system"],
-      ["health", "System status", "Data & Tools", "system"],
-      ["jobs", "Operations", "Data & Tools", "operations"],
-      ["operations", "Operations", "Data & Tools", "operations"],
-      ["maps", "Rainfall maps", "Maps", "maps"],
+      ["models/candidate", "Model registry", "Operations", "models"],
+      ["models/production", "Model registry", "Operations", "models"],
+      ["system/data", "System status", "Operations", "system"],
+      ["system/models", "System status", "Operations", "system"],
+      ["system/processing", "System status", "Operations", "system"],
+      ["health", "System status", "Operations", "system"],
+      ["jobs", "Run the weekly cycle", "Operations", "operations"],
+      ["operations", "Run the weekly cycle", "Operations", "operations"],
+      ["maps", "Rainfall maps", "Forecasts", "maps"],
     ] as const
   ).map(([path, title, menu, page]) => ({
     path,
@@ -300,6 +318,7 @@ export function href(route: Route) {
   return "/" + route.path;
 }
 
+/** The pages listed in a header menu. */
 export function menuRoutes(menu: Menu): Route[] {
-  return ROUTES.filter((r) => r.menu === menu && r.nav !== false);
+  return ROUTES.filter((r) => r.menu === menu && r.nav !== false && !r.sub);
 }

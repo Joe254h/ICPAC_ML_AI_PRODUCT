@@ -430,7 +430,7 @@ function Ecmwf({ source }: { source?: DataSource }) {
       <PageBanner
         title="ECMWF Ensemble (ENS)"
         crumbs={[
-          { label: "Data & Tools", href: "/data" },
+          { label: "Data sources", href: "/data" },
           { label: "ECMWF ensemble" },
         ]}
         subtitle="The forecast input: the real-time ECMWF ensemble from ECMWF Open Data, 00 UTC run, 0.25°, 15-day range. Only the fields the model reads are downloaded."
@@ -565,7 +565,7 @@ function Chirps() {
     <>
       <PageBanner
         title="CHIRPS v2.0"
-        crumbs={[{ label: "Data & Tools", href: "/data" }, { label: "CHIRPS" }]}
+        crumbs={[{ label: "Data sources", href: "/data" }, { label: "CHIRPS" }]}
         subtitle="The verification reference: daily satellite-and-gauge rainfall at 0.05°, on the same grid as the forecast. The final product is used when published, else the preliminary product."
         facts={["0.05° daily", "Africa", "Climate Hazards Center, UCSB"]}
         actions={
@@ -803,7 +803,7 @@ function MonitoredSource({
       <PageBanner
         title={about.title}
         crumbs={[
-          { label: "Data & Tools", href: "/data" },
+          { label: "Data sources", href: "/data" },
           { label: about.crumb },
         ]}
         subtitle={about.subtitle}

@@ -87,7 +87,7 @@ export default function System() {
         <PageBanner
           title="System Status"
           crumbs={[
-            { label: "Data & Tools", href: "/data" },
+            { label: "Operations", href: "/data/runs" },
             { label: "System status" },
           ]}
           subtitle="Live checks of the forecast inputs, runs, models and platform. A warning means something needs attention; an item in progress is not built yet and is not used."
