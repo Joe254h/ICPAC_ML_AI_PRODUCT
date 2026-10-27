@@ -84,7 +84,9 @@ def test_the_refit_differs_from_the_pre_refit_model(grid, refit):
     new = refit[1].build_features(rain, initialization, grid, cfg, levels)
     before = old.build_features(rain, initialization, grid, cfg, levels)
     assert not np.allclose(new.column("MBC_forecast_mmweek"), before.column("MBC_forecast_mmweek"))
-    assert not np.allclose(refit[1].run(new).hybrid, old.run(before).hybrid)
+    refitted, earlier_hybrid = refit[1].run(new).hybrid, old.run(before).hybrid
+    assert refitted is not None and earlier_hybrid is not None
+    assert not np.allclose(refitted, earlier_hybrid)
 
 
 def test_registration_records_the_refit_contract_and_its_retrospective_scores(refit):

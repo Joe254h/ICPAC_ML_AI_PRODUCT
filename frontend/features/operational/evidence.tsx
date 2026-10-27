@@ -973,7 +973,14 @@ export default function Evidence() {
     `/verification/experimental${set ? `?set=${set}` : ""}`,
   );
   const [tab, setTab] = useState<Tab>("overview");
-  const e = evidence.data;
+  // A service from before the refit sends the pre-refit set without the newer fields.
+  const e: ExperimentalEvidence | undefined = evidence.data && {
+    ...evidence.data,
+    set: evidence.data.set ?? "prerefit",
+    figures: evidence.data.figures ?? [],
+    comparison: evidence.data.comparison ?? null,
+    country_rain_maps: evidence.data.country_rain_maps ?? false,
+  };
   const shown = e?.set ?? set ?? "refit";
   const choose = (next: EvidenceSetKey) => {
     setSet(next);
