@@ -1,0 +1,1 @@
+ICPAC final full-development 2005–2021 refit. All 647,228,800 case-cell rows; exact frozen 24 features and 17-PC atmospheric PCA. No published independent score exists for this new refit; prior 2022–2024 test was used for deployment policy comparison. Do not enable live ECMWF predictions without matched source-cycle, lead, grid, variable order and accumulation QC.

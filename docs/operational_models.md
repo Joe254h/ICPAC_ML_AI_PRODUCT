@@ -112,11 +112,12 @@ integrity check, or a production release naming a non-production model) is a reg
 issue: a cloud deployment refuses to start rather than serve another model than the one
 decided. Remove the decision to leave the choice to the Models page alone.
 
-The current decision (2026-10-26, Joe254h): the frozen pre-refit model with the full
-CatBoost policy (`icpac_week2_catboost_prerefit_v1`) issues the MBC + AI/ML forecast until
-the refit has completed, passed its integrity checks and been approved. It is approved for
-operational (evaluation) use only: its independent test is not recorded by this decision,
-and it is not a production model.
+The current decision (2026-10-27, Joe254h): the final refit with the full CatBoost policy
+(`icpac_week2_catboost_refit_v1`, below) issues the MBC + AI/ML forecast. It replaced the
+2026-10-26 decision for the pre-refit model, which stays registered for rollback. The refit
+is approved for operational (evaluation) use only: it has no new independent test, and it
+is not a production model. Its first weekly run from 2025 still waits for the one-time
+real-time confirmation on the forecast page.
 
 API: `POST /models/{id}/candidate`, `POST /models/{id}/activate`, `POST /models/{id}/promote`
 (production, also activates), `POST /models/{id}/retire`, each with `{"actor", "confirmed":
@@ -148,6 +149,42 @@ the activation and its history.
 5. Record the HPC independent-test result for it (Models › Record independent test).
 6. Promote it with a named reviewer. The candidate stays registered; retire it when the
    reviewers agree. Its past forecasts keep their own model labels.
+
+## The final refit (ICPAC_WEEK2_CATBOOST_FINAL_REFIT_2005_2021)
+
+The development refit, committed unchanged under
+`artifacts/bundles/ICPAC_WEEK2_CATBOOST_FINAL_REFIT_2005_2021/`: the same 24 inputs,
+runtime and policies as the pre-refit bundle, with the monthly MBC factors, the PCA of the
+30 atmospheric predictors and the CatBoost model (300 trees, CatBoost 1.2.10) refitted on
+every development year, 2005–2021 (3,148 cases, 647,228,800 cell rows; residual targets
+from year-out MBC factors, so no year sees its own correction). Its `manifest.json` pins
+every file; the HPC's lock file pins the bundle and its parts.
+
+`config/model_registry/icpac_week2_catboost_refit_v1.yaml` registers the full policy with
+`layout: refit`: there is no validation period (`validation_period: none`, 2020–2021 were
+fitted) and no validation or policy files. Registration checks the training years against
+the manifest, that the comparison years lie outside them, the model, MBC and PCA checksums
+the manifest records, that the 2022–2024 test was not used, and that the factors and the
+PCA were estimated on 2005–2021; then it loads the model and runs a smoke prediction.
+`backend/tests/test_refit_bundle.py` checks the service's 24 inputs and all four policies
+against the refit bundle's own runtime on the full grid.
+
+Its scores on the 2022–2024 reforecasts (551 cases), in
+`artifacts/verification/FINAL_REFIT_RETROSPECTIVE_2022_2024_20261027/`, are a
+**retrospective comparison**: those years had been consulted to choose the policy, so they
+are not a new independent test, and the registry records them as such (`metrics_scope`,
+`retrospective_report`), never as validation or an independent test.
+
+| Model on 2022–2024 | RMSE (mm/week) |
+|---|---|
+| Raw ECMWF | 17.269 |
+| MBC, refitted | 15.364 |
+| MBC + CatBoost, pre-refit | 15.204 |
+| MBC + CatBoost, final refit | 15.156 |
+
+Against the pre-refit model the refit's difference is −0.048 mm/week, 95% interval −0.105
+to +0.020 (paired monthly-block bootstrap, exploratory): no clear difference. The
+`Model evidence` page shows both sets; the refit's opens while it is the model in use.
 
 ## The frozen pre-refit model (ICPAC_WEEK2_WEB_MODEL_20261025)
 

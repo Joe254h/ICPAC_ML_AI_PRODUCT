@@ -21,6 +21,7 @@ from climate_engine.core import ROOT
 from climate_engine.models.hybrid7_pc17 import (
     MBCHybrid7PC17CatBoost,
     independent_summary,
+    training_years,
     verify_bundle,
 )
 from climate_engine.models.hybrid7_pc17 import validation_scores as bundle_scores
@@ -53,7 +54,22 @@ BUNDLE_KINDS = {
     "domain": {".npz"},
     "independent_summary": {".csv"},
 }
+# A development refit of a bundle (layout: refit): refitted on every development year, so
+# there is no validation period; a retrospective summary on the earlier test years stands
+# in for the validation and independent-test files.
+REFIT_KINDS = {
+    "manifest": {".json"},
+    "model": None,
+    "policies": {".json"},
+    "feature_schema": {".json"},
+    "mbc": {".npz"},
+    "pca": {".npz"},
+    "domain": {".npz"},
+    "retrospective_summary": {".csv"},
+}
 FAMILY_KINDS = {"hybrid7_pc17": BUNDLE_KINDS}
+LAYOUTS = {"refit": REFIT_KINDS}
+NO_VALIDATION = "none"
 # Fields a bundle descriptor must state: the frozen training contract of the model.
 BUNDLE_REQUIRED = (
     "policy",
@@ -116,7 +132,11 @@ class ModelDescriptor:
 
     @property
     def kinds(self) -> dict[str, set[str] | None]:
-        return FAMILY_KINDS.get(str(self.data["family"]), ARTIFACT_KINDS)
+        return kinds_of(self.data)
+
+    @property
+    def refit(self) -> bool:
+        return self.data.get("layout") == "refit"
 
     @property
     def bundle(self) -> bool:
@@ -154,8 +174,72 @@ class ModelDescriptor:
                     raise ValueError(f"{kind} artifact is not the file the bundle manifest pins")
         return actual
 
+    def check_refit_metadata(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Training contract of a development refit and its retrospective scores.
+
+        The refit has no validation period (every development year was fitted) and no new
+        independent test; its scores on the earlier test years are a retrospective
+        comparison, recorded as such and never as validation or an independent test.
+        """
+        d = self.data
+        manifest = json.loads(self.artifact("manifest").read_text(encoding="utf-8"))
+        policies = json.loads(self.artifact("policies").read_text(encoding="utf-8"))
+        years = training_years(d["training_period"])
+        t_first, t_last = (int(y) for y in str(d["test_period"]).split("-"))
+        checks = {
+            "manifest training years": manifest.get("training_years") == years,
+            "test years outside training": not set(range(t_first, t_last + 1)) & set(years),
+            "manifest feature count": manifest.get("feature_count") == d["feature_count"] == 24,
+            "manifest PCA components": manifest.get("pca_components") == 17,
+            "manifest ensemble members": manifest.get("ensemble_members") == d["ensemble_members"],
+            "manifest model checksum": manifest.get("artifact_model_sha256")
+            == d["checksums"]["model"],
+            "manifest MBC checksum": manifest.get("artifact_mbc_sha256") == d["checksums"]["mbc"],
+            "manifest PCA checksum": manifest.get("artifact_pca_sha256") == d["checksums"]["pca"],
+            "independent test unused in the refit": manifest.get("independent_test_used_for_refit")
+            is False,
+            "policy defined by the bundle": str(d["policy"]) in policies.get("policies", {}),
+            "no validation period": d["validation_period"] == NO_VALIDATION,
+        }
+        failed = [name for name, ok in checks.items() if not ok]
+        if failed:
+            raise ValueError(f"Refit metadata disagrees with the descriptor: {failed}")
+        retrospective = independent_summary(
+            self.artifact("retrospective_summary"), str(d["policy"])
+        )
+        summary = {
+            "rainfall_RMSE": retrospective["rmse"],
+            "rainfall_MAE": retrospective["mae"],
+            "rainfall_bias": retrospective["bias"],
+            "rainfall_pearson_r": retrospective["pearson_r"],
+        }
+        warnings = [
+            str(manifest[key]) for key in ("independent_test_reuse_caveat",) if manifest.get(key)
+        ] + [str(policies[key]) for key in ("policy_selection_context",) if policies.get(key)]
+        evidence = {
+            "experiment": d["experiment"],
+            "target": "CHIRPS - MBC_forecast",
+            "bundle_id": self.artifact("manifest").parent.name,
+            "bundle_status": manifest.get("status"),
+            "bundle_warnings": warnings,
+            "trained_rows": manifest.get("training_rows"),
+            "training_cases": manifest.get("training_cases"),
+            "retrospective_report": {
+                **retrospective,
+                "cases": 551,
+                "period": d["test_period"],
+                "source": "HPC retrospective comparison after the refit (frozen tables)",
+                "selection_note": "The 2022-2024 years were consulted earlier to choose the "
+                "deployment policy, so these scores are a retrospective comparison, not a new "
+                "independent test of the refit",
+            },
+        }
+        return summary, evidence
+
     def check_bundle_metadata(self) -> tuple[dict[str, Any], dict[str, Any]]:
         """Training contract and validation scores of a frozen bundle; never test data."""
+        if self.refit:
+            return self.check_refit_metadata()
         d = self.data
         metrics = json.loads(self.artifact("metrics").read_text(encoding="utf-8"))
         manifest = json.loads(self.artifact("manifest").read_text(encoding="utf-8"))
@@ -312,7 +396,24 @@ class ModelDescriptor:
                 f"validation period {d['validation_period']} of the {d['policy']} policy "
                 "(from the bundle's validation files)"
             )
+        if self.refit:
+            fields["metrics_scope"] = (
+                f"retrospective {d['test_period']} comparison of the {d['policy']} policy; "
+                "no validation period (every development year was fitted)"
+            )
+            fields["validation_note"] = {
+                "source": "the HPC's retrospective comparison after the refit",
+                "scope": f"retrospective {d['test_period']} scores; those years were consulted "
+                "earlier to choose the policy, so this is not an independent test",
+            }
         return fields, model
+
+
+def kinds_of(data: dict[str, Any]) -> dict[str, set[str] | None]:
+    """The artifacts a descriptor must name: by layout, else by family."""
+    if data.get("layout") in LAYOUTS:
+        return LAYOUTS[str(data["layout"])]
+    return FAMILY_KINDS.get(str(data["family"]), ARTIFACT_KINDS)
 
 
 def load_descriptor(path: str | Path) -> ModelDescriptor:
@@ -337,10 +438,17 @@ def load_descriptor(path: str | Path) -> ModelDescriptor:
         raise ValueError("Record independent test results through the registry, not the descriptor")
     if data["algorithm"] not in MODEL_FORMATS:
         raise ValueError(f"Unsupported algorithm {data['algorithm']}")
+    if "layout" in data and data["layout"] not in LAYOUTS:
+        raise ValueError(f"layout must be one of {sorted(LAYOUTS)}")
     for key in ("training_period", "validation_period", "test_period"):
-        if not PERIOD.match(str(data[key])):
+        refit_without_validation = (
+            key == "validation_period"
+            and data.get("layout") == "refit"
+            and data[key] == NO_VALIDATION
+        )
+        if not PERIOD.match(str(data[key])) and not refit_without_validation:
             raise ValueError(f"{key} must look like 2008-2019")
-    kinds = FAMILY_KINDS.get(str(data["family"]), ARTIFACT_KINDS)
+    kinds = kinds_of(data)
     for kind in kinds:
         if kind not in data["artifacts"] or kind not in data["checksums"]:
             raise ValueError(f"Descriptor must list the {kind} artifact and its checksum")

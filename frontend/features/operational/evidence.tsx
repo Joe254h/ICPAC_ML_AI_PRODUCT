@@ -1,5 +1,10 @@
 "use client";
-/** The frozen experimental verification of the pre-refit model (independent 2022–2024). */
+/**
+ * Model evidence on the 2022–2024 reforecasts, in two frozen sets: the final 2005–2021
+ * refit (a retrospective comparison, with the HPC's figures and the pre-refit-against-refit
+ * comparison) and the pre-refit model's independent test. The set of the model in use
+ * opens first; the choice is kept in the address (?set=).
+ */
 import { useMemo, useState } from "react";
 import Chart from "@/components/chart";
 import {
@@ -15,9 +20,20 @@ import { num, signed } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type {
   EvidenceScore,
+  EvidenceSetKey,
   ExperimentalEvidence,
   RocCurve,
 } from "@/types/operational";
+
+/** A frozen map or figure of the set being read. */
+function asset(e: ExperimentalEvidence, kind: "maps" | "figures", id: string) {
+  return `/api/verification/experimental/${kind}/${id}?set=${e.set}`;
+}
+
+/** "retrospective" or "independent", as the cases of this set are. */
+function casesWord(e: ExperimentalEvidence) {
+  return e.scope.kind === "retrospective" ? "retrospective" : "independent";
+}
 
 const COLOURS: Record<string, string> = {
   RawECMWF: "#2a78d6",
@@ -53,7 +69,8 @@ type Tab =
   | "roc"
   | "ensemble"
   | "uncertainty"
-  | "maps";
+  | "maps"
+  | "figures";
 
 function Swatch({ model }: { model: string }) {
   return (
@@ -222,53 +239,122 @@ function Overview({ e }: { e: ExperimentalEvidence }) {
   return (
     <>
       <Card
-        title="Regional scores, 551 independent cases"
+        title={`Regional scores, 551 ${casesWord(e)} cases`}
         subtitle="Area-weighted over every matched cell of the eleven member states (113,285,600 cell observations). Lowest RMSE in bold."
       >
         <Chart
           option={option}
           height={300}
-          label="RMSE by model over the independent 2022–2024 period (values in the table)"
+          label={`RMSE by model over the ${casesWord(e)} 2022–2024 period (values in the table)`}
         />
         <ScoreTable items={e.regional} skill />
       </Card>
-      <Card
-        title="Validation and independent periods"
-        subtitle="Scores fall from the 2020–2021 validation to the independent 2022–2024 period: both are shown, nothing is re-tuned."
-      >
-        <div className="table-wrap">
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Model</th>
-                <th className="num">Validation RMSE</th>
-                <th className="num">Validation MAE</th>
-                <th className="num">Independent RMSE</th>
-                <th className="num">Independent MAE</th>
-                <th className="num">Independent anomaly corr.</th>
-              </tr>
-            </thead>
-            <tbody>
-              {e.foundational.map((f) => (
-                <tr key={f.model}>
+      {e.comparison && <RefitComparison e={e} />}
+      {e.foundational.length > 0 && (
+        <Card
+          title="Validation and independent periods"
+          subtitle="Scores fall from the 2020–2021 validation to the independent 2022–2024 period: both are shown, nothing is re-tuned."
+        >
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th className="num">Validation RMSE</th>
+                  <th className="num">Validation MAE</th>
+                  <th className="num">Independent RMSE</th>
+                  <th className="num">Independent MAE</th>
+                  <th className="num">Independent anomaly corr.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {e.foundational.map((f) => (
+                  <tr key={f.model}>
+                    <td className="strong">
+                      <Swatch model={f.model} />
+                      {f.label}
+                    </td>
+                    <td className="num">{num(f.validation_rmse, 3)}</td>
+                    <td className="num">{num(f.validation_mae, 3)}</td>
+                    <td className="num">{num(f.independent_rmse, 3)}</td>
+                    <td className="num">{num(f.independent_mae, 3)}</td>
+                    <td className="num">
+                      {num(f.independent_anomaly_correlation, 3)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </>
+  );
+}
+
+/** The refit against the pre-refit model on the same 551 cases, with paired intervals. */
+function RefitComparison({ e }: { e: ExperimentalEvidence }) {
+  const items = e.comparison?.items ?? [];
+  const forest = e.figures.find((f) => f.id.startsWith("12-"));
+  return (
+    <Card
+      title="The refit against the pre-refit model"
+      subtitle="RMSE on the same 551 cases (mm/week). Negative differences mean the refit's error is lower."
+    >
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th className="num">Pre-refit RMSE</th>
+              <th className="num">Refit RMSE</th>
+              <th className="num">Difference</th>
+              <th className="num">95% interval</th>
+              <th>Reading</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((c) => {
+              const clear = c.low > 0 || c.high < 0;
+              return (
+                <tr key={c.model}>
                   <td className="strong">
-                    <Swatch model={f.model} />
-                    {f.label}
+                    <Swatch model={c.model} />
+                    {c.label}
                   </td>
-                  <td className="num">{num(f.validation_rmse, 3)}</td>
-                  <td className="num">{num(f.validation_mae, 3)}</td>
-                  <td className="num">{num(f.independent_rmse, 3)}</td>
-                  <td className="num">{num(f.independent_mae, 3)}</td>
+                  <td className="num">{num(c.prerefit_rmse, 3)}</td>
+                  <td className="num">{num(c.refit_rmse, 3)}</td>
+                  <td className="num">{signed(c.delta_rmse, 3)}</td>
                   <td className="num">
-                    {num(f.independent_anomaly_correlation, 3)}
+                    {c.model === "RawECMWF"
+                      ? "—"
+                      : `${signed(c.low, 3)} to ${signed(c.high, 3)}`}
+                  </td>
+                  <td>
+                    {c.model === "RawECMWF"
+                      ? "Unchanged input"
+                      : !clear
+                        ? "No clear difference"
+                        : c.delta_rmse < 0
+                          ? "Refit lower"
+                          : "Pre-refit lower"}
                   </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-    </>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="card-note">{e.comparison?.method}</p>
+      {forest && (
+        <img
+          className="evidence-figure"
+          src={asset(e, "figures", forest.id)}
+          alt={forest.title}
+          loading="lazy"
+        />
+      )}
+    </Card>
   );
 }
 
@@ -349,6 +435,8 @@ function OverTime({ e }: { e: ExperimentalEvidence }) {
 function Countries({ e }: { e: ExperimentalEvidence }) {
   const [metric, setMetric] = useState<"rmse" | "mae" | "bias">("rmse");
   const [country, setCountry] = useState(e.country_maps[0] ?? "Kenya");
+  const [kind, setKind] = useState<"country" | "rain">("country");
+  const slug = country.toLowerCase().replace(/ /g, "-");
   const gains = Object.entries(e.countries)
     .map(([name, items]) => {
       const mbc = items.find((s) => s.model === "MBC")?.rmse ?? NaN;
@@ -385,22 +473,39 @@ function Countries({ e }: { e: ExperimentalEvidence }) {
             )}
           />
         </Card>
-        <Card title="Country performance map">
-          <label className="field" style={{ marginBottom: 12 }}>
-            Country
-            <select
-              value={country}
-              onChange={(ev) => setCountry(ev.target.value)}
-            >
-              {e.country_maps.map((name) => (
-                <option key={name}>{name}</option>
-              ))}
-            </select>
-          </label>
+        <Card title="Country maps">
+          <div className="evidence-controls">
+            <label className="field">
+              Country
+              <select
+                value={country}
+                onChange={(ev) => setCountry(ev.target.value)}
+              >
+                {e.country_maps.map((name) => (
+                  <option key={name}>{name}</option>
+                ))}
+              </select>
+            </label>
+            {e.country_rain_maps && (
+              <Tabs
+                label="Country map"
+                value={kind}
+                onChange={setKind}
+                options={[
+                  { value: "country", label: "Performance" },
+                  { value: "rain", label: "Mean rainfall" },
+                ]}
+              />
+            )}
+          </div>
           <img
-            src={`/api/verification/experimental/maps/country-${country.toLowerCase().replace(/ /g, "-")}`}
-            alt={`Frozen 2022–2024 verification maps for ${country}`}
-            style={{ width: "100%", height: "auto", borderRadius: 8 }}
+            className="evidence-figure"
+            src={asset(
+              e,
+              "maps",
+              `${e.country_rain_maps ? kind : "country"}-${slug}`,
+            )}
+            alt={`Frozen 2022–2024 ${kind === "rain" && e.country_rain_maps ? "mean rainfall" : "verification"} maps for ${country}`}
           />
         </Card>
       </div>
@@ -759,11 +864,20 @@ function Uncertainty({ e }: { e: ExperimentalEvidence }) {
           </tbody>
         </table>
       </div>
-      <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 0 }}>
-        Negative differences favour the MAM-protected policy. Its interval
-        against the full CatBoost correction is above zero: on the independent
-        period the full correction was better, although MAM-protected was the
-        policy preselected on validation.
+      <p className="card-note">
+        Negative differences favour the MAM-protected policy, the one
+        preselected on 2020–2021 validation.{" "}
+        {(() => {
+          const full = e.bootstrap.items.find(
+            (b) => b.comparator === "CatBoost residual hybrid",
+          );
+          if (!full) return null;
+          if (full.low > 0)
+            return "Against the full CatBoost correction its interval is above zero: the full correction was better here.";
+          if (full.high < 0)
+            return "Against the full CatBoost correction its interval is below zero: MAM-protected was better here.";
+          return "Against the full CatBoost correction the interval includes zero: no clear difference here.";
+        })()}
       </p>
     </Card>
   );
@@ -774,7 +888,7 @@ function Maps({ e }: { e: ExperimentalEvidence }) {
   return (
     <Card
       title="Spatial verification"
-      subtitle="Frozen maps of the 551-case period, official ICPAC outlines and logo."
+      subtitle={`Frozen maps of the 551 ${casesWord(e)} cases, with ICPAC's outlines and logo.`}
     >
       <Tabs
         label="Map"
@@ -783,14 +897,9 @@ function Maps({ e }: { e: ExperimentalEvidence }) {
         options={e.maps.map((m) => ({ value: m.id, label: m.title }))}
       />
       <img
-        src={`/api/verification/experimental/maps/${map}`}
+        className="evidence-figure"
+        src={asset(e, "maps", map)}
         alt={e.maps.find((m) => m.id === map)?.title ?? "Verification map"}
-        style={{
-          width: "100%",
-          height: "auto",
-          marginTop: 16,
-          borderRadius: 8,
-        }}
       />
       <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 0 }}>
         {e.sudan.note}
@@ -799,25 +908,102 @@ function Maps({ e }: { e: ExperimentalEvidence }) {
   );
 }
 
+/** The HPC's published figures of the set, by topic. */
+function Figures({ e }: { e: ExperimentalEvidence }) {
+  const groups = [...new Set(e.figures.map((f) => f.group))];
+  return (
+    <>
+      {groups.map((group) => (
+        <Card key={group} title={group}>
+          <div className="figure-grid">
+            {e.figures
+              .filter((f) => f.group === group)
+              .map((f) => (
+                <figure key={f.id} className="evidence-card">
+                  <img
+                    src={asset(e, "figures", f.id)}
+                    alt={f.title}
+                    loading="lazy"
+                  />
+                  <figcaption>{f.title}</figcaption>
+                </figure>
+              ))}
+          </div>
+        </Card>
+      ))}
+      <p className="card-note">
+        The ECMWF ensemble charts describe the original ten-member ensemble:
+        CatBoost gives one rainfall value, so it has no probabilities to score.
+      </p>
+    </>
+  );
+}
+
+/** The set named in the address, if any. */
+function chosenSet(): EvidenceSetKey | null {
+  if (typeof window === "undefined") return null;
+  const value = new URL(window.location.href).searchParams.get("set");
+  return value === "refit" || value === "prerefit" ? value : null;
+}
+
+const BANNER: Record<EvidenceSetKey, { subtitle: string; facts: string[] }> = {
+  refit: {
+    subtitle:
+      "The final 2005–2021 refit on 551 Week-2 reforecast cases, against CHIRPS on the 0.05° ICPAC grid. A retrospective comparison: the 2022–2024 years were used earlier to choose the policy. Not the skill of live forecasts.",
+    facts: [
+      "Trained 2005–2021",
+      "No validation period",
+      "Compared on 2022–2024",
+    ],
+  },
+  prerefit: {
+    subtitle:
+      "The frozen pre-refit models on 551 independent Week-2 reforecast cases, against CHIRPS on the 0.05° ICPAC grid. Experimental evidence, not the skill of live forecasts.",
+    facts: [
+      "Trained 2005–2019",
+      "Validated 2020–2021",
+      "Independent 2022–2024",
+    ],
+  },
+};
+
 export default function Evidence() {
-  const evidence = useApi<ExperimentalEvidence>("/verification/experimental");
+  const [set, setSet] = useState<EvidenceSetKey | null>(chosenSet);
+  const evidence = useApi<ExperimentalEvidence>(
+    `/verification/experimental${set ? `?set=${set}` : ""}`,
+  );
   const [tab, setTab] = useState<Tab>("overview");
   const e = evidence.data;
+  const shown = e?.set ?? set ?? "refit";
+  const choose = (next: EvidenceSetKey) => {
+    setSet(next);
+    if (next === "prerefit" && tab === "figures") setTab("overview");
+    const url = new URL(window.location.href);
+    url.searchParams.set("set", next);
+    window.history.replaceState(null, "", url);
+  };
   return (
     <div className="page">
       <div className="wrap">
         <PageBanner
-          title="Experimental Verification, 2022–2024"
+          title="Model Evidence, 2022–2024"
           crumbs={[
             { label: "Verification", href: "/verification" },
-            { label: "Experimental verification" },
+            { label: "Model evidence" },
           ]}
-          subtitle="The frozen pre-refit models on 551 independent Week-2 reforecast cases, against CHIRPS on the 0.05° ICPAC grid. Experimental evidence, not the skill of live forecasts."
-          facts={[
-            "Trained 2005–2019",
-            "Validated 2020–2021",
-            "Independent 2022–2024",
-          ]}
+          subtitle={BANNER[shown].subtitle}
+          facts={BANNER[shown].facts}
+        />
+        <Tabs
+          label="Model"
+          value={shown}
+          onChange={choose}
+          options={(
+            e?.sets ?? [
+              { key: "refit", label: "Final refit, 2005–2021" },
+              { key: "prerefit", label: "Pre-refit model, 2005–2019" },
+            ]
+          ).map((s) => ({ value: s.key, label: s.label }))}
         />
         {evidence.loading && <Skeleton height={420} />}
         {evidence.error && (
@@ -827,6 +1013,8 @@ export default function Evidence() {
           <>
             <Notice title="What these scores are.">
               {String(e.scope.statement)} {String(e.scope.selection)}
+              {e.describes_model_in_use &&
+                " This is the model forecasts use now."}
             </Notice>
             <Tabs
               label="Section"
@@ -841,6 +1029,9 @@ export default function Evidence() {
                 { value: "ensemble", label: "ECMWF ensemble" },
                 { value: "uncertainty", label: "Uncertainty" },
                 { value: "maps", label: "Maps" },
+                ...(e.figures.length
+                  ? [{ value: "figures" as const, label: "Figures" }]
+                  : []),
               ]}
             />
             <div style={{ display: "grid", gap: 24, marginTop: 20 }}>
@@ -851,7 +1042,8 @@ export default function Evidence() {
               {tab === "roc" && <Discrimination e={e} />}
               {tab === "ensemble" && <Ensemble e={e} />}
               {tab === "uncertainty" && <Uncertainty e={e} />}
-              {tab === "maps" && <Maps e={e} />}
+              {tab === "maps" && <Maps key={e.set} e={e} />}
+              {tab === "figures" && <Figures e={e} />}
             </div>
           </>
         )}

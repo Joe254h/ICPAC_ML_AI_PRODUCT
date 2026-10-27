@@ -1,0 +1,12 @@
+{
+  "default_development": "catboost_full",
+  "policy_selection_context": "Original 300-tree CatBoost architecture fixed before refit. Alpha=1 chosen after comparing original 2022\u20132024 holdout policies; new refit has NO untouched 2022\u20132024 skill estimate.",
+  "policies": {
+    "catboost_full": "clip(MBC + CatBoost residual, lower=0)",
+    "global_alpha075": "0.25 clip(MBC,0) + 0.75 clip(MBC+residual,0)",
+    "mam_protected": "March\u2013May uses clipped MBC; otherwise global_alpha075",
+    "mbc_only": "clip(MBC,0)"
+  },
+  "live_use": "DISABLED until external ECMWF source and preprocessing audit",
+  "sudan_country_mask_review": "813 Sudan-labelled centers outside approved Sudan vector; keep independent scores unchanged"
+}

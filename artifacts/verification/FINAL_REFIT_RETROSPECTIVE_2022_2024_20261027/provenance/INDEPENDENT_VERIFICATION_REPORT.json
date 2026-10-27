@@ -1,0 +1,37 @@
+{
+  "status": "COMPLETE_RETROSPECTIVE_POST_SELECTION_REFIT_2022_2024",
+  "validation_selection_frozen": false,
+  "holdout_rows": 113285600,
+  "holdout_cases": 551,
+  "years": [
+    2022,
+    2023,
+    2024
+  ],
+  "selected_models": [
+    "RawECMWF",
+    "TrainingClimatology",
+    "MBC",
+    "CatBoost",
+    "GlobalAlpha075",
+    "MAMProtected"
+  ],
+  "thresholds_mmweek": [
+    1.0,
+    10.0,
+    25.0,
+    50.0,
+    100.0
+  ],
+  "data_store_manifest_sha256": "be13b590aec095a0c7ceedc239a9485f2342cbd5ff7787d719128bd8c9a216be",
+  "refit_lock_sha256": "134fa12b55357777a929ada4302cde2d4c20eccc4ec30ec379c55f189bd7de62",
+  "catboost_sha256": "00c97a8dce7e2307fc406be167fdd29cf12f383dbae012013dfbb69ff7f0d923",
+  "verification": "retrospective post-refit, 2022-2024 originally consulted for policy selection; all matched observations, area-weighted, no subsampling",
+  "roc": "deterministic-rainfall-score ROC, 1mm/week histogram bins, approximate AUC",
+  "probability_reliability": "NOT COMPUTED; deterministic models do not supply calibrated forecast probabilities",
+  "probability_Brier_CRPS": "NOT COMPUTED; requires authentic probability/ensemble forecast",
+  "confidence_intervals": "2000 paired 2022\u20132024 year-month block bootstrap; exploratory, 36 months and three distinct years",
+  "country_verification": "available from same-grid mask",
+  "test_2025": "NOT INCLUDED; requires separate real-time provenance adapter",
+  "generated_utc": "2026-10-27T06:31:29.532862+00:00"
+}

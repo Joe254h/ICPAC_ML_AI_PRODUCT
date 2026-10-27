@@ -24,7 +24,8 @@ COPY config config
 COPY fixtures fixtures
 COPY cartography cartography
 COPY templates templates
-# The verified inference artifacts (about 25 MB), so an image pins the model it serves.
+# The verified models and their frozen evidence (about 110 MB), so an image pins the model
+# it serves.
 # Mount another ARTIFACT_ROOT (read-only) to serve newer registered versions.
 COPY artifacts artifacts
 RUN set -eu; extras="$PIP_EXTRAS"; build_postgres=false; \

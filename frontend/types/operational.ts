@@ -47,6 +47,20 @@ export type OperationalModel = Model & {
     bundle_status?: string;
     bundle_warnings?: string[];
     trained_rows?: number;
+    training_cases?: number;
+    /** The final refit: its 2022–2024 scores, a retrospective comparison. */
+    retrospective_report?: {
+      rows: number;
+      cases: number;
+      period: string;
+      rmse: number;
+      mae: number;
+      bias: number;
+      pearson_r: number;
+      anomaly_correlation?: number;
+      source: string;
+      selection_note: string;
+    };
     independent_report?: {
       rows: number;
       cases: number;
@@ -599,10 +613,36 @@ export type RocCurve = {
   curve: [number, number][];
 };
 
-/** GET /verification/experimental: the frozen pre-refit independent verification. */
+/** The frozen evidence sets on the 2022–2024 reforecasts. */
+export type EvidenceSetKey = "refit" | "prerefit";
+
+/** GET /verification/experimental: the final refit's retrospective comparison or the
+ * pre-refit model's independent test; by default the set of the model in use. */
 export type ExperimentalEvidence = {
-  scope: Record<string, string | number>;
+  set: EvidenceSetKey;
+  sets: { key: EvidenceSetKey; label: string }[];
+  /** Whether this set describes the model forecasts use now. */
+  describes_model_in_use?: boolean;
+  scope: Record<string, string | number> & {
+    kind: "retrospective" | "independent";
+  };
   regional: EvidenceScore[];
+  /** Pre-refit against refit on the same cases (refit set only). */
+  comparison: {
+    method: string;
+    items: {
+      model: string;
+      label: string;
+      prerefit_rmse: number;
+      refit_rmse: number;
+      delta_rmse: number;
+      low: number;
+      high: number;
+    }[];
+  } | null;
+  /** The HPC's figures (refit set only). */
+  figures: { id: string; title: string; group: string }[];
+  country_rain_maps: boolean;
   foundational: {
     model: string;
     label: string;

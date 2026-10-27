@@ -157,7 +157,7 @@ test("operations lists the weekly cycle with who ran it", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("the decided pre-refit model is in use and the earlier one a click away", async ({
+test("the decided final refit is in use and the earlier models a click away", async ({
   page,
 }) => {
   await page.goto("/models");
@@ -165,48 +165,85 @@ test("the decided pre-refit model is in use and the earlier one a click away", a
     page
       .locator("section.card")
       .filter({ has: page.getByRole("heading", { name, exact: true }) });
-  // The recorded decision approved and activated the full-correction policy, once.
-  const decided = card("MBC + CatBoost residual (full correction)");
+  // The recorded decision approved and activated the final refit, once.
+  const decided = card("MBC + CatBoost residual, final refit (2005-2021)");
   await expect(decided).toContainText("In use for forecasts");
-  await expect(decided.getByText(/RMSE 15\.204 mm\/week/)).toBeVisible();
+  await expect(decided.getByText(/RMSE 15\.156 mm\/week/)).toBeVisible();
+  await expect(decided).toContainText(
+    "None: every development year was fitted",
+  );
+  await expect(decided).toContainText("not a new independent test");
   await expect(
     decided.getByRole("button", { name: "Make this the model in use" }),
   ).toHaveCount(0);
   const history = card("Model in use");
   await expect(history).toContainText("Joe254h");
   await expect(history).toContainText("MBC + Atmos37 CatBoost");
-  // The other policies stay experimental: approving one does not put it in use.
-  const other = card("MBC + 75% CatBoost residual");
-  await expect(other.getByText("Integrity verified")).toBeVisible();
-  await expect(
-    other.getByRole("button", { name: "Approve for operational use" }),
-  ).toBeVisible();
-  await expect(
-    other.getByRole("button", { name: "Make this the model in use" }),
-  ).toHaveCount(0);
+  // The pre-refit policies stay registered and experimental: approving one does not
+  // put it in use.
+  for (const name of [
+    "MBC + CatBoost residual (full correction)",
+    "MBC + 75% CatBoost residual",
+  ]) {
+    const other = card(name);
+    await expect(other.getByText("Integrity verified")).toBeVisible();
+    await expect(
+      other.getByRole("button", { name: "Approve for operational use" }),
+    ).toBeVisible();
+    await expect(
+      other.getByRole("button", { name: "Make this the model in use" }),
+    ).toHaveCount(0);
+  }
   await expect(
     page.locator("section.card").filter({ hasText: "In use for forecasts" }),
   ).toHaveCount(1);
 });
 
-test("the experimental verification keeps the frozen results apart", async ({
+test("the model evidence keeps the refit and the pre-refit results apart", async ({
   page,
 }) => {
   await page.goto("/verification/experimental");
+  // The final refit, in use, opens first: a retrospective comparison.
   await expect(page.getByText("What these scores are.")).toBeVisible();
   await expect(
-    page.getByRole("cell", { name: "15.204" }).first(),
+    page.getByText(/not a new independent test/).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("cell", { name: "15.156" }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "The refit against the pre-refit model",
+    }),
   ).toBeVisible();
   const tabs = page.getByRole("group", { name: "Section" });
+  await tabs.getByRole("button", { name: "Figures" }).click();
+  const figure = page.getByRole("img", { name: "RMSE by country" });
+  await expect(figure).toBeVisible();
+  await expect
+    .poll(() => figure.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBeGreaterThan(300);
   await tabs.getByRole("button", { name: "ECMWF ensemble" }).click();
   await expect(page.getByText("6.773 mm/week")).toBeVisible();
   await expect(page.getByText(/No Brier skill score is given/)).toBeVisible();
+  // The pre-refit model's independent test is one switch away, kept in the address.
+  await page
+    .getByRole("group", { name: "Model" })
+    .getByRole("button", { name: "Pre-refit model, 2005–2019" })
+    .click();
+  await expect(page).toHaveURL(/set=prerefit/);
+  await tabs.getByRole("button", { name: "Overview" }).click();
+  await expect(
+    page.getByRole("cell", { name: "15.204" }).first(),
+  ).toBeVisible();
+  await expect(tabs.getByRole("button", { name: "Figures" })).toHaveCount(0);
   await tabs.getByRole("button", { name: "Rainfall events" }).click();
   await expect(page.getByRole("columnheader", { name: "POD" })).toBeVisible();
   await page.goto("/verification");
   await expect(
-    page.getByText("Experimental evidence: the independent 2022–2024 test"),
+    page.getByText("Model evidence: the final refit on 2022–2024"),
   ).toBeVisible();
+  await expect(page.locator(".answer")).toContainText("final refit");
 });
 
 test("the ECMWF page reports recorded readiness", async ({ page }) => {

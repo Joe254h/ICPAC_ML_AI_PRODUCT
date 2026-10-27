@@ -64,11 +64,42 @@ const PREREFIT_TEXT: Record<Variant, { title: string; method: string }> = {
   },
 };
 
-/** How each layer of a forecast was made, for the model family that produced it. */
+/** Layer descriptions of the final refit (the same inputs, refitted on 2005–2021). */
+const REFIT_TEXT: Record<Variant, { title: string; method: string }> = {
+  raw: LAYER_TEXT.raw,
+  mbc: {
+    title: "MBC",
+    method:
+      "Multiplicative bias correction: the ECMWF ensemble mean times the frozen monthly factor (prior 500, cap 3, estimated on 2005–2021) for the initialization month and grid cell. On the 2022–2024 reforecasts its RMSE was 11.0% lower than raw ECMWF (a retrospective comparison).",
+  },
+  hybrid: {
+    title: "MBC + AI/ML",
+    method:
+      "The MBC forecast corrected by a CatBoost model (300 trees, refitted on 2005–2021) from 24 predictors: ensemble rainfall, location, season, MBC and 17 principal components of 30 atmospheric fields at 850, 700, 500 and 200 hPa; kept at or above zero.",
+  },
+};
+
+/** Which model made a forecast's layers: the Atmos37 candidate, the pre-refit bundle or
+ * the final refit (the bundle family with 2005–2021 training years). */
+export type ModelKind = "atmos37" | "prerefit" | "refit";
+
+export function modelKind(
+  model?: { family?: string | null; training_period?: string | null } | null,
+): ModelKind {
+  if (model?.family !== "hybrid7_pc17") return "atmos37";
+  return model.training_period === "2005-2019" ? "prerefit" : "refit";
+}
+
+const TEXTS: Record<
+  ModelKind,
+  Record<Variant, { title: string; method: string }>
+> = { atmos37: LAYER_TEXT, prerefit: PREREFIT_TEXT, refit: REFIT_TEXT };
+
+/** How each layer of a forecast was made, for the model that produced it. */
 export function layerText(
-  family?: string | null,
+  kind: ModelKind,
 ): Record<Variant, { title: string; method: string }> {
-  return family === "hybrid7_pc17" ? PREREFIT_TEXT : LAYER_TEXT;
+  return TEXTS[kind];
 }
 
 /** The family of the model that issued a forecast. A run issued from MBC alone records
@@ -77,6 +108,18 @@ export function familyOf(
   detail: Pick<ForecastRun, "family"> & { model?: { family?: string } },
 ): string | undefined {
   return detail.model?.family ?? detail.family;
+}
+
+/** The kind of model that issued a forecast. */
+export function kindOf(
+  detail: Pick<ForecastRun, "family"> & {
+    model?: { family?: string; training_period?: string };
+  },
+): ModelKind {
+  return modelKind({
+    family: familyOf(detail),
+    training_period: detail.model?.training_period,
+  });
 }
 
 /** The model forecasts use now, when another model issued this forecast (a reviewer or
@@ -233,7 +276,7 @@ export function productReason(product?: ProductStatus): string {
 
 export function ProductStatusList({ detail }: { detail: ForecastDetail }) {
   const products = detail.products ?? {};
-  const text = layerText(familyOf(detail));
+  const text = layerText(kindOf(detail));
   return (
     <div className="grid-3">
       {VARIANTS.map((variant) => {
@@ -566,7 +609,7 @@ export function ProvenanceList({ detail }: { detail: ForecastDetail }) {
         [
           "Bias correction",
           detail.family === "hybrid7_pc17"
-            ? `Frozen factors for ${MONTHS[(p.mbc_month ?? 1) - 1]} (prior 500, cap 3), from 2005–2019 CHIRPS and ECMWF reforecasts`
+            ? `Frozen factors for ${MONTHS[(p.mbc_month ?? 1) - 1]} (prior 500, cap 3), from ${(detail.model?.training_period ?? "2005-2019").replace("-", "–")} CHIRPS and ECMWF reforecasts`
             : `Ratios for ${MONTHS[(p.mbc_month ?? 1) - 1]}, from 2005–2021 CHIRPS and ECMWF rainfall`,
         ],
         ["Input", detail.input_label],

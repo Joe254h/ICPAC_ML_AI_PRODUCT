@@ -154,23 +154,31 @@ def method_label(provenance: dict[str, Any]) -> str:
 
 def method_description(provenance: dict[str, Any], primary: str) -> str:
     """The issued layer's method in words, for the bulletin and the Copilot."""
-    family = provenance.get("model", {}).get("family")
+    model = provenance.get("model", {})
+    family = model.get("family")
     policy = provenance.get("hybrid_policy") or {}
     version = provenance.get("model_version") or ""
+    years = str(model.get("training_period") or "2005-2019")
     if family == "hybrid7_pc17" or provenance.get("hybrid_policy"):
         if primary == "hybrid":
+            refit = years != "2005-2019"
+            scores = (
+                f"Final refit {version}, trained on {years}: its 2022-2024 scores are a "
+                "retrospective comparison on reforecasts"
+                if refit
+                else f"Pre-refit model {version}: its 2022-2024 test scores describe reforecasts"
+            )
             return (
                 "Hybrid residual-corrected forecast: ICPAC's monthly MBC (prior 500, cap 3, "
-                "factors estimated on 2005-2019) corrected by a CatBoost model of what MBC "
+                f"factors estimated on {years}) corrected by a CatBoost model of what MBC "
                 "still gets wrong, from 24 inputs (ensemble rainfall, location, season, MBC "
                 "and 17 atmospheric components); the forecast is "
                 f"{POLICY_WORDS.get(str(policy.get('policy')), POLICY_WORDS['catboost_full'])}. "
-                f"Pre-refit model {version}: its 2022-2024 test scores describe reforecasts, "
-                "not the skill of this live forecast"
+                f"{scores}, not the skill of this live forecast"
             )
         return (
             "Multiplicative bias correction (MBC): the ECMWF ensemble-mean Week-2 rainfall "
-            "times the frozen monthly factor (prior 500, cap 3, estimated on 2005-2019) of the "
+            f"times the frozen monthly factor (prior 500, cap 3, estimated on {years}) of the "
             "initialization month, cell by cell"
         )
     if primary == "hybrid":

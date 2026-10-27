@@ -1,8 +1,15 @@
-"""The frozen 2026-10-25 MBC + CatBoost residual model (Hybrid7 + 17 atmospheric PCs).
+"""The frozen MBC + CatBoost residual models (Hybrid7 + 17 atmospheric PCs).
 
-Bundle: artifacts/bundles/ICPAC_WEEK2_WEB_MODEL_20261025 (its manifest.json pins every
-file's SHA256; the descriptor pins the manifest). Trained 2005-2019, validated 2020-2021
-and tested once on 2022-2024 (551 cases) on the HPC. Per domain cell:
+Two bundles share the 24 inputs, the runtime and the policies; each manifest.json pins
+every file's SHA256 and the descriptor pins the manifest and states the training years:
+
+- artifacts/bundles/ICPAC_WEEK2_WEB_MODEL_20261025: the pre-refit model, trained
+  2005-2019, validated 2020-2021 and tested once on 2022-2024 (551 cases) on the HPC.
+- artifacts/bundles/ICPAC_WEEK2_CATBOOST_FINAL_REFIT_2005_2021: the final refit on all
+  development years 2005-2021 (MBC, PCA and CatBoost refitted; no validation period), with
+  a retrospective 2022-2024 comparison (those years had been consulted to choose the policy).
+
+Per domain cell:
 
     residual       = CatBoost(24 predictors)
     catboost_full  = max(MBC + residual, 0)
@@ -32,7 +39,6 @@ from climate_engine.preprocessing.atmos37 import FeatureSet, RainfallSet
 from climate_engine.provenance import file_checksum
 
 FAMILY = "hybrid7_pc17"
-TRAINING_YEARS = list(range(2005, 2020))
 N_COMPONENTS = 17
 POLICIES = {
     "catboost_full": "max(MBC + CatBoost residual, 0)",
@@ -94,13 +100,23 @@ class PCAProjection:
         return ((x - self.mean) / self.scale) @ self.basis
 
 
-def load_pca(path: Path, cells: int) -> PCAProjection:
+def training_years(period: str) -> list[int]:
+    """The years of a descriptor's training period, such as 2005-2021."""
+    first, last = (int(y) for y in str(period).split("-"))
+    return list(range(first, last + 1))
+
+
+def _span(years: list[int]) -> str:
+    return f"{years[0]}-{years[-1]}"
+
+
+def load_pca(path: Path, cells: int, years: list[int]) -> PCAProjection:
     with np.load(path, allow_pickle=False) as z:
         names = [str(n) for n in z["feature_names"]]
         if names != list(features.ATMOS30):
             raise ValueError("PCA feature order differs from the 30 training predictors")
-        if [int(y) for y in z["training_years"]] != TRAINING_YEARS:
-            raise ValueError("The PCA must be fitted on 2005-2019 only")
+        if [int(y) for y in z["training_years"]] != years:
+            raise ValueError(f"The PCA must be fitted on the training years {_span(years)} only")
         if int(z["cell_count"]) != cells:
             raise ValueError(f"PCA was fitted on {int(z['cell_count'])} cells, grid has {cells}")
         mean = np.asarray(z["mean"], dtype=np.float64)
@@ -115,7 +131,9 @@ def load_pca(path: Path, cells: int) -> PCAProjection:
     return PCAProjection(mean, scale, components[:N_COMPONENTS].T.copy())
 
 
-def load_factors(path: Path, grid: DomainGrid, bounds: tuple[float, float]) -> MBCParameters:
+def load_factors(
+    path: Path, grid: DomainGrid, bounds: tuple[float, float], years: list[int]
+) -> MBCParameters:
     """Monthly MBC factors (prior 500, cap 3) in the authoritative cell order."""
     rows, cols = np.unravel_index(grid.domain_cells, grid.shape)
     with np.load(path, allow_pickle=False) as z:
@@ -126,10 +144,12 @@ def load_factors(path: Path, grid: DomainGrid, bounds: tuple[float, float]) -> M
             and np.allclose(z["longitude"], grid.cell_longitude, atol=1e-4)
         ):
             raise ValueError("MBC factor coordinates differ from the authoritative grid")
-        if [int(m) for m in z["month"]] != list(range(1, 13)):
+        # The pre-refit bundle names the month axis "month", the refit "months".
+        months = z["month"] if "month" in z.files else z["months"]
+        if [int(m) for m in months] != list(range(1, 13)):
             raise ValueError("MBC factors must cover calendar months 1-12 in order")
-        if [int(y) for y in z["train_years"]] != TRAINING_YEARS:
-            raise ValueError("MBC factors must be estimated on 2005-2019")
+        if [int(y) for y in z["train_years"]] != years:
+            raise ValueError(f"MBC factors must be estimated on the training years {_span(years)}")
         factors = np.asarray(z["factors"], dtype=np.float64)
         chosen = str(z["chosen_model"])
     if chosen != "MBC_monthly_prior500_cap3":
@@ -219,8 +239,9 @@ class MBCHybrid7PC17CatBoost(ResidualMBCModel):
         if len(steps) != 7:
             raise ValueError("pressure_steps_hours must list the seven training leads")
         low, high = (float(v) for v in d["mbc_factor_bounds"])
-        mbc = load_factors(descriptor.artifact("mbc"), grid, (low, high))
-        pca = load_pca(descriptor.artifact("pca"), cells)
+        years = training_years(d["training_period"])
+        mbc = load_factors(descriptor.artifact("mbc"), grid, (low, high), years)
+        pca = load_pca(descriptor.artifact("pca"), cells, years)
         estimator = load_estimator("catboost", descriptor.artifact("model"))
         if type(estimator).__name__ != "CatBoostRegressor":
             raise ModelArtifactError("Expected a CatBoostRegressor artifact")
@@ -244,8 +265,10 @@ class MBCHybrid7PC17CatBoost(ResidualMBCModel):
             "random_seed": params.get("random_seed"),
             "policy": policy,
             "policy_definition": POLICIES[policy],
+            "training_years": _span(years),
             "scientific_preselected_policy": policies.get("scientific_preselected_primary"),
-            "default_basis": policies.get("default_basis"),
+            "default_basis": policies.get("default_basis")
+            or policies.get("policy_selection_context"),
             "independent_test_reuse_warning": policies.get("independent_test_reuse_warning"),
             "pressure_steps_hours": steps,
             "training_members": int(d["ensemble_members"]),

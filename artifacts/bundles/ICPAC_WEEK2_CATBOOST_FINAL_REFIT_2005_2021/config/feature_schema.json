@@ -1,0 +1,42 @@
+{
+  "features": [
+    "X_mean_mmweek",
+    "X_spread_mmweek",
+    "latitude_deg",
+    "longitude_deg",
+    "doy_sin",
+    "doy_cos",
+    "MBC_forecast_mmweek",
+    "atmospheric_PC01",
+    "atmospheric_PC02",
+    "atmospheric_PC03",
+    "atmospheric_PC04",
+    "atmospheric_PC05",
+    "atmospheric_PC06",
+    "atmospheric_PC07",
+    "atmospheric_PC08",
+    "atmospheric_PC09",
+    "atmospheric_PC10",
+    "atmospheric_PC11",
+    "atmospheric_PC12",
+    "atmospheric_PC13",
+    "atmospheric_PC14",
+    "atmospheric_PC15",
+    "atmospheric_PC16",
+    "atmospheric_PC17"
+  ],
+  "feature_count": 24,
+  "cell_count": 205999,
+  "full_grid": [
+    800,
+    700
+  ],
+  "mask_order": "numpy.nonzero(domain_mask), row-major",
+  "rainfall_units": "mm/week",
+  "lead": "days 8\u201314, tp(+336h)-tp(+168h)",
+  "atmos30_order": "15 atmospheric quantities x (mean, spread) from canonical source",
+  "pca_training": "2005\u20132021, development cases only",
+  "init_month_rule": "initialization month, not verification month",
+  "area": "11 authoritative ICPAC countries",
+  "historical_refit_rows": 647228800
+}

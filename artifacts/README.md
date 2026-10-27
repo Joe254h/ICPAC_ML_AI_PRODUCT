@@ -59,7 +59,25 @@ artifacts/verification/PRE_REFIT_INDEPENDENT_2022_2024_20261025/
 └── SHA256SUMS.txt
 ```
 
-Both are checked by `python -m scripts.verify_artifacts`. See
+## The final refit and its retrospective comparison (2026-10-27)
+
+```text
+artifacts/bundles/ICPAC_WEEK2_CATBOOST_FINAL_REFIT_2005_2021/   unchanged; manifest.json pins
+├── artifacts/   catboost_residual_fullrows.cbm (300 trees, 24 inputs), refitted MBC factors,
+│                2005-2021 PCA, mask, training-only climatology
+├── config/      feature schema and deployment policies
+├── provenance/  refit pipeline and canonical training code; runtime/ its inference code
+artifacts/verification/FINAL_REFIT_RETROSPECTIVE_2022_2024_20261027/
+├── tables/      the 551-case scores of the refit (retrospective), pre-refit against refit
+├── maps/        30 frozen maps (regional and per country); figures/ 22 charts
+├── provenance/  the HPC's refit lock and manifests, README and figure index
+└── SHA256SUMS.txt
+```
+
+The monthly leave-one-year-out MBC files, the run logs and the training intermediates of
+the refit stay on the HPC: inference does not need them.
+
+All are checked by `python -m scripts.verify_artifacts`. See
 [the operational models guide](../docs/operational_models.md#the-frozen-pre-refit-model-icpac_week2_web_model_20261025).
 
 ## Not stored here

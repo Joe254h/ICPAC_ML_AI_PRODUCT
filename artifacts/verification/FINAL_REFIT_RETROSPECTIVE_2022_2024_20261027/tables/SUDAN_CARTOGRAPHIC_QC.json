@@ -1,0 +1,27 @@
+{
+  "sudan_northeast_vector_cells": 11963,
+  "sudan_northeast_authoritative_cells": 11867,
+  "sudan_northeast_geometry_coverage_fraction": 0.9919752570425479,
+  "sudan_vector_bounds_wgs84": [
+    21.825293,
+    8.665625,
+    38.609473,
+    22.202441
+  ],
+  "sudan_valid_mask_cells": 63284,
+  "sudan_northeast_cells_lat_ge15_lon_ge33": 12538,
+  "sudan_mask_northmost_lat": 23.125,
+  "sudan_mask_eastmost_lon": 38.57499694824219,
+  "note": "No extrapolation beyond recorded domain cells; zero-value arid-region fields retained.",
+  "display_geometry_overlap_sq_degrees": 1.173704752300566,
+  "display_footprint_cells_with_overlap": 1109,
+  "additional_northeast_sudan_display_cells": 634,
+  "Halaib_boundary_status": "Disputed Halaib; solid composite is a presentation-only science-domain outline, not an official sovereign border",
+  "NE_Sudan_CHIRPS_valid_mask_cells": 12538,
+  "NE_Sudan_authoritative_cells": 12538,
+  "NE_Sudan_CHIRPS_fraction": 1.0,
+  "sudan_labeled_outside_vector": 813,
+  "visualization_clip_only": true,
+  "science_country_codes_unchanged": true,
+  "visualized_grid_cells": 205966
+}

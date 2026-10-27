@@ -1,0 +1,12 @@
+country_id,identified_name,official_cells,center_points_inside_vector,match_fraction
+1,Kenya,19249,19249,1.0
+2,Ethiopia,37069,37069,1.0
+3,Uganda,7836,7836,1.0
+4,Tanzania,30817,30817,1.0
+5,Somalia,20945,20945,1.0
+6,Sudan,63284,62471,0.9871531508754188
+7,South Sudan,20250,20250,1.0
+8,Eritrea,4126,4126,1.0
+9,Djibouti,721,721,1.0
+10,Rwanda,817,817,1.0
+11,Burundi,885,885,1.0

@@ -10,10 +10,12 @@
 # registration issue: a cloud deployment then refuses to start rather than serve another
 # model than the one decided.
 decision:
-  id: 2026-10-26-prerefit
-  model_id: icpac_week2_catboost_prerefit_v1
+  id: 2026-10-27-final-refit
+  model_id: icpac_week2_catboost_refit_v1
   decided_by: Joe254h
   reason: >-
-    Use the uploaded pre-refit model (MBC + CatBoost residual, full policy) for the
-    MBC + AI/ML forecast until the refit has completed, passed its integrity checks and
-    been approved.
+    Use the final refit (MBC + CatBoost residual, full policy, refitted on 2005-2021) for the
+    MBC + AI/ML forecast. Every file passed its integrity checks; on the 2022-2024
+    reforecasts it matches the pre-refit model (RMSE 15.156 against 15.204 mm/week), a
+    retrospective comparison rather than a new independent test. The pre-refit model stays
+    registered for rollback.

@@ -1,0 +1,111 @@
+{
+  "status": "PASS",
+  "rows": 647228800,
+  "cases": 3148,
+  "months": [
+    {
+      "month": 1,
+      "cases": 272,
+      "rows": 55923200,
+      "sha256": "96871eb5a429a8151cdb8d665dbc96d648af52facdd6c134bd3e77d397b17482"
+    },
+    {
+      "month": 2,
+      "cases": 238,
+      "rows": 48932800,
+      "sha256": "179cf9b5b847cc02d56bf43af3f8a0cd66d9571e564b4da1e9b776f3220041e6"
+    },
+    {
+      "month": 3,
+      "cases": 272,
+      "rows": 55923200,
+      "sha256": "50c66e6860e9b43dafc324b95311bd7cec2c10505e550937110862a70e2eb487"
+    },
+    {
+      "month": 4,
+      "cases": 255,
+      "rows": 52428000,
+      "sha256": "cf508a981a41da4c2aca5ca63722ae2f6ae01e3b19d9a5b08e51d56bf30bb43e"
+    },
+    {
+      "month": 5,
+      "cases": 272,
+      "rows": 55923200,
+      "sha256": "aee5596a0b2795922821dc0c03eafb94daa3089f280f5cd2465cc88c38626923"
+    },
+    {
+      "month": 6,
+      "cases": 255,
+      "rows": 52428000,
+      "sha256": "90b500f3bb4560ff603dddaf5cfb4ddb43f7dd91ad0c2647bdb98464913da4d9"
+    },
+    {
+      "month": 7,
+      "cases": 272,
+      "rows": 55923200,
+      "sha256": "86ec2e75def4dc543b8e870d099a8e263652749c012ecd39febfe121b2d9723c"
+    },
+    {
+      "month": 8,
+      "cases": 272,
+      "rows": 55923200,
+      "sha256": "a0634c5321ce32a11c92bd877eaa94c411c4c9ae321b13f8fee158d655a538bb"
+    },
+    {
+      "month": 9,
+      "cases": 255,
+      "rows": 52428000,
+      "sha256": "f49f28fc8823ad7449dc0f9ad9da6878884c802303c1e844b46534e333480b04"
+    },
+    {
+      "month": 10,
+      "cases": 272,
+      "rows": 55923200,
+      "sha256": "cec67864a963c7a5eeaba7b0c258e3ba846d36af53051ab476d66ad15566188c"
+    },
+    {
+      "month": 11,
+      "cases": 255,
+      "rows": 52428000,
+      "sha256": "b0f2504c683371984f79ec686aa146980b5b370e66af2a476cdd7edd2bf538e3"
+    },
+    {
+      "month": 12,
+      "cases": 258,
+      "rows": 53044800,
+      "sha256": "691dc285bb7b844572bbec8ebb4c3c4381fbe7b1b758eaa47d0e6bbd432c9fb2"
+    }
+  ],
+  "pca_sha256": "3bb8c43a609ebba0fef3bfc2db10a375a9a159091b7518997dfab88f99701a7c",
+  "mbc_sha256": "3a4edff89e8a4326a8705b0a480da0308b43b2ee176b140b1d20f18a5781222a",
+  "no_subsampling": true,
+  "mask_cells": 205999,
+  "features": [
+    "X_mean_mmweek",
+    "X_spread_mmweek",
+    "latitude_deg",
+    "longitude_deg",
+    "doy_sin",
+    "doy_cos",
+    "MBC_forecast_mmweek",
+    "atmospheric_PC01",
+    "atmospheric_PC02",
+    "atmospheric_PC03",
+    "atmospheric_PC04",
+    "atmospheric_PC05",
+    "atmospheric_PC06",
+    "atmospheric_PC07",
+    "atmospheric_PC08",
+    "atmospheric_PC09",
+    "atmospheric_PC10",
+    "atmospheric_PC11",
+    "atmospheric_PC12",
+    "atmospheric_PC13",
+    "atmospheric_PC14",
+    "atmospheric_PC15",
+    "atmospheric_PC16",
+    "atmospheric_PC17"
+  ],
+  "test_period_not_used": "2022-2025",
+  "source_code_sha256": "e7fd4fb5ed8507d2eb9511b1e48165b782347516997fed14a85fb945b3e963cd"
+}

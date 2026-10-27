@@ -161,6 +161,8 @@ class ModelRegistry:
                 "source": "metrics.json supplied with the artifacts",
                 "period": fields["validation_period"],
                 "scope": "experiment validation period; independent test still required",
+                # A development refit has no validation period: its note says what stands in.
+                **fields.get("validation_note", {}),
                 "timestamp": stamp,
             },
             "inference_test": {

@@ -370,12 +370,16 @@ function BulletinPreview({
 function Trust({ detail }: { detail: ForecastDetail }) {
   const evidence = useApi<ExperimentalEvidence>("/verification/experimental");
   const runs = useApi<ForecastRun[]>("/forecasts");
-  // The correction the service issues: MBC + CatBoost, else MBC alone.
-  const scores = evidence.data?.regional ?? [];
+  // The correction the service issues: MBC + CatBoost, else MBC alone; only when the
+  // evidence describes the model in use.
+  const scores = evidence.data?.describes_model_in_use
+    ? evidence.data.regional
+    : [];
   const best =
     scores.find((s) => s.model === "CatBoost") ??
     scores.find((s) => s.model === "MBC");
   const cases = evidence.data?.scope.cases;
+  const refit = evidence.data?.scope.kind === "retrospective";
   const verified =
     runs.data?.filter((r) => r.verification_status === "available").length ?? 0;
   const end = new Date(new Date(detail.valid_end).getTime() + 2 * 86_400_000);
@@ -410,11 +414,13 @@ function Trust({ detail }: { detail: ForecastDetail }) {
             </strong>
             <span className="trust-text">
               {best?.skill_vs_raw != null
-                ? `The ${best.model === "MBC" ? "MBC" : "MBC + CatBoost"} correction, measured against CHIRPS on ${cases ?? "the"} independent forecast cases from 2022 to 2024.`
+                ? refit
+                  ? `The ${best.model === "MBC" ? "MBC" : "MBC + CatBoost"} correction, refitted on 2005–2021 and measured against CHIRPS on ${cases ?? "the"} forecast cases from 2022 to 2024 it was not trained on.`
+                  : `The ${best.model === "MBC" ? "MBC" : "MBC + CatBoost"} correction, measured against CHIRPS on ${cases ?? "the"} independent forecast cases from 2022 to 2024.`
                 : "A bias correction and a machine-learning correction learned from past ECMWF reforecasts and CHIRPS."}
             </span>
             <Link href="/verification/experimental">
-              The independent test <ArrowRight size={14} />
+              The evidence <ArrowRight size={14} />
             </Link>
           </li>
           <li>

@@ -261,9 +261,10 @@ def test_the_pipeline_applies_the_realtime_gate(tmp_path, grid, loaded):
 def test_the_decided_model_issues_the_hybrid_once_the_realtime_input_is_confirmed(
     tmp_path, monkeypatch
 ):
-    """Through the API, with the committed decision on the model in use: the first 2026
-    run of the pre-refit model passes every input check and waits for the reviewer; after
-    the confirmation the weekly run issues a new forecast with the MBC + AI/ML layer."""
+    """Through the API, with the committed decision on the model in use (the final refit,
+    which shares the pre-refit runtime): the first 2026 run passes every input check and
+    waits for the reviewer; after the confirmation the weekly run issues a new forecast
+    with the MBC + AI/ML layer."""
     from fastapi.testclient import TestClient
 
     from backend.app.main import create_app
@@ -289,7 +290,7 @@ def test_the_decided_model_issues_the_hybrid_once_the_realtime_input_is_confirme
     monkeypatch.setattr(icpac_maps, "render_png", lambda *args, **kwargs: PNG)
     steps = (192, 216, 240, 264, 288, 312, 336)
     ecmwf_mirror.build(tmp_path / "mirror", date(2026, 10, 25), 10, pressure_steps=steps)
-    model_id = "icpac_week2_catboost_prerefit_v1"
+    model_id = "icpac_week2_catboost_refit_v1"
     weekly = {"action": "run_forecast", "initialization": "2026-10-25", "actor": "Joe254h"}
     with ecmwf_mirror.serve(tmp_path / "mirror") as url:
         monkeypatch.setenv("ECMWF_OPENDATA_MIRRORS", url)

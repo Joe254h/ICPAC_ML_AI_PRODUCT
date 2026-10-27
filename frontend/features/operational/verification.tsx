@@ -259,17 +259,21 @@ function Answer({
   if (!evidence || hybrid?.skill_vs_raw == null || mbc?.skill_vs_raw == null)
     return null;
   const percent = (value: number) => `${Math.round(value * 100)}%`;
+  const refit = evidence.scope.kind === "retrospective";
   return (
     <section className="card answer-card" aria-label="Verification in brief">
       <p className="answer">
-        On {evidence.scope.cases} independent reforecast cases from 2022 to
-        2024, the MBC + CatBoost correction had{" "}
-        <strong>{percent(hybrid.skill_vs_raw)} lower error</strong> than raw
-        ECMWF, and MBC alone {percent(mbc.skill_vs_raw)} lower.
+        On {evidence.scope.cases} {refit ? "" : "independent "}reforecast cases
+        from 2022 to 2024, the{" "}
+        {refit ? "final refit (MBC + CatBoost)" : "MBC + CatBoost correction"}{" "}
+        had <strong>{percent(hybrid.skill_vs_raw)} lower error</strong> than raw
+        ECMWF, and its MBC alone {percent(mbc.skill_vs_raw)} lower.
       </p>
       <p className="answer-sub">
         Error here is the root-mean-square difference from CHIRPS in weekly
         rainfall.{" "}
+        {refit &&
+          "The refit learned from 2005–2021; the 2022–2024 years had been used to choose its policy, so this is a retrospective comparison. "}
         {verified > 0
           ? `${verified} live ${verified === 1 ? "week has" : "weeks have"} been scored so far; their scores follow.`
           : "Live weeks are scored below as soon as CHIRPS has observed them."}
@@ -286,8 +290,16 @@ function ExperimentalSummary({
 }) {
   return (
     <Card
-      title="Experimental evidence: the independent 2022–2024 test"
-      subtitle="The frozen pre-refit models on 551 reforecast cases. These are not the scores of the forecasts above, and they do not transfer to a refitted model."
+      title={
+        evidence.data?.scope.kind === "retrospective"
+          ? "Model evidence: the final refit on 2022–2024"
+          : "Model evidence: the independent 2022–2024 test"
+      }
+      subtitle={
+        evidence.data?.scope.kind === "retrospective"
+          ? "The 2005–2021 refit on 551 reforecast cases, a retrospective comparison. These are not the scores of the forecasts above."
+          : "The frozen pre-refit models on 551 reforecast cases. These are not the scores of the forecasts above, and they do not transfer to a refitted model."
+      }
       action={
         <LinkButton
           href="/verification/experimental"
@@ -334,11 +346,9 @@ function ExperimentalSummary({
           </table>
         </div>
       )}
-      <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 0 }}>
-        The full CatBoost correction had the lowest RMSE; the MAM-protected
-        policy, preselected on 2020–2021 validation, did not beat it on the
-        independent period.
-      </p>
+      {evidence.data && (
+        <p className="card-note">{String(evidence.data.scope.selection)}</p>
+      )}
     </Card>
   );
 }

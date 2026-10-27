@@ -1,0 +1,6 @@
+model,delta_new_minus_old_rmse_mmweek,ci95_lower,ci95_upper,blocks,cases,interpretation
+RawECMWF,0.0,0.0,0.0,36,551,"Exploratory paired monthly-block bootstrap, post-selection retrospective comparison"
+MBC,-0.05208691539343313,-0.08230427377805434,-0.021974858415218432,36,551,"Exploratory paired monthly-block bootstrap, post-selection retrospective comparison"
+CatBoost,-0.047841345393580426,-0.10471673753190185,0.020417755625698124,36,551,"Exploratory paired monthly-block bootstrap, post-selection retrospective comparison"
+GlobalAlpha075,-0.048590962834078155,-0.09921595960031855,0.01147260160581061,36,551,"Exploratory paired monthly-block bootstrap, post-selection retrospective comparison"
+MAMProtected,-0.06678057758271372,-0.09965430573451317,-0.0338762836747032,36,551,"Exploratory paired monthly-block bootstrap, post-selection retrospective comparison"

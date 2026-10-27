@@ -237,27 +237,33 @@ def test_startup_registers_the_committed_candidate_from_real_artifacts(tmp_path,
     current = ModelRegistry(platform).current()
     assert current["role"] == "candidate"
     assert current["model"]["model_id"] == "mbc_atmos37_catboost_candidate_v1"
-    # The frozen pre-refit bundle registers each policy, experimental: none becomes active.
+    # The frozen pre-refit bundle registers each policy and the final refit its full policy,
+    # all experimental: none becomes active by registering.
     bundle = {
         m["model_id"]: m for m in platform.repo.list("model") if m.get("family") == "hybrid7_pc17"
     }
     assert sorted(m["policy"] for m in bundle.values()) == [
+        "catboost_full",
         "catboost_full",
         "global_alpha075",
         "mam_protected",
         "mbc_only",
     ]
     assert {m["status"] for m in bundle.values()} == {"experimental"}
+    refit = bundle["icpac_week2_catboost_refit_v1"]
+    assert refit["training_period"] == "2005-2021" and refit["validation_period"] == "none"
+    assert "not an independent test" in refit["validation"]["scope"]
     stages = ModelRegistry(platform).lifecycles()
     assert stages["icpac_week2_catboost_prerefit_v1"]["stage"] == "integrity_verified"
+    assert stages["icpac_week2_catboost_refit_v1"]["stage"] == "integrity_verified"
     assert stages["mbc_atmos37_catboost_candidate_v1"]["stage"] == "active"
     again = Platform(platform.repo, register_descriptors=True)
-    assert len([m for m in again.repo.list("model") if operational.is_operational(m)]) == 5
+    assert len([m for m in again.repo.list("model") if operational.is_operational(m)]) == 6
 
 
 def test_startup_applies_the_recorded_decision_on_the_model_in_use_once(tmp_path, monkeypatch):
-    """config/model_in_use.yaml names the pre-refit model: startup approves and activates
-    it as the named decider, once; a later Models page activation then stands."""
+    """config/model_in_use.yaml names the final refit: startup approves and activates it
+    as the named decider, once; a later Models page activation then stands."""
     monkeypatch.delenv("ARTIFACT_ROOT", raising=False)
     monkeypatch.delenv("MODEL_DECISION_PATH")
     operational.authoritative_grid.cache_clear()
@@ -267,17 +273,19 @@ def test_startup_applies_the_recorded_decision_on_the_model_in_use_once(tmp_path
     assert platform.repo.list("registration_issue") == []
     registry = ModelRegistry(platform)
     current = registry.current()
-    assert current["model"]["model_id"] == "icpac_week2_catboost_prerefit_v1"
+    assert current["model"]["model_id"] == "icpac_week2_catboost_refit_v1"
     assert (
         current["model"]["status"] == "candidate" and current["model"]["policy"] == "catboost_full"
     )
     assert current["activation"]["actor"] == "Joe254h"
-    assert "2026-10-26-prerefit" in current["activation"]["comment"]
+    assert "2026-10-27-final-refit" in current["activation"]["comment"]
     # The earlier model in use is one click away (rollback).
     assert current["activation"]["history"][0]["model_id"] == "mbc_atmos37_catboost_candidate_v1"
     actions = {(a["action"], a["entity"], a["actor"]) for a in platform.repo.list("approval")}
-    assert ("candidate", "icpac_week2_catboost_prerefit_v1", "Joe254h") in actions
-    assert ("activate", "icpac_week2_catboost_prerefit_v1", "Joe254h") in actions
+    assert ("candidate", "icpac_week2_catboost_refit_v1", "Joe254h") in actions
+    assert ("activate", "icpac_week2_catboost_refit_v1", "Joe254h") in actions
+    # The independent test is not recorded by the decision: the refit has none.
+    assert current["model"]["test_status"] == "untested"
     # A reviewer switches back on the Models page; restarting does not undo it.
     registry.transition("mbc_atmos37_catboost_candidate_v1", "activate", REVIEW)
     Platform(platform.repo, register_descriptors=True)

@@ -1,0 +1,65 @@
+# Registration descriptor: the final development refit of the ICPAC Week-2 model
+# (ICPAC_WEEK2_CATBOOST_FINAL_REFIT_2005_2021). MBC factors, PCA and CatBoost were refitted
+# on every development year 2005-2021 (3,148 cases), with the same 24 inputs, runtime and
+# policies as the pre-refit bundle. Registration verifies the bundle manifest and every file
+# it lists, the refit contract (training years, checksums, no test-year use), the MBC
+# factors, the PCA and the 24-input schema, and runs a smoke prediction. It registers the
+# model as experimental: it is never made active automatically (see
+# docs/operational_models.md, model lifecycle).
+model_id: icpac_week2_catboost_refit_v1
+model_name: MBC + CatBoost residual, final refit (2005-2021)
+version: 2.0.0-refit
+experiment: ICPAC_RETRAIN_2005_2025_V1
+baseline: MBC
+family: hybrid7_pc17
+layout: refit
+algorithm: catboost
+feature_schema: hybrid7_pc17
+feature_count: 24
+expected_trees: 300
+training_period: "2005-2021"
+# Every development year was fitted: there is no validation period.
+validation_period: none
+test_period: "2022-2024"
+# No new independent test exists for the refit; 2022-2024 is a retrospective comparison.
+test_status: untested
+declared_status: experimental
+declared_by: Joe254h
+policy: catboost_full
+# The training code's seven upper-air leads, as for the pre-refit model.
+pressure_steps_hours: [192, 216, 240, 264, 288, 312, 336]
+# Perturbed members per forecast in the reforecasts the model was trained on.
+ensemble_members: 10
+# Frozen MBC factor range (prior 500, cap 3; lower clip 0.2).
+mbc_factor_bounds: [0.2, 3.0]
+# The bundle refuses real-time inputs from 2025 until their compatibility is confirmed.
+realtime_gate_from: "2025-01-01"
+notes: >-
+  The full CatBoost correction, max(MBC + residual, 0), refitted on 2005-2021. On the
+  2022-2024 reforecasts (551 cases) its RMSE is 15.156 mm/week, against 15.204 for the
+  pre-refit model and 17.269 for raw ECMWF. Those years were consulted earlier to choose
+  the policy, so this is a retrospective comparison, not a new independent test; the paired
+  monthly-block bootstrap gives -0.048 mm/week (95% interval -0.105 to +0.020) against
+  the pre-refit model.
+
+# Paths are relative to ARTIFACT_ROOT (the repository's artifacts/ by default).
+artifacts:
+  manifest: bundles/ICPAC_WEEK2_CATBOOST_FINAL_REFIT_2005_2021/manifest.json
+  model: bundles/ICPAC_WEEK2_CATBOOST_FINAL_REFIT_2005_2021/artifacts/catboost_residual_fullrows.cbm
+  policies: bundles/ICPAC_WEEK2_CATBOOST_FINAL_REFIT_2005_2021/config/deployment_policies.json
+  feature_schema: bundles/ICPAC_WEEK2_CATBOOST_FINAL_REFIT_2005_2021/config/feature_schema.json
+  mbc: bundles/ICPAC_WEEK2_CATBOOST_FINAL_REFIT_2005_2021/artifacts/mbc_monthly_prior500_cap3.npz
+  pca: bundles/ICPAC_WEEK2_CATBOOST_FINAL_REFIT_2005_2021/artifacts/pca_atmos30_refit2005_2021.npz
+  domain: bundles/ICPAC_WEEK2_CATBOOST_FINAL_REFIT_2005_2021/artifacts/authoritative_icpac11_mask.npz
+  retrospective_summary: verification/FINAL_REFIT_RETROSPECTIVE_2022_2024_20261027/tables/GLOBAL_METRICS.csv
+
+# SHA256 of each file; the manifest's own list covers every other bundle file.
+checksums:
+  manifest: 6103a4fc32d047efd4fbd316710ef6a53af770a13119ddf088bdbec7caa82d75
+  model: 00c97a8dce7e2307fc406be167fdd29cf12f383dbae012013dfbb69ff7f0d923
+  policies: afd41405f92aecacee95d4c50fb213c1c12c9f0f8e451815fc379697938106c2
+  feature_schema: 67704ed5c416f196d2f702e48a7fba17fa6b7de15671528b4bcc440a9e3c1d04
+  mbc: 3a4edff89e8a4326a8705b0a480da0308b43b2ee176b140b1d20f18a5781222a
+  pca: 3bb8c43a609ebba0fef3bfc2db10a375a9a159091b7518997dfab88f99701a7c
+  domain: 3906541fd4bbd368095340c43e649acd9e319aea3936144192fe921d9f786ed9
+  retrospective_summary: 12b2a50b2ceb9f5889a50e83ad488721892cae1e00ce90314a5c0776bf481da1

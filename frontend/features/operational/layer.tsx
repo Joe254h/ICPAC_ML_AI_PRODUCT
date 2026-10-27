@@ -16,13 +16,15 @@ import { countrySlug } from "@/features/routes";
 import { SERIES, num, validDays } from "@/lib/format";
 import { useApp } from "@/components/shell";
 import type { ForecastDetail, Variant } from "@/types/operational";
+import type { ModelKind } from "@/features/operational/shared";
 import {
   EarlierModelNotice,
   LAYER_TEXT,
-  familyOf,
+  kindOf,
   NoForecast,
   laterModel,
   layerText,
+  modelKind,
   forecastFacts,
   layersOf,
   mapUrl,
@@ -64,6 +66,26 @@ const PREREFIT_STEPS: Record<Variant, string[]> = {
   ],
 };
 
+/** The final refit: the pre-refit steps with factors and components refitted on
+ * 2005–2021. */
+const REFIT_STEPS: Record<Variant, string[]> = {
+  raw: STEPS.raw,
+  mbc: PREREFIT_STEPS.mbc.map((step) => step.replace("2005–2019", "2005–2021")),
+  hybrid: PREREFIT_STEPS.hybrid.map((step) =>
+    step
+      .replace("2005–2019", "2005–2021")
+      .replace(
+        "CatBoost model (300 trees)",
+        "CatBoost model (300 trees, refitted on 2005–2021)",
+      ),
+  ),
+};
+const STEPS_OF: Record<ModelKind, Record<Variant, string[]>> = {
+  atmos37: STEPS,
+  prerefit: PREREFIT_STEPS,
+  refit: REFIT_STEPS,
+};
+
 /** What the AI/ML layer of each model family needs before a forecast includes it. */
 const NEEDS = [
   "The forecast hours at which the model's training read the upper-air (pressure-level) fields, from ICPAC's training scripts.",
@@ -84,14 +106,14 @@ function Body({
   variant: Variant;
 }) {
   const { config, current } = useApp();
-  const family = familyOf(detail);
+  const kind = kindOf(detail);
   const available = layersOf(detail).includes(variant);
   // A layer missing from a forecast of the earlier model is described, with what it
   // still needs, for the model now in use.
   const now = laterModel(detail, current.data);
-  const shown = !available && now ? now.family : family;
+  const shown = !available && now ? modelKind(now) : kind;
   const text = layerText(shown)[variant];
-  const steps = (family === "hybrid7_pc17" ? PREREFIT_STEPS : STEPS)[variant];
+  const steps = STEPS_OF[kind][variant];
   const reason =
     detail.products?.hybrid?.reason ??
     config.data?.operational.hybrid.reason ??
@@ -128,11 +150,9 @@ function Body({
             <ol
               style={{ margin: 0, paddingLeft: 22, display: "grid", gap: 10 }}
             >
-              {(shown === "hybrid7_pc17" ? PREREFIT_NEEDS : NEEDS).map(
-                (need) => (
-                  <li key={need}>{need}</li>
-                ),
-              )}
+              {(shown === "atmos37" ? NEEDS : PREREFIT_NEEDS).map((need) => (
+                <li key={need}>{need}</li>
+              ))}
             </ol>
             <p style={{ margin: "18px 0 0" }}>
               <Link className="link-amber" href="/forecasts/mbc">

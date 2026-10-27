@@ -1,9 +1,10 @@
-"""Hybrid7 + 17 PC feature builder for the frozen 2026-10-25 MBC + CatBoost model.
+"""Hybrid7 + 17 PC feature builder for the frozen MBC + CatBoost models (the pre-refit
+bundle and the 2005-2021 refit share it).
 
-The order of operations is that of the bundle's training code
+The order of operations is that of the bundles' training code
 (artifacts/bundles/ICPAC_WEEK2_WEB_MODEL_20261025/provenance/fullgrid_stats_mbc.py,
-prepare_fullgrid_ml.py), which worked on the 1.5 degree ECMWF S2S grid and only then
-interpolated bilinearly to the 205,999 cells:
+prepare_fullgrid_ml.py; the refit's canonical copies), which worked on the 1.5 degree ECMWF
+S2S grid and only then interpolated bilinearly to the 205,999 cells:
 
 1. Rainfall: per perturbed member tp(336 h) - tp(168 h) in mm, floored at zero (only
    encoding noise may be negative), then ensemble mean and population spread on the
@@ -11,8 +12,8 @@ interpolated bilinearly to the 205,999 cells:
 2. MBC_forecast_mmweek = X_mean_mmweek * factor[initialization month, cell].
 3. Upper air at the seven forecast hours 192-336 h: the 15 derived variables, their
    seven-hour mean per member, ensemble mean and spread (30 values) on the 1.5 degree
-   grid, bilinear to the cells, standardised with the 2005-2019 PCA mean and scale and
-   projected on its first 17 components.
+   grid, bilinear to the cells, standardised with the PCA mean and scale of the model's
+   training years and projected on its first 17 components.
 4. latitude_deg, longitude_deg of each cell; doy_sin, doy_cos of the initialization day
    of year over 365.2425 days.
 
@@ -355,9 +356,10 @@ def build(
     )
     atmos = atmospheric(pressure, grid, cfg, model.steps, checks)
     pcs = model.pca.project(atmos)
+    years = str(model.info.get("training_years", "")).replace("-", "–")
     checks.passed(
         "PCA transform",
-        "2005–2019 centring and scaling, first 17 components, from the checksum-verified file",
+        f"{years} centring and scaling, first 17 components, from the checksum-verified file",
     )
     month = initialization.month
     mbc = model.mbc.apply(rain.mean, month)

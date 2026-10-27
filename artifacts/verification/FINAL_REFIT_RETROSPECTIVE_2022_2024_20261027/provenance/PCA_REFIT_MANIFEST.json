@@ -1,0 +1,39 @@
+{
+  "sha256": "3bb8c43a609ebba0fef3bfc2db10a375a9a159091b7518997dfab88f99701a7c",
+  "cases": 3148,
+  "training_years": [
+    2005,
+    2006,
+    2007,
+    2008,
+    2009,
+    2010,
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021
+  ],
+  "monthly_sha256": {
+    "month_01_moments.npz": "1a76425de5b2410739dabf4512a9e6aac300869235805bd74da96b8c744a7ad2",
+    "month_02_moments.npz": "b874f3373e3766f8312221ad1e594c84d253818ba12988b4ee96f4877da765e8",
+    "month_03_moments.npz": "2280b404c8ee0fc2e8e4937a4612a082e9dc5fcf11a80382ea42c31d5db8af45",
+    "month_04_moments.npz": "9fb690b03946aaf39d221a30b7560bda477ecc576800970832a78d1e533bd39a",
+    "month_05_moments.npz": "fb52281a13a4bc0afb17c4eccfbab88acd33c0c1bb6a9845b88b2306c1da49db",
+    "month_06_moments.npz": "69e43e8662a2a530beb88e4150dde71567228658d6d992faa7949a7e1090c1f8",
+    "month_07_moments.npz": "9772e18d7db75821406c9629fc2e11866c5230a6acd73723af32a4e46afcc786",
+    "month_08_moments.npz": "18650178a63e6fa4407978d1d1c2a0acdcba600ab935dac033a4456874d2811e",
+    "month_09_moments.npz": "1a363b2da63e8322a13a0f0431a6348dd8a792952afb1b1cafc8670f5c90291a",
+    "month_10_moments.npz": "abc959135e3a27984cd690f3c26ce4ca65389fc34351afc758a1fcaafae1ecbb",
+    "month_11_moments.npz": "fd3a9a98305b3395da265e8ed5259e9b27a56d71ba2a9272c964087f63c8386d",
+    "month_12_moments.npz": "57fdc12a989b6c56b923fe1abbf4327737b16494551d772711a63a90b184a8ff"
+  },
+  "explained_variance_17": 0.9536941622073449,
+  "source_sha256": "1b7e04160f0c6578e1bbb2bd3bc3528e91cccf82daa574c7059dc4f931772f17"
+}

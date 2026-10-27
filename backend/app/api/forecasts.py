@@ -406,16 +406,37 @@ def install(app: FastAPI, dependency) -> None:
         )
         return Response(png, media_type="image/png", headers={"Cache-Control": "no-cache"})
 
-    @app.get("/verification/experimental")
-    def experimental_verification() -> dict:
-        """Frozen pre-refit verification (independent 2022-2024 reforecast test)."""
-        from backend.app.services import evidence
+    EVIDENCE_SET = Query(None, alias="set", pattern=r"^[a-z]{1,20}$")
 
-        return evidence.summary()
+    @app.get("/verification/experimental")
+    def experimental_verification(which: str | None = EVIDENCE_SET, platform=Depends(dependency)):
+        """Frozen verification on the 2022-2024 reforecasts: the final refit's retrospective
+        comparison or the pre-refit model's independent test. Without a set: the one that
+        describes the model in use."""
+        from backend.app.services import evidence
+        from backend.app.services.registry import ModelRegistry
+
+        try:
+            in_use = ModelRegistry(platform).current()["model"]["model_id"]
+        except KeyError:
+            in_use = None
+        body = evidence.summary(which or evidence.set_for_model(in_use))
+        return {**body, "describes_model_in_use": in_use in evidence.SETS[body["set"]].model_ids}
 
     @app.get("/verification/experimental/maps/{name}")
-    def experimental_map(name: str = Path(pattern=r"^[a-z][a-z_-]{1,40}$")):
+    def experimental_map(
+        name: str = Path(pattern=r"^[a-z][a-z_-]{1,40}$"), which: str | None = EVIDENCE_SET
+    ):
         from backend.app.services import evidence
 
-        png = evidence.map_file(name).read_bytes()
+        png = evidence.map_file(name, which).read_bytes()
+        return Response(png, media_type="image/png", headers=IMMUTABLE)
+
+    @app.get("/verification/experimental/figures/{name}")
+    def experimental_figure(
+        name: str = Path(pattern=r"^[a-z0-9][a-z0-9-]{1,60}$"), which: str | None = EVIDENCE_SET
+    ):
+        from backend.app.services import evidence
+
+        png = evidence.figure_file(name, which).read_bytes()
         return Response(png, media_type="image/png", headers=IMMUTABLE)

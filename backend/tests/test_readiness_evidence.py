@@ -1,6 +1,7 @@
 """The ECMWF readiness page and the frozen experimental verification, through the API."""
 
 import shutil
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -47,8 +48,10 @@ def test_check_ecmwf_records_the_published_run(env, mirror, monkeypatch):
 
 
 def test_the_experimental_verification_is_served_from_the_frozen_tables(env):
+    """The pre-refit model's independent 2022-2024 test, one of the two frozen sets."""
     client = env.client
-    body = client.get("/verification/experimental").json()
+    body = client.get("/verification/experimental?set=prerefit").json()
+    assert body["set"] == "prerefit" and body["scope"]["kind"] == "independent"
     assert body["scope"]["cases"] == 551 and body["scope"]["rows"] == 113285600
     regional = {s["model"]: s for s in body["regional"]}
     assert regional["CatBoost"]["rmse"] == pytest.approx(15.203976, abs=1e-6)
@@ -67,23 +70,62 @@ def test_the_experimental_verification_is_served_from_the_frozen_tables(env):
     assert {c["model"] for c in body["deterministic_roc"]} >= {"CatBoost", "MBC"}
     assert all(len(c["curve"]) <= 80 for c in body["deterministic_roc"])
     assert body["sudan"]["cells_outside_vector"] == 813
-    png = client.get("/verification/experimental/maps/added_value_mbc")
+    assert body["comparison"] is None and body["figures"] == []
+    png = client.get("/verification/experimental/maps/added_value_mbc?set=prerefit")
     assert png.status_code == 200 and png.content[:4] == b"\x89PNG"
-    assert client.get("/verification/experimental/maps/country-south-sudan").status_code == 200
+    path = "/verification/experimental/maps/country-south-sudan?set=prerefit"
+    assert client.get(path).status_code == 200
     assert client.get("/verification/experimental/maps/secrets").status_code == 422
+
+
+def test_the_refit_comparison_is_served_as_retrospective(env):
+    """The final refit's 2022-2024 scores: retrospective, beside the pre-refit model's."""
+    client = env.client
+    body = client.get("/verification/experimental?set=refit").json()
+    assert body["set"] == "refit" and body["scope"]["kind"] == "retrospective"
+    assert "not a new independent test" in body["scope"]["statement"]
+    assert body["scope"]["training"] == "2005–2021" and body["scope"]["training_cases"] == 3148
+    regional = {s["model"]: s for s in body["regional"]}
+    assert regional["CatBoost"]["rmse"] == pytest.approx(15.156135, abs=1e-6)
+    assert regional["MBC"]["rmse"] == pytest.approx(15.363620, abs=1e-6)
+    assert regional["CatBoost"]["skill_vs_raw"] == pytest.approx(1 - 15.156135 / 17.268974)
+    assert "LightGBM" not in regional  # not refitted: never shown as if it were
+    compared = {c["model"]: c for c in body["comparison"]["items"]}
+    assert compared["CatBoost"]["prerefit_rmse"] == pytest.approx(15.203976, abs=1e-6)
+    assert compared["CatBoost"]["refit_rmse"] == pytest.approx(15.156135, abs=1e-6)
+    assert compared["CatBoost"]["low"] < 0 < compared["CatBoost"]["high"]
+    assert sum(item["cases"] for items in body["monthly"].values() for item in items) == 551 * 6
+    assert len(body["figures"]) == 22 and len(body["maps"]) == 8 and body["country_rain_maps"]
+    for path in (
+        "maps/regimes",
+        "maps/rain-south-sudan",
+        "maps/country-kenya",
+        "figures/12-paired-old-vs-refit-ci-forest",
+    ):
+        png = client.get(f"/verification/experimental/{path}?set=refit")
+        assert png.status_code == 200 and png.content[:4] == b"\x89PNG", path
+    assert client.get("/verification/experimental/figures/../../x").status_code == 404
+    assert client.get("/verification/experimental?set=other").status_code == 422
+    # Without a set: the one describing the model in use.
+    default = client.get("/verification/experimental").json()
+    assert default["set"] in ("refit", "prerefit")
+    assert isinstance(default["describes_model_in_use"], bool)
 
 
 def test_changed_evidence_is_refused(tmp_path, monkeypatch):
     copy = tmp_path / "evidence"
-    shutil.copytree(evidence.EVIDENCE, copy)
-    monkeypatch.setattr(evidence, "EVIDENCE", copy)
-    evidence.rows("T01_independent_regional_metrics.csv")
+    original = evidence.SETS["prerefit"]
+    shutil.copytree(original.directory, copy)
+    monkeypatch.setitem(evidence.SETS, "prerefit", replace(original, directory=copy))
+    evidence.rows("T01_independent_regional_metrics.csv", "prerefit")
     table = copy / "tables" / "T01_independent_regional_metrics.csv"
     table.write_text(table.read_text().replace("15.20", "14.20", 1))
     with pytest.raises(evidence.EvidenceError, match="changed after it was frozen"):
-        evidence.rows("T01_independent_regional_metrics.csv")
+        evidence.rows("T01_independent_regional_metrics.csv", "prerefit")
     with pytest.raises(evidence.EvidenceError, match="not part of the frozen evidence"):
-        evidence.verified_file("tables/../../SHA256SUMS.txt")
+        evidence.verified_file("tables/../../SHA256SUMS.txt", "prerefit")
+    with pytest.raises(evidence.EvidenceError, match="No frozen evidence set"):
+        evidence.summary("latest")
 
 
 def test_the_realtime_gate_date_is_inclusive():

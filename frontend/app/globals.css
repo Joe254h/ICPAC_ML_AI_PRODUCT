@@ -2354,6 +2354,56 @@ select.input,
   font-size: clamp(26px, 2.8vw, 34px);
 }
 
+/* frozen evidence: maps, figures and their notes */
+.card-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+.evidence-figure {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 16px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+.evidence-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+}
+.figure-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 18px;
+}
+.evidence-card {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.evidence-card img {
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+.evidence-card figcaption {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+@media (max-width: 600px) {
+  .figure-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* the answer first, on pages that report results */
 .answer-card {
   border-left: 3px solid var(--green-700);

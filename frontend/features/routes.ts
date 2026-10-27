@@ -178,7 +178,7 @@ export const ROUTES: Route[] = [
   },
   {
     path: "verification/experimental",
-    title: "Independent test 2022–2024",
+    title: "Model evidence 2022–2024",
     menu: "Verification",
     page: "evidence",
   },

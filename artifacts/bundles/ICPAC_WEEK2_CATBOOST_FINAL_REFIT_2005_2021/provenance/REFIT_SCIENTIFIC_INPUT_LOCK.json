@@ -1,0 +1,103 @@
+{
+  "scientific_inputs": {
+    "canonical_source": {
+      "path": "/scratch/njoel/code/s2s_unified_raw_20261018/FULLGRID_STATS_MBC_20261022/fullgrid_stats_mbc.py",
+      "sha256": "e7fd4fb5ed8507d2eb9511b1e48165b782347516997fed14a85fb945b3e963cd"
+    },
+    "pca_source": {
+      "path": "/scratch/njoel/code/s2s_unified_raw_20261018/icpac_fit_pca_2005_2019.py",
+      "sha256": "1b7e04160f0c6578e1bbb2bd3bc3528e91cccf82daa574c7059dc4f931772f17"
+    },
+    "feature_source": {
+      "path": "/scratch/njoel/code/s2s_unified_raw_20261018/ML_FULLGRID_ALLROWS_STAGE1_20261022/prepare_fullgrid_ml.py",
+      "sha256": "baa21530840556bb9326e7f542317f21409ac7bea8fd8c589b40308687cc6f33"
+    },
+    "authoritative_mask": {
+      "path": "/scratch/njoel/ICPAC_DATA_HUB/DOMAIN/authoritative_icpac11_mask.npz",
+      "sha256": "3906541fd4bbd368095340c43e649acd9e319aea3936144192fe921d9f786ed9"
+    },
+    "historic_frozen_model": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CATBOOST_VALIDATION_SELECTION_20261023/CatBoost_17PC_LOYO_RESIDUAL_FULLROWS.cbm",
+      "sha256": "19a17b2c9cafcdcbb624c89fe9eb2a147ad10662f7a1d42144656cbd5aec0763"
+    },
+    "historic_validation_policy": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/HYBRID_POLICY_SELECTION_20261023/HYBRID_POLICY_MANIFEST.json",
+      "sha256": "782aa642593b357cffe1e8621c895b429415d9f043f0e367211bcc8ac2a9c3ba"
+    },
+    "eligible_date_inventory_01": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CCA_DIAGNOSTIC_2005_2021/cca_month_01.npz",
+      "sha256": "c7ba0dfc2c5edb88234bef6d6620fa3b6516a7e53b82ba374ae07eb1799d215f"
+    },
+    "eligible_date_inventory_02": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CCA_DIAGNOSTIC_2005_2021/cca_month_02.npz",
+      "sha256": "286cf98ce57c707064f26151b8729b831484ba16645b2d8cab5c8d140c45fad2"
+    },
+    "eligible_date_inventory_03": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CCA_DIAGNOSTIC_2005_2021/cca_month_03.npz",
+      "sha256": "ee5ddcb692b9fa70bc904f445f4164af628a02b1cfac0bb3f690f183e7747424"
+    },
+    "eligible_date_inventory_04": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CCA_DIAGNOSTIC_2005_2021/cca_month_04.npz",
+      "sha256": "876f7e0da6c2dc50497f675e07a8b6990a39ab31e527d62e7c33c5748cee6d51"
+    },
+    "eligible_date_inventory_05": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CCA_DIAGNOSTIC_2005_2021/cca_month_05.npz",
+      "sha256": "40931c67ecd6045357b2befb280531be238fd308879d10e8ed0690412123faf3"
+    },
+    "eligible_date_inventory_06": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CCA_DIAGNOSTIC_2005_2021/cca_month_06.npz",
+      "sha256": "ff178d963381228dce257e13b322efd577099d66f0101508ab71eba3b5d68695"
+    },
+    "eligible_date_inventory_07": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CCA_DIAGNOSTIC_2005_2021/cca_month_07.npz",
+      "sha256": "49df70467bf699db7718e6c2132f8234ae5f1052ce9a068b50ff5639071985bd"
+    },
+    "eligible_date_inventory_08": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CCA_DIAGNOSTIC_2005_2021/cca_month_08.npz",
+      "sha256": "0b28727beaf5129a847b34ce5e1653f9fe8a5f8bd6e9a64fc3ba06e8cec26bc3"
+    },
+    "eligible_date_inventory_09": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CCA_DIAGNOSTIC_2005_2021/cca_month_09.npz",
+      "sha256": "1fa2285917606da2da8fa35f0e7e4e195ca3b2857073a33d6e694f3f9a514f80"
+    },
+    "eligible_date_inventory_10": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CCA_DIAGNOSTIC_2005_2021/cca_month_10.npz",
+      "sha256": "644cc3d0861e2f00036ef8ecf697dbd0b4be79b478c650aaab0b549ba12553af"
+    },
+    "eligible_date_inventory_11": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CCA_DIAGNOSTIC_2005_2021/cca_month_11.npz",
+      "sha256": "eeacc12ece19bc257f5ba7813160f7113dc81fab37b28131865dda816ac21160"
+    },
+    "eligible_date_inventory_12": {
+      "path": "/scratch/njoel/s2s_master_data/results/ICPAC_RETRAIN_2005_2025_V1/CCA_DIAGNOSTIC_2005_2021/cca_month_12.npz",
+      "sha256": "c4283886e1884d586f215700676674c826671c3ced54a3f3ac5af9554277bb50"
+    }
+  },
+  "cases": 3148,
+  "rows": 647228800,
+  "eligible_years": [
+    2005,
+    2006,
+    2007,
+    2008,
+    2009,
+    2010,
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021
+  ],
+  "test_years_forbidden": [
+    2022,
+    2023,
+    2024,
+    2025
+  ]
+}

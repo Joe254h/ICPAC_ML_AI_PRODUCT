@@ -276,6 +276,9 @@ function ModelCard({
   const [checked, setChecked] = useState<string | null>(null);
   const metrics = model.metrics ?? {};
   const report = model.bundle?.independent_report;
+  const retrospective = model.bundle?.retrospective_report;
+  // A development refit has no validation period: its scores are the retrospective ones.
+  const scored = retrospective ? "2022–2024 retrospective" : "Validation";
   const gated =
     Boolean(model.model_info?.realtime_gate_from) &&
     model.policy !== "mbc_only";
@@ -308,18 +311,22 @@ function ModelCard({
       <LifecycleSteps lifecycle={model.lifecycle} />
       <div className="stats" style={{ marginBottom: 22 }}>
         <Stat
-          label="Validation RMSE"
+          label={`${scored} RMSE`}
           value={num(metrics.rainfall_RMSE ?? metrics.rmse, 2)}
           unit="mm"
-          hint={`Period ${model.validation_period}`}
+          hint={
+            retrospective
+              ? "Not a new independent test"
+              : `Period ${model.validation_period}`
+          }
         />
         <Stat
-          label="Validation MAE"
+          label={`${scored} MAE`}
           value={num(metrics.rainfall_MAE ?? metrics.mae, 2)}
           unit="mm"
         />
         <Stat
-          label="Validation r"
+          label={`${scored} r`}
           value={num(metrics.rainfall_pearson_r ?? metrics.correlation, 3)}
         />
         <Stat
@@ -346,12 +353,32 @@ function ModelCard({
                 string,
               ][])
             : []),
-          ["Training", model.training_period],
-          ["Validation", model.validation_period],
+          [
+            "Training",
+            model.bundle?.training_cases
+              ? `${model.training_period} (${model.bundle.training_cases.toLocaleString("en")} cases)`
+              : model.training_period,
+          ],
+          [
+            "Validation",
+            model.validation_period === "none"
+              ? "None: every development year was fitted"
+              : model.validation_period,
+          ],
           [
             "Independent test",
-            `${model.test_period ?? "—"} · ${model.test_status ?? "untested"}`,
+            retrospective
+              ? `${model.test_period ?? "—"} · none new for the refit`
+              : `${model.test_period ?? "—"} · ${model.test_status ?? "untested"}`,
           ],
+          ...(retrospective
+            ? ([
+                [
+                  "HPC retrospective comparison",
+                  `RMSE ${num(retrospective.rmse, 3)} mm/week, MAE ${num(retrospective.mae, 3)}, r ${num(retrospective.pearson_r, 3)} over ${retrospective.cases} cases (${retrospective.period}, reforecasts). ${retrospective.selection_note}.`,
+                ],
+              ] as [string, string][])
+            : []),
           ...(report
             ? ([
                 [
