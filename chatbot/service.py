@@ -14,6 +14,7 @@ import httpx
 from backend.app.db import now
 from backend.app.schemas import ChatRequest
 from chatbot import agent
+from chatbot.attachments import Attachments, for_model, public
 from chatbot.budget import request_budget
 from chatbot.conversation import OperationalConversation
 from chatbot.providers import render_grounded
@@ -57,6 +58,8 @@ GROUNDING = (
 def selection(body: ChatRequest) -> str | None:
     """What the forecaster picked in the side panel, as a hint for the model."""
     parts = []
+    if body.forecast_id:
+        parts.append("forecast week chosen on the page for this question")
     if body.country and body.country != "GHA":
         parts.append(f"area selected: {body.country}")
     if body.variant:
@@ -106,6 +109,8 @@ class Copilot:
     def __init__(self, platform):
         self.platform = platform
         self.references = ReferenceIndex()
+        #: The files attached to the question being answered, as the page shows them.
+        self._files: list[dict] = []
 
     @request_budget
     def answer(
@@ -120,6 +125,14 @@ class Copilot:
             if body.session_id and session.get("owner") != owner:
                 raise KeyError(body.session_id)
             session["owner"] = owner
+        if body.edit_index is not None:
+            # An earlier question edited: it and what followed are replaced.
+            held = session["messages"]
+            if body.edit_index >= len(held) or held[body.edit_index].get("role") != "user":
+                raise ValueError("Only one of your own questions can be edited")
+            session["messages"] = held[: body.edit_index]
+        files = [Attachments(self.platform).get(i, owner) for i in body.attachment_ids]
+        self._files = [public(f) for f in files]
         fallback = None
         reason = None
         try:
@@ -143,6 +156,7 @@ class Copilot:
                     selection(body),
                     actor,
                     body.language,
+                    for_model(files),
                 )
                 response = {**result, "created_at": now(), "grounding": GROUNDING}
                 session["context"] = response["context"]
@@ -244,9 +258,12 @@ class Copilot:
         return self._save(body, session, response)
 
     def _save(self, body: ChatRequest, session: dict, response: dict) -> dict:
+        question: dict = {"role": "user", "text": body.message, "created_at": now()}
+        if self._files:
+            question["attachments"] = self._files
         session["messages"] = [
             *session["messages"],
-            {"role": "user", "text": body.message, "created_at": now()},
+            question,
             {"role": "assistant", **json.loads(json.dumps(response, default=str))},
         ]
         session["updated_at"] = now()

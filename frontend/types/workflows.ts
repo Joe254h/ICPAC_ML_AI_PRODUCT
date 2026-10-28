@@ -12,10 +12,22 @@ export type ToolTrace = {
   arguments: Record<string, unknown>;
   result: Record<string, unknown>;
 };
+/** A file attached to a question (its content stays on the server). */
+export type ChatAttachment = {
+  id: string;
+  name: string;
+  kind: "text" | "image" | "binary";
+  bytes: number;
+  characters?: number;
+  truncated?: boolean;
+  note?: string | null;
+};
+
 export type ChatMessage = {
   role: "user" | "assistant";
   text: string;
   created_at?: string;
+  attachments?: ChatAttachment[];
   provider?: string;
   fallback?: string | null;
   /** Why the assistant did not answer, in words. */
@@ -40,6 +52,8 @@ export type BulletinEdit = {
   with?: string;
   request?: string;
   summary?: string;
+  /** A translated version: the language it is in. */
+  language?: string;
   changed?: string[];
   at?: string;
 };
@@ -121,6 +135,11 @@ export type BulletinSection = {
   text: string[];
   leads: string[];
   missing_dependency?: string;
+  /** The country focus: why this country was chosen. */
+  why?: string;
+  /** A section the forecaster added. */
+  note?: boolean;
+  edited?: boolean;
 };
 export type Bulletin = {
   id: string;

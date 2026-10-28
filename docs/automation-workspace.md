@@ -30,7 +30,9 @@ stops at once; a running one at its next step (a download under way finishes fir
 Steps already finished are kept, the stop is recorded with who asked for it, and a
 stopped task is not retried.
 
-This workflow never trains, promotes, approves, publishes or sends an email. Existing
+This workflow never trains, promotes, approves or publishes. Its only email tells the
+forecasters (`BULLETIN_FORECASTERS`, default the reviewers) that a new draft is ready to
+check, with the draft Word document attached. Existing
 explicit review transitions remain responsible for distribution. Public evaluation
 does not establish a reviewer's institutional identity.
 

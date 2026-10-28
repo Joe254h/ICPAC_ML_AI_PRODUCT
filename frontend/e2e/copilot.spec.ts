@@ -322,3 +322,44 @@ test("another model's forecast is uploaded in the chat and compared with ICPAC's
   await expect(listed).toContainText("Colleague CNN");
   await expect(listed).toContainText("Awaiting CHIRPS");
 });
+
+test("a file of any format goes with a question, and a question can be edited", async ({
+  page,
+}) => {
+  await page.goto("/copilot");
+  await page.getByTestId("forecast-file").setInputFiles({
+    name: "field-report.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("Floods were reported in Garissa on 25 October."),
+  });
+  const pending = page.getByRole("list", {
+    name: "Files for the next question",
+  });
+  await expect(pending).toContainText("field-report.txt");
+  await page
+    .getByLabel("Ask Forecaster Copilot")
+    .fill("What does my report say?");
+  await page.keyboard.press("Enter");
+  const asked = page.locator(".chat-message.user").last();
+  await expect(asked).toContainText("field-report.txt");
+  await expect(page.locator(".chat-message.assistant")).toHaveCount(1, {
+    timeout: 60_000,
+  });
+  // Editing the question replaces it and its answer.
+  await asked.getByRole("button", { name: "Edit this question" }).click();
+  await page
+    .getByLabel("Edited question")
+    .fill("Summarise this week's forecast.");
+  await page.getByRole("button", { name: "Ask again" }).click();
+  await expect(page.locator(".chat-message.user")).toHaveCount(1);
+  await expect(page.locator(".chat-message.user").last()).toContainText(
+    "Summarise this week's forecast.",
+  );
+  await expect(page.locator(".chat-message.assistant")).toHaveCount(1, {
+    timeout: 60_000,
+  });
+  // The forecast weeks are offered in the conversation's menu.
+  await expect(
+    page.getByLabel("Forecast week").locator("option").first(),
+  ).toContainText("newest");
+});

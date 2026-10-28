@@ -487,11 +487,33 @@ class ForecastService:
             reverse=True,
         )
 
-    def latest(self) -> dict[str, Any]:
+    def listing(self) -> list[dict[str, Any]]:
+        """Every forecast, newest first, each marked ``of_record`` if it is its ECMWF run's
+        forecast of record: the newest one made by the model in use, else the newest. The
+        others (a run forecast again by an earlier model, or before a confirmation) are
+        earlier versions of the same week, kept for the record."""
         runs = self.runs()
-        if not runs:
-            raise KeyError("no operational forecast run yet")
-        return self.get(runs[0]["forecast_id"])
+        model_id = (current_record(self.platform) or {}).get("model_id")
+        chosen: dict[str, dict[str, Any]] = {}
+        for record in runs:
+            day = record["initialization"][:10]
+            held = chosen.get(day)
+            if held is None or (
+                held.get("model_id") != model_id and record.get("model_id") == model_id
+            ):
+                chosen[day] = record
+        of_record = {id(r) for r in chosen.values()}
+        return [{**r, "of_record": id(r) in of_record} for r in runs]
+
+    def latest_id(self) -> str:
+        """The newest ECMWF run's forecast of record."""
+        for record in self.listing():
+            if record["of_record"]:
+                return record["forecast_id"]
+        raise KeyError("no operational forecast run yet")
+
+    def latest(self) -> dict[str, Any]:
+        return self.get(self.latest_id())
 
     def _path(self, forecast_id: str, name: str) -> Path:
         """A package file, served only while it matches the checksum in the manifest."""
@@ -842,6 +864,44 @@ class ForecastService:
             except Exception:  # the further comparisons never hold up verification
                 continue
         return compared
+
+    def verified_weeks(self, limit: int = 52) -> list[dict[str, Any]]:
+        """Every verified week, newest first (each ECMWF run's forecast of record): the
+        scores of each layer against CHIRPS (MAE, RMSE, bias, Pearson r, over the domain's
+        cells), and against ARC 2.0, RFE 2.0 and GPM IMERG where they were compared."""
+        weeks: list[dict[str, Any]] = []
+        for record in self.listing():
+            if not record["of_record"] or record.get("verification_status") != "available":
+                continue
+            try:
+                verification = self.verification(record["forecast_id"])
+            except (KeyError, ValueError, FileNotFoundError, Unavailable):
+                continue  # a package that fails its checks is not scored
+            weeks.append(
+                {
+                    "forecast_id": record["forecast_id"],
+                    "initialization": record["initialization"],
+                    "valid_start": record["valid_start"],
+                    "valid_end": record["valid_end"],
+                    "model_id": record.get("model_id"),
+                    "method": record.get("method"),
+                    "primary_layer": record.get("primary_layer"),
+                    "season": verification.get("season"),
+                    "chirps": verification.get("domain") or {},
+                    "references": [
+                        {
+                            "source": c["source"],
+                            "name": c["name"],
+                            "status": c["status"],
+                            "domain": c.get("domain") or {},
+                        }
+                        for c in self.references(record["forecast_id"])
+                    ],
+                }
+            )
+            if len(weeks) == limit:
+                break
+        return weeks
 
     def references(self, forecast_id: str) -> list[dict[str, Any]]:
         """A forecast's comparisons with the further references, in their order."""

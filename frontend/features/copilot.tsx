@@ -18,25 +18,28 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Paperclip,
+  Pencil,
   RefreshCw,
   SquarePen,
   Trash2,
+  X,
 } from "lucide-react";
 import { openStaffAccess } from "@/components/bulletin-access";
 import { Button, Notice, PageBanner } from "@/components/ui";
 import { cx } from "@/components/ui";
-import { LAYER_TEXT, layersOf } from "@/features/operational/shared";
-import { num, relativeDay, shortPeriod, signed } from "@/lib/format";
-import { mutate, request, upload } from "@/services/api";
+import { LAYER_TEXT, layersOf, ofRecord } from "@/features/operational/shared";
+import { day, num, relativeDay, shortPeriod, signed } from "@/lib/format";
+import { mutate, request, upload, uploadFile } from "@/services/api";
 import { useApi } from "@/services/hooks";
 import { useStaff } from "@/services/staff";
-import type { ForecastDetail, Variant } from "@/types/operational";
+import type { ForecastDetail, ForecastRun, Variant } from "@/types/operational";
 import { useActor } from "@/lib/actor";
 import type {
   ChatAnswer,
   ChatBulletin,
   ChatComparison,
   ChatContext,
+  ChatAttachment,
   ChatMessage,
   ChatSession,
   Source,
@@ -245,8 +248,17 @@ function AnswerBasis({ message }: { message: ChatMessage }) {
   );
 }
 
-function Message({ message }: { message: ChatMessage }) {
+function Message({
+  message,
+  onEdit,
+}: {
+  message: ChatMessage;
+  /** Ask again with changed words (your own questions only). */
+  onEdit?: (text: string) => void;
+}) {
   const user = message.role === "user";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(message.text);
   return (
     <article className={cx("chat-message", user ? "user" : "assistant")}>
       {!user && (
@@ -256,9 +268,68 @@ function Message({ message }: { message: ChatMessage }) {
       )}
       <div className="chat-bubble">
         <div className="chat-who">{user ? "You" : "Copilot"}</div>
-        <div className="chat-text">
-          {user ? message.text : <Markdown text={message.text} />}
-        </div>
+        {editing ? (
+          <form
+            className="chat-edit-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!draft.trim()) return;
+              setEditing(false);
+              onEdit?.(draft);
+            }}
+          >
+            <textarea
+              aria-label="Edited question"
+              value={draft}
+              maxLength={2000}
+              rows={3}
+              autoFocus
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            <div>
+              <Button size="sm" type="submit" disabled={!draft.trim()}>
+                Ask again
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setEditing(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+            <small>
+              The answers after this question are replaced by the new answer.
+            </small>
+          </form>
+        ) : (
+          <div className="chat-text">
+            {user ? message.text : <Markdown text={message.text} />}
+          </div>
+        )}
+        {!!message.attachments?.length && (
+          <ul className="chat-files" aria-label="Attached files">
+            {message.attachments.map((file) => (
+              <li key={file.id}>
+                <FileText size={14} aria-hidden /> {file.name}
+              </li>
+            ))}
+          </ul>
+        )}
+        {user && onEdit && !editing && (
+          <button
+            type="button"
+            className="chat-edit"
+            aria-label="Edit this question"
+            title="Edit this question"
+            onClick={() => {
+              setDraft(message.text);
+              setEditing(true);
+            }}
+          >
+            <Pencil size={13} aria-hidden /> Edit
+          </button>
+        )}
         {message.bulletin && <BulletinCard bulletin={message.bulletin} />}
         {message.comparison && (
           <ComparisonCard comparison={message.comparison} />
@@ -366,6 +437,12 @@ export default function Copilot() {
   const [modelName, setModelName] = useState("");
   const [weekStart, setWeekStart] = useState("");
   const [uploading, setUploading] = useState(false);
+  /** Files attached to the next question. */
+  const [files, setFiles] = useState<ChatAttachment[]>([]);
+  const [reading, setReading] = useState(false);
+  /** The forecast week chosen in the menu, for the next question. */
+  const [week, setWeek] = useState("");
+  const forecastList = useApi<ForecastRun[]>("/forecasts");
   const stickToBottom = useRef(true);
   const latest = useApi<ForecastDetail>("/forecasts/latest");
   // In staff mode the Copilot answers signed-in staff only: before signing in there is
@@ -604,15 +681,25 @@ export default function Copilot() {
     }
   }
 
-  async function send(text: string, extra: { external_id?: string } = {}) {
+  async function send(
+    text: string,
+    extra: { external_id?: string; edit_index?: number } = {},
+  ) {
     const message = text.trim();
-    if (!message || pending || restoring || restoreFailed) return;
+    if (!message || pending || restoring || restoreFailed || reading) return;
+    const before = messages;
+    const attachments = extra.edit_index === undefined ? files : [];
     setPending(true);
     setError("");
-    setInput("");
+    if (extra.edit_index === undefined) setInput("");
     stickToBottom.current = true;
     setAwayFromBottom(false);
-    setMessages((old) => [...old, { role: "user", text: message }]);
+    setMessages((old) => [
+      ...(extra.edit_index === undefined
+        ? old
+        : old.slice(0, extra.edit_index)),
+      { role: "user", text: message, attachments },
+    ]);
     try {
       const answer = await mutate<ChatAnswer>("/chat", {
         message,
@@ -623,8 +710,12 @@ export default function Copilot() {
         reset_context: resetContext,
         actor: actor || null,
         language,
+        forecast_id: week || null,
+        attachment_ids: attachments.map((file) => file.id),
         ...extra,
       });
+      if (attachments.length) setFiles([]);
+      setWeek("");
       setMessages((old) => [...old, { ...answer, role: "assistant" }]);
       setSession(answer.session_id);
       setContext(answer.context ?? null);
@@ -650,12 +741,41 @@ export default function Copilot() {
       // Asking in an archived conversation brings it back to the list.
       setArchived((old) => old.filter((s) => s.id !== answer.session_id));
     } catch (e) {
-      setMessages((old) => old.slice(0, -1));
-      setInput((draft) => draft || message);
+      if (extra.edit_index === undefined) {
+        setMessages((old) => old.slice(0, -1));
+        setInput((draft) => draft || message);
+      } else setMessages(before);
       setError((e as Error).message);
     } finally {
       setPending(false);
       composer.current?.focus();
+    }
+  }
+
+  /** A file of any format for the next question; a NetCDF forecast goes to the forecast
+   * comparison instead. */
+  async function attachFile(file: File) {
+    if (/\.(nc|nc4|netcdf)$/i.test(file.name)) {
+      setAttached(file);
+      try {
+        setModelName((name) => name || localStorage.getItem(MODEL_NAME) || "");
+      } catch {
+        // private window: the name is typed each time
+      }
+      return;
+    }
+    setReading(true);
+    setError("");
+    try {
+      const record = await uploadFile<ChatAttachment>(
+        `/chat/attachments?name=${encodeURIComponent(file.name)}`,
+        file,
+      );
+      setFiles((old) => [...old, record].slice(-5));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setReading(false);
     }
   }
 
@@ -674,6 +794,18 @@ export default function Copilot() {
         : null;
 
   const shown = showArchived ? archived : sessions.slice(0, 50);
+  // The weeks to choose from: each ECMWF run's forecast, and the conversation's own if it
+  // is about an earlier version.
+  const listed = Array.isArray(forecastList.data) ? forecastList.data : [];
+  const weeks = ofRecord(listed).filter((r) => !r.synthetic);
+  const own = listed.find((r) => r.forecast_id === pinned?.forecast_id);
+  if (own && !weeks.includes(own)) weeks.push(own);
+  const shownWeek =
+    week ||
+    pinned?.forecast_id ||
+    forecast?.forecast_id ||
+    weeks[0]?.forecast_id ||
+    "";
 
   const startNew = () => {
     newConversation();
@@ -844,21 +976,44 @@ export default function Copilot() {
               >
                 <PanelLeftOpen size={19} />
               </button>
-              <div className="context-forecast">
-                <span>Forecast</span>
-                <strong>
-                  {span
-                    ? shortPeriod(
-                        span[0],
-                        new Date(
-                          new Date(span[1]).getTime() - 86_400_000,
-                        ).toISOString(),
-                      )
-                    : latest.loading
-                      ? "Loading…"
-                      : "None yet"}
-                </strong>
-              </div>
+              <label className="context-forecast context-select">
+                <span>Forecast week</span>
+                {weeks.length ? (
+                  <select
+                    aria-label="Forecast week"
+                    value={shownWeek}
+                    disabled={locked}
+                    onChange={(e) => setWeek(e.target.value)}
+                  >
+                    {weeks.map((run, i) => (
+                      <option key={run.forecast_id} value={run.forecast_id}>
+                        {shortPeriod(
+                          run.valid_start,
+                          new Date(
+                            new Date(run.valid_end).getTime() - 86_400_000,
+                          ).toISOString(),
+                        )}
+                        {i === 0
+                          ? " · newest"
+                          : ` · run ${day(run.initialization)}`}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <strong>
+                    {span
+                      ? shortPeriod(
+                          span[0],
+                          new Date(
+                            new Date(span[1]).getTime() - 86_400_000,
+                          ).toISOString(),
+                        )
+                      : latest.loading
+                        ? "Loading…"
+                        : "None yet"}
+                  </strong>
+                )}
+              </label>
               <label className="context-select context-area">
                 <span>Area</span>
                 <select
@@ -1000,7 +1155,15 @@ export default function Copilot() {
                 </div>
               ) : (
                 messages.map((message, index) => (
-                  <Message key={index} message={message} />
+                  <Message
+                    key={`${index}-${message.text}`}
+                    message={message}
+                    onEdit={
+                      message.role === "user" && !pending && !locked
+                        ? (text) => send(text, { edit_index: index })
+                        : undefined
+                    }
+                  />
                 ))
               )}
               {pending && (
@@ -1092,6 +1255,36 @@ export default function Copilot() {
                 </p>
               </div>
             )}
+            {files.length > 0 && (
+              <ul
+                className="chat-pending-files"
+                aria-label="Files for the next question"
+              >
+                {files.map((file) => (
+                  <li key={file.id}>
+                    <FileText size={14} aria-hidden />
+                    <span>{file.name}</span>
+                    <small>
+                      {file.kind === "image"
+                        ? "image"
+                        : file.kind === "text"
+                          ? (file.note ??
+                            `${Math.round((file.characters ?? 0) / 1000)}k characters read`)
+                          : "kept, not readable as text"}
+                    </small>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${file.name}`}
+                      onClick={() =>
+                        setFiles((old) => old.filter((f) => f.id !== file.id))
+                      }
+                    >
+                      <X size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             <form
               className="chat-compose"
               onSubmit={(e) => {
@@ -1102,37 +1295,33 @@ export default function Copilot() {
               <button
                 type="button"
                 className="chat-attach"
-                aria-label="Upload another model's forecast (NetCDF)"
-                title="Upload another model's forecast (NetCDF)"
+                aria-label="Attach a file"
+                title="Attach a file: documents, spreadsheets, PDFs, images or text; a NetCDF forecast is compared with ICPAC's"
                 disabled={
                   pending ||
                   uploading ||
+                  reading ||
                   restoring ||
                   restoreFailed ||
                   signInNeeded
                 }
                 onClick={() => fileInput.current?.click()}
               >
-                <Paperclip size={18} />
+                {reading ? (
+                  <LoaderCircle size={18} className="spin" />
+                ) : (
+                  <Paperclip size={18} />
+                )}
               </button>
               <input
                 ref={fileInput}
                 type="file"
-                accept=".nc,.nc4,.netcdf,application/x-netcdf"
                 hidden
                 data-testid="forecast-file"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   e.target.value = "";
-                  if (!file) return;
-                  setAttached(file);
-                  try {
-                    setModelName(
-                      (name) => name || localStorage.getItem(MODEL_NAME) || "",
-                    );
-                  } catch {
-                    // private window: the name is typed each time
-                  }
+                  if (file) void attachFile(file);
                 }}
               />
               <label className="sr-only" htmlFor="copilot-question">

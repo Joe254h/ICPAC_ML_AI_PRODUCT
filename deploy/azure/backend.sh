@@ -45,7 +45,7 @@
 #     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_SECURITY, MAIL_FROM  The mail
 #                 server, e.g. Gmail with an app password: smtp.gmail.com, 587, your address,
 #                 the 16-letter app password. SMTP_PASSWORD is stored as an app secret.
-#     BULLETIN_REVIEWERS, BULLETIN_PUBLISHERS, BULLETIN_DISTRIBUTION  Comma-separated
+#     BULLETIN_FORECASTERS, BULLETIN_REVIEWERS, BULLETIN_PUBLISHERS, BULLETIN_DISTRIBUTION  Comma-separated
 #                 addresses: who approves, who publishes (default the reviewers), and who
 #                 receives the published bulletin.
 #     PUBLIC_SITE_URL  The website the email links open (default the Vercel site).
@@ -282,6 +282,7 @@ for name in (
     "SMTP_USER",
     "SMTP_SECURITY",
     "MAIL_FROM",
+    "BULLETIN_FORECASTERS",
     "BULLETIN_REVIEWERS",
     "BULLETIN_PUBLISHERS",
     "BULLETIN_DISTRIBUTION",

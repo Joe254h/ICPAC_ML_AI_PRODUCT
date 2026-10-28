@@ -1,5 +1,7 @@
 """The bulletin review by email.
 
+A draft the weekly cycle prepares is announced to the forecasters (BULLETIN_FORECASTERS,
+default the reviewers) with the draft Word document and a link to check and edit it.
 Submitting a draft emails each reviewer a personal link; approving it (by email or on the
 website) emails the publishers a publish link; publishing it sends the approved Word
 bulletin to the distribution list; a rejection is reported to the reviewers. A link opens
@@ -96,6 +98,16 @@ def compose(
             "document is attached. The link is personal, works once and expires in 7 days.",
         ]
         return f"Ready to publish: {title}", paragraphs, ("Publish the bulletin", link or "")
+    if step == "drafted":
+        paragraphs = [
+            f"This week's forecast has been issued and the {title} is drafted from it.",
+            *([f"Headline: {lead}"] if lead else []),
+            "Check the wording and the maps. You can edit the draft on the website (each "
+            "change is a new version and the Word document follows it), ask the Copilot to "
+            "change or translate it, then submit it for review. The draft Word document is "
+            "attached; nothing is published without a reviewer's approval.",
+        ]
+        return f"Draft ready to check: {title}", paragraphs, ("Open the draft", link or "")
     if step == "published":
         paragraphs = [
             f"The {title} has been published by ICPAC.",
@@ -114,6 +126,7 @@ def notify(platform, bulletin: dict) -> dict[str, Any]:
     """Email the people the bulletin's new status concerns, and record what was sent."""
     status = bulletin["status"]
     step, recipients = {
+        "draft": ("drafted", mail.forecasters()),
         "under_review": ("review", mail.reviewers()),
         "approved": ("publish", mail.publishers()),
         "published": ("published", mail.distribution()),
@@ -127,6 +140,7 @@ def notify(platform, bulletin: dict) -> dict[str, Any]:
         result["skipped"] = f"Email is not set up ({mailer.problem()})."
     elif not recipients:
         result["skipped"] = {
+            "drafted": "No forecasters' or reviewers' addresses are set up.",
             "review": "No reviewers' addresses are set up.",
             "publish": "No publishers' addresses are set up.",
             "published": "No distribution list is set up.",
@@ -140,7 +154,7 @@ def notify(platform, bulletin: dict) -> dict[str, Any]:
             document = BulletinService(platform).released(bulletin)
             attachments = [mail.Attachment(name, document, *DOCX)]
         for address in recipients:
-            link = None
+            link = page if step == "drafted" else None
             if step in STEPS:
                 token = mail.make_link_token(platform.repo, bulletin["id"], step, address)
                 link = f"{mail.site_url()}/bulletins/action?token={token}"

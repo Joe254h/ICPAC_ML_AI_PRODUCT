@@ -256,8 +256,9 @@ def install(app: FastAPI, dependency) -> None:
 
     @app.get("/forecasts")
     def forecasts(platform=Depends(dependency)) -> list[dict]:
-        """Operational forecast runs, newest initialization first."""
-        return ForecastService(platform).runs()
+        """Operational forecast runs, newest initialization first, each run's forecast of
+        record marked."""
+        return ForecastService(platform).listing()
 
     @app.get("/forecasts/latest")
     def latest(platform=Depends(dependency)) -> dict:
@@ -392,6 +393,11 @@ def install(app: FastAPI, dependency) -> None:
         if name not in {"manifest.json", "verification.json"}:  # the only files that change
             headers.update(IMMUTABLE)
         return Response(content, media_type=media_type, headers=headers)
+
+    @app.get("/verification/weeks")
+    def verified_weeks(platform=Depends(dependency)) -> list[dict]:
+        """Every verified week's scores against CHIRPS and the further observations."""
+        return ForecastService(platform).verified_weeks()
 
     @app.get("/verification/seasonal")
     def seasonal_verification(

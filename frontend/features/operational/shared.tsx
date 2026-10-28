@@ -227,6 +227,12 @@ export function primaryOf(run: Pick<ForecastRun, "primary_layer">): Variant {
   return run.primary_layer ?? "hybrid";
 }
 
+/** Each ECMWF run's forecast of record, newest first (an older service marks none: then
+ * every forecast is kept). */
+export function ofRecord(runs: ForecastRun[]): ForecastRun[] {
+  return runs.filter((run) => run.of_record !== false);
+}
+
 export function methodName(run: Pick<ForecastRun, "primary_layer">): string {
   return primaryOf(run) === "mbc"
     ? "ECMWF ensemble + MBC"

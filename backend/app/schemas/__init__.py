@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from typing import Literal
 
@@ -19,6 +20,19 @@ class ChatRequest(BaseModel):
     external_id: str | None = Field(default=None, pattern=r"^[0-9a-f-]{36}$")
     #: The answer's language (chatbot.agent.LANGUAGES).
     language: Literal["en", "sw", "am", "so", "ar", "fr", "ti", "om", "rw", "rn", "lg"] = "en"
+    #: Files attached to this question (chatbot/attachments.py).
+    attachment_ids: list[str] = Field(default_factory=list, max_length=5)
+    #: Editing an earlier question: the position of that question in the conversation;
+    #: it and everything after it are replaced by this question and its answer.
+    edit_index: int | None = Field(default=None, ge=0, le=200)
+
+    @field_validator("attachment_ids")
+    @classmethod
+    def attachment_identifiers(cls, value: list[str]) -> list[str]:
+        for item in value:
+            if not re.fullmatch(r"[0-9a-f-]{36}", item):
+                raise ValueError("Unknown attachment")
+        return value
 
     @field_validator("message")
     @classmethod
@@ -131,10 +145,12 @@ class OperationRequest(BaseModel):
         "past_weeks",
         "check_ecmwf",
         "observations",
+        "refresh_archive",
     ]
     initialization: date | None = None
     forecast_id: str | None = Field(default=None, pattern=FORECAST_ID)
-    #: past_weeks: how many past weeks to forecast and verify.
+    #: past_weeks: how many past weeks to forecast and verify; refresh_archive: how many of
+    #: the newest ECMWF runs to bring up to the model in use.
     weeks: int = Field(default=4, ge=1, le=12)
     actor: str = Field(min_length=2, max_length=80)
 
@@ -170,6 +186,32 @@ class EmailActionRequest(BaseModel):
 
 class ResendRequest(BaseModel):
     actor: str = Field(min_length=2, max_length=80)
+
+
+class BulletinSectionEdit(BaseModel):
+    section: Literal["headline", "decision_support", "rainfall", "focus"]
+    paragraphs: list[str] = Field(min_length=1, max_length=12)
+    why: str | None = Field(default=None, max_length=1200)
+
+
+class BulletinNote(BaseModel):
+    title: str = Field(min_length=3, max_length=80)
+    paragraphs: list[str] = Field(min_length=1, max_length=12)
+
+
+class BulletinEditRequest(BaseModel):
+    """A forecaster's edit of a weekly bulletin draft on the website."""
+
+    changes: list[BulletinSectionEdit] = Field(default_factory=list, max_length=4)
+    add_notes: list[BulletinNote] = Field(default_factory=list, max_length=6)
+    remove_notes: list[str] = Field(default_factory=list, max_length=6)
+    summary: str = Field(default="", max_length=300)
+    actor: str | None = Field(default=None, max_length=80)
+
+
+class BulletinTranslateRequest(BaseModel):
+    language: Literal["sw", "am", "so", "ar", "fr", "ti", "om", "rw", "rn", "lg"]
+    actor: str | None = Field(default=None, max_length=80)
 
 
 class BulletinRequest(BaseModel):

@@ -363,3 +363,46 @@ def test_the_weekly_cycle_leaves_the_slow_monitoring_to_a_follow_up_task(platfor
     assert calls[-2:] == ["monitoring", "compare"]
     finished = service.get(follow_up["id"])
     assert finished["status"] == "complete" and finished["result"]["compared"] == 6
+
+
+def test_the_archive_is_forecast_again_with_the_model_in_use(platform, monkeypatch):
+    """Runs the model in use has not forecast are forecast again (with their upper-air
+    inputs), newest first and only as many as asked; a run missing from the ECMWF archive
+    is reported and the others go on; the weeks are then verified."""
+    service = OperationService(platform)
+    held = [
+        {"initialization": "2026-10-28T00:00:00+00:00", "model_id": "refit"},
+        {"initialization": "2026-10-20T00:00:00+00:00", "model_id": "prerefit"},
+        {"initialization": "2026-10-19T00:00:00+00:00", "model_id": "mbc-only"},
+        {"initialization": "2026-10-06T00:00:00+00:00", "model_id": "prerefit"},
+    ]
+    forecast: list[tuple[str, bool]] = []
+
+    class Forecasts:
+        def runs(self):
+            return held
+
+        def run(self, body, upper_air=False, progress=None):
+            day = body.initialization.isoformat()
+            if day == "2026-10-19":
+                raise ECMWFDataUnavailable("not in the archive")
+            forecast.append((day, upper_air))
+            return {"forecast_id": f"w2-{day}-new"}
+
+    verified: list[bool] = []
+
+    def verify(self, op, body, compare=True):
+        verified.append(compare)
+        return {}
+
+    monkeypatch.setattr(OperationService, "_forecasts", lambda self: Forecasts())
+    monkeypatch.setattr(OperationService, "_model_id", lambda self: "refit")
+    monkeypatch.setattr(OperationService, "_verify_due", verify)
+    task = service.start(OperationRequest(action="refresh_archive", actor="Operator", weeks=3))
+    assert service.run_pending()
+    done = service.get(task["id"])
+    assert done["status"] == "complete", done
+    assert forecast == [("2026-10-20", True)]
+    assert done["result"]["issued"] == ["w2-2026-10-20-new"]
+    assert done["result"]["failed"][0].startswith("2026-10-19")
+    assert verified == [True]

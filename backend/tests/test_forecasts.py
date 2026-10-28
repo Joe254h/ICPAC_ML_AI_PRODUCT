@@ -623,3 +623,16 @@ def test_word_export_reports_missing_template_as_configuration_error(env, fast_m
     response = env.client.get(f"/forecasts/{fid}/bulletin/export")
     assert response.status_code == 503
     assert "template" in response.json()["detail"]
+
+
+def test_each_run_has_one_forecast_of_record(env):
+    """A run forecast twice is one week: the newest forecast is the one of record (shown,
+    drafted and discussed); the earlier one stays in the archive as an earlier version."""
+    first = run(env)
+    second = run(env)
+    other = run(env, "2026-09-28")
+    listing = {r["forecast_id"]: r for r in env.client.get("/forecasts").json()}
+    assert listing[second["forecast_id"]]["of_record"] is True
+    assert listing[first["forecast_id"]]["of_record"] is False
+    assert listing[other["forecast_id"]]["of_record"] is True
+    assert env.client.get("/forecasts/latest").json()["forecast_id"] == second["forecast_id"]

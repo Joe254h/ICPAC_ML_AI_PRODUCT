@@ -48,6 +48,11 @@ def reviewers() -> list[str]:
     return addresses("BULLETIN_REVIEWERS")
 
 
+def forecasters() -> list[str]:
+    """Who hears that a new draft is ready to check (default: the reviewers)."""
+    return addresses("BULLETIN_FORECASTERS") or reviewers()
+
+
 def publishers() -> list[str]:
     return addresses("BULLETIN_PUBLISHERS") or reviewers()
 

@@ -3829,3 +3829,148 @@ ol.lifecycle li:not(:last-child)::after {
     width: 30px;
   }
 }
+
+/* forecast archive: a week's earlier versions, quieter than the forecast of record */
+.earlier-toggle td {
+  padding-top: 0;
+  border-top: 0;
+}
+.earlier-toggle button {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-size: 13px;
+}
+.earlier-version td {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+/* Copilot: editing a question, and the files that go with a question */
+.chat-edit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  margin: 6px 0 -4px auto;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  font: 500 12.5px var(--font-body);
+  cursor: pointer;
+}
+.chat-edit:hover {
+  color: var(--ink);
+  background: var(--ground);
+}
+.chat-edit-form {
+  display: grid;
+  gap: 8px;
+}
+.chat-edit-form textarea {
+  width: 100%;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+}
+.chat-edit-form div {
+  display: flex;
+  gap: 8px;
+}
+.chat-edit-form small {
+  color: var(--muted);
+}
+.chat-files,
+.chat-pending-files {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chat-files li,
+.chat-pending-files li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 13px;
+  max-width: 100%;
+}
+.chat-pending-files {
+  margin: 0 16px 8px;
+}
+.chat-pending-files span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+.chat-pending-files small {
+  color: var(--muted);
+}
+.chat-pending-files button {
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+.context-forecast select {
+  max-width: 260px;
+}
+
+/* bulletin drafts: editing and translating a draft, weeks not drafted yet */
+.draft-editor {
+  display: grid;
+  gap: 18px;
+}
+.draft-editor textarea,
+.draft-editor input {
+  width: 100%;
+  font: inherit;
+  line-height: 1.55;
+}
+.draft-note {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  justify-items: start;
+}
+.draft-note .field {
+  width: 100%;
+}
+.draft-translate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 0 0 18px;
+}
+.draft-translate .field {
+  margin: 0;
+  min-width: 200px;
+}
+.draft-translate .notice {
+  flex: 1 1 100%;
+}
+.draft-list button.btn {
+  display: inline-flex;
+  justify-self: start;
+  padding: 6px 12px;
+  border-width: 1px;
+}

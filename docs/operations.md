@@ -194,6 +194,7 @@ in any mix. Every step is recorded with who took it and when.
 
 | Status reached | Who is emailed | What the email holds |
 |---|---|---|
+| Drafted by the weekly cycle | `BULLETIN_FORECASTERS` (default: the reviewers) | That this week's forecast is issued, the headline, the draft Word bulletin and a link to check, edit or translate it |
 | Under review (submitted) | `BULLETIN_REVIEWERS` | A personal link to approve or reject, and the Word bulletin |
 | Approved (web or email) | `BULLETIN_PUBLISHERS` (default: the reviewers) | A personal link to publish, and the approved Word bulletin |
 | Published (web or email) | `BULLETIN_DISTRIBUTION` | The published Word bulletin |
@@ -218,7 +219,7 @@ on later runs):
 |---|---|
 | `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_SECURITY` (`starttls`; `ssl` for 465) | The mail server |
 | `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM` (default the user) | Its login and the sender |
-| `BULLETIN_REVIEWERS`, `BULLETIN_PUBLISHERS`, `BULLETIN_DISTRIBUTION` | Comma-separated addresses |
+| `BULLETIN_FORECASTERS`, `BULLETIN_REVIEWERS`, `BULLETIN_PUBLISHERS`, `BULLETIN_DISTRIBUTION` | Comma-separated addresses |
 | `PUBLIC_SITE_URL` | The website the links open, e.g. `https://icpac-ml-ai-product-three.vercel.app` |
 | `EMAIL_ACTION_SECRET` | Signs the links (the deploy script generates one); without it a key is kept in the database |
 | `MAIL_OUTBOX_DIR` | Write the emails to this folder instead of sending them (testing) |

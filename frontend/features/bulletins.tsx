@@ -2,7 +2,15 @@
 /** Weekly bulletin drafts and their review: draft → review → approval → publication. */
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { FileDown, FilePlus2, Globe2, Mail, RefreshCw } from "lucide-react";
+import {
+  FileDown,
+  FilePlus2,
+  Globe2,
+  Mail,
+  PenLine,
+  RefreshCw,
+} from "lucide-react";
+import { DraftEditor, TranslateDraft } from "@/features/bulletin-editor";
 import ReviewDialog from "@/components/review-dialog";
 import type { Review } from "@/components/review-dialog";
 import {
@@ -23,6 +31,7 @@ import { useActor } from "@/lib/actor";
 import { dateTime, day, personName, weekPeriod } from "@/lib/format";
 import { mutate, request } from "@/services/api";
 import { useApi } from "@/services/hooks";
+import { ofRecord } from "@/features/operational/shared";
 import type { ForecastRun } from "@/types/operational";
 import type { Bulletin, EmailNotice, EmailStatus } from "@/types/workflows";
 
@@ -242,16 +251,21 @@ function Detail({
   draft,
   onChanged,
   onRevise,
+  onVersion,
   busy,
 }: {
   draft: Bulletin;
   onChanged: (draft: Bulletin) => void;
   onRevise: () => void;
+  /** A new version was made (edited or translated): show it. */
+  onVersion: (draft: Bulletin) => void;
   busy: boolean;
 }) {
   const [dialog, setDialog] = useState<(typeof ACTIONS)[string][number] | null>(
     null,
   );
+  const [editing, setEditing] = useState(false);
+  const editable = draft.status !== "published";
   const [label, tone] = STATUS[draft.status];
   const close = useCallback(() => setDialog(null), []);
   const email = useApi<EmailStatus>("/bulletins/email-status");
@@ -294,6 +308,15 @@ function Detail({
               {action.label}
             </Button>
           ))}
+          {editable && (
+            <Button
+              variant="outline"
+              onClick={() => setEditing(true)}
+              disabled={busy || editing}
+            >
+              <PenLine size={16} /> Edit the text
+            </Button>
+          )}
           {draft.status !== "published" && (
             <Button variant="outline" onClick={onRevise} disabled={busy}>
               <RefreshCw size={16} /> New revision
@@ -312,6 +335,16 @@ function Detail({
             <Globe2 size={16} /> Web page
           </LinkButton>
         </div>
+        {draft.edited?.language && (
+          <Notice title={`${draft.edited.language} version.`}>
+            Machine translation of the wording, every figure checked. A{" "}
+            {draft.edited.language} speaker checks it before a reviewer approves
+            it.
+          </Notice>
+        )}
+        {editable && !editing && (
+          <TranslateDraft draft={draft} onDone={onVersion} />
+        )}
         {draft.consistency.status !== "PASS" && (
           <Notice tone="red" title="Consistency check failed.">
             The text no longer matches the sections frozen with this draft; make
@@ -376,16 +409,27 @@ function Detail({
           </div>
         )}
       </Card>
-      <Card
-        title="Preview"
-        subtitle="The bulletin's web page, as exported. The Word document carries the same words and maps."
-      >
-        <iframe
-          className="preview-frame"
-          title={`Preview of ${draft.title}`}
-          src={`/api/bulletins/${draft.id}/export?inline=true`}
+      {editing ? (
+        <DraftEditor
+          draft={draft}
+          onCancel={() => setEditing(false)}
+          onSaved={(version) => {
+            setEditing(false);
+            onVersion(version);
+          }}
         />
-      </Card>
+      ) : (
+        <Card
+          title="Preview"
+          subtitle="The bulletin's web page, as exported. The Word document carries the same words and maps."
+        >
+          <iframe
+            className="preview-frame"
+            title={`Preview of ${draft.title}`}
+            src={`/api/bulletins/${draft.id}/export?inline=true`}
+          />
+        </Card>
+      )}
       {dialog && (
         <ReviewDialog
           title={`${dialog.label}: ${draft.title}`}
@@ -410,10 +454,19 @@ export default function Bulletins({ id }: PageProps) {
   const [error, setError] = useState<string | null>(null);
   const [opened, setOpened] = useState<string | null>(null);
   useEffect(() => setSelected(id), [id]);
-  const runs = (forecasts.data ?? []).filter((r) => !r.synthetic);
+  const runs = ofRecord(forecasts.data ?? []).filter((r) => !r.synthetic);
   const newest = runs[0];
   const target = chosen || newest?.forecast_id || "";
   const groups = byForecast(drafts.data ?? [], runs);
+  // The bulletin archive: every forecast week, drafted or not, newest first.
+  const allWeeks = [
+    ...runs.map((run) => ({
+      forecastId: run.forecast_id,
+      run: run as ForecastRun | undefined,
+      items: groups.find((g) => g.forecastId === run.forecast_id)?.items ?? [],
+    })),
+    ...groups.filter((g) => !runs.some((r) => r.forecast_id === g.forecastId)),
+  ];
   const active =
     drafts.data?.find((d) => d.id === selected) ?? groups[0]?.items[0];
   const newestDrafted =
@@ -535,7 +588,7 @@ export default function Bulletins({ id }: PageProps) {
             className="drafts-layout"
           >
             <aside className="draft-list" aria-label="Drafts">
-              {groups.map((group) => (
+              {allWeeks.map((group) => (
                 <section key={group.forecastId} className="draft-group">
                   <h3>
                     {group.run
@@ -551,6 +604,16 @@ export default function Bulletins({ id }: PageProps) {
                         : "Forecast no longer listed"}
                     </small>
                   </h3>
+                  {!group.items.length && group.run && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => create(undefined, group.forecastId)}
+                    >
+                      <FilePlus2 size={15} /> Draft this week
+                    </Button>
+                  )}
                   {group.items.map((draft) => (
                     <button
                       key={draft.id}
@@ -584,6 +647,11 @@ export default function Bulletins({ id }: PageProps) {
                 busy={busy}
                 onRevise={() => create(active)}
                 onChanged={() => drafts.reload()}
+                onVersion={(version) => {
+                  drafts.reload();
+                  router.replace(`/bulletins?id=${version.id}`);
+                  setSelected(version.id);
+                }}
               />
             </div>
           </div>

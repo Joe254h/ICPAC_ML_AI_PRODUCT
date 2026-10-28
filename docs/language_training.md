@@ -25,6 +25,19 @@ English stays the reference for every bulletin. Afar and Tigre have professional
 sentences (CC-BY-4.0) but no usable model yet; Dinka and Nuer data is almost all religious
 text. Those four start from forecaster-translated templates.
 
+## Which languages to fine-tune, in order
+
+| Phase | Languages | Why |
+|---|---|---|
+| 1 | Kiswahili, Amharic, Somali, Afaan Oromo | Together they reach most people in the region. Kiswahili is the common language of Kenya, Tanzania, Uganda, Rwanda and Burundi. Amharic is Ethiopia's working language, and Afaan Oromo its largest mother tongue. Somali covers Somalia, Djibouti, Ethiopia's Somali Region and north-eastern Kenya, where drought and flood warnings matter most. General AI models are weakest in Amharic and Oromo, so fine-tuning gains most there. |
+| 2 | Tigrinya, Kinyarwanda, Kirundi | National languages of Eritrea, Rwanda and Burundi; less training data, so the forecasters' templates carry more weight. |
+| 3 | Luganda | Uganda; the SALT corpus adds farming and health sentences. |
+| Templates only | Afar, Tigre, Dinka, Nuer | Too little usable data for a model yet; forecasters translate the templates. |
+| No fine-tune | Arabic, French | General AI models already write them well; a reviewed glossary of ICPAC terms is enough. |
+
+Start with phase 1 on one model (all four in one run): NLLB-600M takes 4-5 hours on the
+RTX 5000 Ada once its memory is free, or under an hour on one GH200.
+
 ## What works today, and what the training adds
 
 * **The Copilot answers in a chosen language now.** The Copilot page has a language menu
@@ -34,11 +47,12 @@ text. Those four start from forecaster-translated templates.
   shown. Quality is good in Kiswahili, Arabic and French, fair in Amharic and Somali, and
   uneven in Tigrinya, Afaan Oromo, Kirundi and Luganda, so answers in those need a speaker's
   eye.
-* **The bulletin in a chosen language** is drafted on request in the Copilot ("write this
-  week's bulletin in Kiswahili"): the paragraphs are translated with every figure checked,
-  and the draft goes through the normal review, where a speaker of the language approves
-  it. The country table and the forecast note stay in English until their fixed labels are
-  translated in `templates.<lang>.tsv`.
+* **The bulletin in a chosen language**: on the Drafts page, "Translate this draft" makes
+  a new draft version in the chosen language. A translation is
+  saved only if every paragraph keeps exactly the same figures as the English one, and the
+  draft goes through the normal review, where a speaker of the language checks it. The
+  section headings, the country table and the forecast note stay in English until their
+  fixed labels are translated in `templates.<lang>.tsv`.
 * **The fine-tuned model** (below) makes the translations consistent with ICPAC's own
   wording, runs on ICPAC's hardware without an outside AI service, and is the route for
   the languages the general AI models handle poorly.

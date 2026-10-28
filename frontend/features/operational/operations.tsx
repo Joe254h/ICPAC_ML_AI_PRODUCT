@@ -77,6 +77,12 @@ const STEPS: {
     icon: History,
   },
   {
+    action: "refresh_archive",
+    title: "Update the archive to the model in use",
+    text: "Forecast the newest twelve ECMWF runs again with the model in use where it has not forecast them yet, then verify them.",
+    icon: RefreshCw,
+  },
+  {
     action: "observations",
     title: "Update rainfall monitoring",
     text: "Download the newest dekad of CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG, and compare recent forecasts with them.",
@@ -125,7 +131,9 @@ function resultLink(operation: Operation) {
 export default function Operations() {
   const history = useApi<Operation[]>("/operations");
   const forecasts = useApi<ForecastRun[]>("/forecasts");
-  const newest = forecasts.data?.find((r) => !r.synthetic);
+  const newest = forecasts.data?.find(
+    (r) => !r.synthetic && r.of_record !== false,
+  );
   const { refresh } = useApp();
   const [actor, setActor] = useActor();
   const [date, setDate] = useState("");
@@ -147,7 +155,15 @@ export default function Operations() {
 
   const name = actor.trim();
   const launch = (action: OperationAction) =>
-    start(action, name || "Forecaster", date ? { initialization: date } : {});
+    start(
+      action,
+      name || "Forecaster",
+      action === "refresh_archive"
+        ? { weeks: 12 }
+        : date
+          ? { initialization: date }
+          : {},
+    );
 
   return (
     <div className="page">

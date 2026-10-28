@@ -91,6 +91,15 @@ export function upload<T>(path: string, file: File) {
   });
 }
 
+/** A file of any format, sent as it is. */
+export function uploadFile<T>(path: string, file: File) {
+  return request<T>(path, {
+    method: "POST",
+    body: file,
+    headers: { "Content-Type": "application/octet-stream" },
+  });
+}
+
 export function mutate<T>(path: string, body: unknown) {
   return request<T>(path, {
     method: "POST",

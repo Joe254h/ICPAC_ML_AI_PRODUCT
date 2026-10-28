@@ -64,11 +64,12 @@ ACTIONS = {
     "verify_due": "Verify finished forecasts against CHIRPS",
     "verify_forecast": "Verify one forecast against CHIRPS",
     "update_chirps": "Update the rainfall monitoring (CHIRPS and the further estimates)",
-    "cycle": "Weekly cycle: download ECMWF, run the forecast, verify against CHIRPS",
+    "cycle": "Weekly cycle: download ECMWF, run the forecast, verify against CHIRPS, draft the bulletin",
     "end_to_end": "Connected forecast workflow: acquire, forecast, verify, map and prepare bulletin",
     "past_weeks": "Forecast and verify past weeks (ECMWF archive and CHIRPS)",
     "check_ecmwf": "Check which ECMWF ensemble run is published",
     "observations": "Update the rainfall monitoring and compare forecasts with ARC 2.0, RFE 2.0 and GPM IMERG",
+    "refresh_archive": "Forecast earlier weeks again with the model in use, then verify them",
 }
 #: Weeks tried beyond those asked for, when CHIRPS does not cover the newest ones yet.
 SPARE_WEEKS = 3
@@ -457,7 +458,8 @@ class OperationService:
         return result
 
     def _end_to_end(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
-        """Prepare products for review; never promote, approve, email or publish."""
+        """Prepare products for review; never promote, approve or publish. The only email
+        is the one telling the forecasters that a new draft is ready to check."""
         from backend.app.services.bulletins import WEEKLY, BulletinService
 
         result = self._cycle(operation_id, body)
@@ -577,9 +579,10 @@ class OperationService:
 
         The weeks keep the weekday of the newest forecast and go back a week at a time from
         the newest week CHIRPS can cover; a forecast already issued within three days of a
-        week is that week's forecast and is reused.
-        These are real forecasts, made with the same model and the same inputs a forecaster
-        had then; they never become the latest forecast.
+        week by the model in use is that week's forecast and is reused.
+        These are real forecasts, made with the model in use (with its upper-air inputs, so
+        the MBC + AI/ML layer is included) and the inputs a forecaster had then; they never
+        become the latest forecast.
         """
         from climate_engine.inputs import chirps
         from climate_engine.operational.settings import settings, valid_window
@@ -587,11 +590,16 @@ class OperationService:
         forecasts = self._forecasts()
         cfg = settings()
         today = _today()
+        model_id = self._model_id()
         held: dict[str, dict[str, Any]] = {}
+        issued_days: set[str] = set()
         for issued in forecasts.runs():  # newest first: the newest forecast of each run
-            held.setdefault(issued["initialization"][:10], issued)
+            issued_days.add(issued["initialization"][:10])
+            if model_id is None or issued.get("model_id") == model_id:
+                held.setdefault(issued["initialization"][:10], issued)
         newest = max(
-            (date.fromisoformat(day) for day in held), default=body.initialization or today
+            (date.fromisoformat(day) for day in issued_days),
+            default=body.initialization or today,
         )
         weeks: list[date] = []
         initialization = newest
@@ -631,7 +639,9 @@ class OperationService:
                             initialization=initialization,
                             source="ecmwf_opendata",
                             actor=body.actor,
-                        )
+                        ),
+                        upper_air=True,
+                        progress=lambda text: self._log(operation_id, text),
                     )
                 except Exception as exc:  # e.g. a run missing from the archive
                     self._log(
@@ -665,6 +675,58 @@ class OperationService:
         )
         compared = self._compare_references(operation_id, verified, body.actor)
         return {"verified": verified, "waiting": waiting, "failed": failed, "compared": compared}
+
+    def _model_id(self) -> str | None:
+        try:
+            return ModelRegistry(self.platform).current()["model"].get("model_id")
+        except KeyError:
+            return None
+
+    def _refresh_archive(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
+        """Forecast the archive's ECMWF runs again with the model in use, newest first (up
+        to ``weeks`` runs), where that model has not forecast them yet; then verify the weeks
+        CHIRPS covers and compare them with ARC 2.0, RFE 2.0 and GPM IMERG. The earlier
+        forecasts stay in the archive as earlier versions of their week."""
+        forecasts = self._forecasts()
+        model_id = self._model_id()
+        if model_id is None:
+            raise ValueError("No model is in use, so there is nothing to forecast with")
+        runs = forecasts.runs()
+        done = {r["initialization"][:10] for r in runs if r.get("model_id") == model_id}
+        days = sorted({r["initialization"][:10] for r in runs}, reverse=True)[: body.weeks]
+        todo = [day for day in days if day not in done]
+        self._log(
+            operation_id,
+            f"{len(days) - len(todo)} of the {len(days)} newest runs already have a forecast "
+            f"from the model in use; forecasting {len(todo)}",
+        )
+        issued: list[str] = []
+        failed: list[str] = []
+        for position, day in enumerate(todo, start=1):
+            self._log(
+                operation_id,
+                f"Forecasting the ECMWF run of {_day(day)} with the model in use "
+                f"({position} of {len(todo)})",
+            )
+            try:
+                record = forecasts.run(
+                    ForecastRunRequest(
+                        initialization=date.fromisoformat(day),
+                        source="ecmwf_opendata",
+                        actor=body.actor,
+                    ),
+                    upper_air=True,
+                    progress=lambda text: self._log(operation_id, text),
+                )
+            except Exception as exc:  # a run missing from the archive, a failed check
+                self._log(
+                    operation_id, f"The run of {_day(day)} could not be forecast: {_plain(exc)}"
+                )
+                failed.append(f"{day}: {_plain(exc)}")
+                continue
+            issued.append(record["forecast_id"])
+        verification = self._verify_due(operation_id, body, compare=True)
+        return {"issued": issued, "failed": failed, "verification": verification}
 
     def _compare_references(
         self, operation_id: str, forecast_ids: Sequence[str], actor: str
@@ -708,6 +770,7 @@ class OperationService:
                 )
             )
         result["verification"] = self._verify_due(operation_id, body, compare=False)
+        result.update(self._prepare_draft(operation_id, body, result["forecast_id"]))
         # The monitoring and the further comparisons download many files from slower
         # servers; they run as their own task, so the forecast and its bulletin draft are
         # not held up by them.
@@ -726,6 +789,38 @@ class OperationService:
                 "GPM IMERG follow as a separate task",
             )
         return result
+
+    def _prepare_draft(
+        self, operation_id: str, body: OperationRequest, forecast_id: str
+    ) -> dict[str, Any]:
+        """The forecast's weekly bulletin draft (its open draft if one exists), and an email
+        telling the forecasters a new draft is ready to check. Never approved or published
+        here; a draft that cannot be made does not undo the forecast."""
+        from backend.app.services import bulletin_mail
+        from backend.app.services.bulletins import BulletinService
+
+        self._log(operation_id, "Drafting the weekly bulletin for the forecasters to check")
+        try:
+            draft = BulletinService(self.platform).generate(
+                forecast_id=forecast_id, actor=body.actor
+            )
+        except Exception as exc:  # the forecast stands; the draft can be made on its page
+            self._log(operation_id, f"The bulletin draft could not be prepared: {_plain(exc)}")
+            return {}
+        if draft.get("reused"):
+            self._log(operation_id, "The forecast's open bulletin draft is kept")
+        else:
+            try:
+                sent = bulletin_mail.notify(self.platform, draft)
+            except Exception as exc:
+                sent = {"sent": [], "skipped": f"the email could not be sent ({_plain(exc)})"}
+            self._log(
+                operation_id,
+                f"Emailed {', '.join(sent['sent'])} that the draft is ready to check"
+                if sent.get("sent")
+                else f"The draft is ready; no email was sent: {sent.get('skipped') or 'no address'}",
+            )
+        return {"bulletin_id": draft["id"], "bulletin_status": draft["status"]}
 
     def _observations(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
         """The rainfall monitoring, then the further comparisons of verified forecasts.

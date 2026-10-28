@@ -145,12 +145,12 @@ class BulletinService:
         parent = self.repo.get("bulletin", parent_id) if parent_id else None
         forecast_id = forecast_id or (parent or {}).get("forecast_id")
         if forecast_id is None:
-            runs = ForecastService(self.platform).runs()
-            if not runs:
+            try:
+                forecast_id = ForecastService(self.platform).latest_id()
+            except KeyError:
                 raise KeyError(
                     "no operational forecast yet: run a forecast before drafting a bulletin"
-                )
-            forecast_id = runs[0]["forecast_id"]
+                ) from None
         if parent is None:
             # A forecast has one open draft: asking again opens it instead of adding a
             # duplicate (a revision, or a draft after a rejection, is still a new one).
@@ -310,12 +310,22 @@ class BulletinService:
         remove_notes: list[str],
         actor: str,
         edited: dict[str, Any],
+        base_id: str | None = None,
     ) -> dict:
         """A new draft version of a forecast's bulletin with the editable sections reworded
-        and the forecaster's notes added, changed or removed. The newest draft is revised
-        (made first from the forecast if there is none); approving and publishing the new
-        version stay with the reviewers."""
-        base = self.latest(forecast_id) or self.generate_weekly(forecast_id, actor=actor)
+        and the forecaster's notes added, changed or removed. ``base_id`` names the draft to
+        revise; otherwise the newest draft is revised (made first from the forecast if
+        there is none). Approving and publishing the new version stay with the reviewers."""
+        if base_id:
+            base = self.repo.get("bulletin", base_id)
+            if base.get("kind") != WEEKLY or base.get("forecast_id") != forecast_id:
+                raise RevisionRefused("Only a weekly bulletin draft of this forecast is revised")
+            if base["status"] == "published":
+                raise RevisionRefused(
+                    "A published bulletin is not changed: make a new draft from its forecast"
+                )
+        else:
+            base = self.latest(forecast_id) or self.generate_weekly(forecast_id, actor=actor)
         sections = json.loads(json.dumps(base["facts"]["sections"]))
         by_key = {s["key"]: s for s in sections}
         changed: list[str] = []
@@ -395,6 +405,73 @@ class BulletinService:
             {"parent": base["id"], "changed": record["edited"]["changed"]},
         )
         return record
+
+    def edit(self, identifier: str, body: dict[str, Any], actor: str) -> dict:
+        """A forecaster's own edit of a draft on the website: a new version with the
+        reworded sections and notes; the Word document is made again from it."""
+        base = self.repo.get("bulletin", identifier)
+        return self.revise(
+            base["forecast_id"],
+            body.get("changes") or [],
+            body.get("add_notes") or [],
+            body.get("remove_notes") or [],
+            actor,
+            {
+                "by": actor,
+                "with": "the bulletin editor",
+                "summary": " ".join(str(body.get("summary") or "Edited on the website").split())[
+                    :300
+                ],
+            },
+            base_id=identifier,
+        )
+
+    def translate(self, identifier: str, language: str, actor: str, model: Any = None) -> dict:
+        """A new version of a draft with its editable sections in another language, every
+        figure checked; a speaker of the language checks it before a reviewer approves it."""
+        from chatbot.agent import LANGUAGES
+        from chatbot.translate import TranslationRefused, editable
+        from chatbot.translate import translate as translated_sections
+
+        if language not in LANGUAGES or language == "en":
+            raise RevisionRefused("Choose a language other than English")
+        name = LANGUAGES[language]
+        base = self.repo.get("bulletin", identifier)
+        sections = base["facts"]["sections"]
+        try:
+            by_key = {t["key"]: t for t in translated_sections(sections, name, model)}
+        except TranslationRefused as exc:
+            raise RevisionRefused(str(exc)) from exc
+        changes, notes = [], []
+        for section in editable(sections):
+            done = by_key[section["key"]]
+            if section.get("note"):
+                notes.append(
+                    {
+                        "title": done.get("title") or section["title"],
+                        "paragraphs": done["paragraphs"],
+                    }
+                )
+                continue
+            change = {"section": section["key"], "paragraphs": done["paragraphs"]}
+            if section.get("why") and done.get("why"):
+                change["why"] = done["why"]
+            changes.append(change)
+        return self.revise(
+            base["forecast_id"],
+            changes,
+            notes,
+            [s["title"] for s in sections if s.get("note")],  # replaced by their translations
+            actor,
+            {
+                "by": actor,
+                "with": "AI translation",
+                "language": name,
+                "summary": f"Translated into {name} by the AI service; a {name} speaker checks "
+                "it before approval",
+            },
+            base_id=identifier,
+        )
 
     def transition(self, identifier: str, action: str, review: ReviewRequest) -> dict:
         if not review.confirmed or not review.comment.strip():

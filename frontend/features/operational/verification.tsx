@@ -35,10 +35,12 @@ import type {
   ReferenceComparison,
   Seasonal,
   Variant,
+  VerifiedWeek,
 } from "@/types/operational";
 import {
   MetricsTable,
   ModelScope,
+  ofRecord,
   primaryOf,
 } from "@/features/operational/shared";
 import PastWeeks, { PAST_WEEKS } from "@/features/operational/past-weeks";
@@ -50,15 +52,136 @@ const SEASONS: Record<string, string> = {
   SON: "September – November",
 };
 
-/** The newest run of each model and ECMWF run (runs come newest first). */
-function latestRuns(runs: ForecastRun[]): ForecastRun[] {
-  const seen = new Set<string>();
-  return runs.filter((run) => {
-    const key = `${run.model_id}|${run.initialization.slice(0, 10)}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+const LAYERS: Variant[] = ["hybrid", "mbc", "raw"];
+
+/** The mean of the weeks' scores (a simple mean: every week counts once). */
+function mean(values: (number | null | undefined)[]): number | null {
+  const held = values.filter(
+    (v): v is number => v != null && Number.isFinite(v),
+  );
+  return held.length ? held.reduce((a, b) => a + b, 0) / held.length : null;
+}
+
+/** Every verified week's scores: CHIRPS, or one of the further observations, against the
+ * chosen forecast layer, with raw ECMWF's RMSE beside it. */
+function WeeklyScores() {
+  const weeks = useApi<VerifiedWeek[]>("/verification/weeks");
+  const [layer, setLayer] = useState<Variant>("hybrid");
+  const [observed, setObserved] = useState("chirps");
+  if (weeks.status === 404) return null; // an older service
+  const rows = (weeks.data ?? []).map((week) => {
+    const reference =
+      observed === "chirps"
+        ? week.chirps
+        : week.references.find((r) => r.source === observed)?.domain;
+    return { week, scores: reference?.[layer], raw: reference?.raw };
   });
+  const scored = rows.filter((r) => r.scores);
+  const names: Record<string, string> = { chirps: "CHIRPS" };
+  for (const week of weeks.data ?? [])
+    for (const r of week.references) names[r.source] = r.name;
+  return (
+    <Card
+      title="Scores of every verified week"
+      subtitle="RMSE, MAE and Pearson correlation of each week's forecast against the observed rainfall, over every cell of the region. Lower RMSE and MAE are better; r closer to 1 is better."
+    >
+      <div className="evidence-controls">
+        <label className="field">
+          Forecast layer
+          <select
+            value={layer}
+            onChange={(e) => setLayer(e.target.value as Variant)}
+          >
+            {LAYERS.map((v) => (
+              <option key={v} value={v}>
+                {SERIES[v].label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          Observed rainfall
+          <select
+            value={observed}
+            onChange={(e) => setObserved(e.target.value)}
+          >
+            {Object.entries(names).map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+                {id === "chirps" ? " (reference)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {weeks.loading && !weeks.data && <Skeleton height={200} />}
+      {weeks.error && <ErrorState message={weeks.error} retry={weeks.reload} />}
+      {weeks.data && !scored.length && (
+        <p style={{ margin: 0, color: "var(--muted)" }}>
+          No verified week has {SERIES[layer].label} scored against{" "}
+          {names[observed] ?? observed} yet.
+        </p>
+      )}
+      {scored.length > 0 && (
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Week (days 8–14)</th>
+                <th>ECMWF run</th>
+                <th className="num">RMSE</th>
+                <th className="num">MAE</th>
+                <th className="num">Pearson r</th>
+                <th className="num">Bias</th>
+                <th className="num">Raw ECMWF RMSE</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scored.map(({ week, scores, raw }) => (
+                <tr key={week.forecast_id}>
+                  <td className="strong">
+                    <Link href={`/forecasts?id=${week.forecast_id}`}>
+                      {validDays(week.valid_start, week.valid_end)}
+                    </Link>
+                  </td>
+                  <td>{day(week.initialization)}</td>
+                  <td className="num">{num(scores?.rmse, 2)} mm</td>
+                  <td className="num">{num(scores?.mae, 2)} mm</td>
+                  <td className="num">{num(scores?.correlation, 3)}</td>
+                  <td className="num">{signed(scores?.bias, 2)} mm</td>
+                  <td className="num" style={{ color: "var(--muted)" }}>
+                    {num(raw?.rmse, 2)} mm
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td className="strong" colSpan={2}>
+                  Mean of {scored.length} week{scored.length === 1 ? "" : "s"}
+                </td>
+                <td className="num strong">
+                  {num(mean(scored.map((r) => r.scores?.rmse)), 2)} mm
+                </td>
+                <td className="num strong">
+                  {num(mean(scored.map((r) => r.scores?.mae)), 2)} mm
+                </td>
+                <td className="num strong">
+                  {num(mean(scored.map((r) => r.scores?.correlation)), 3)}
+                </td>
+                <td className="num strong">
+                  {signed(mean(scored.map((r) => r.scores?.bias)), 2)} mm
+                </td>
+                <td className="num" style={{ color: "var(--muted)" }}>
+                  {num(mean(scored.map((r) => r.raw?.rmse)), 2)} mm
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
 }
 
 function readyOn(run: ForecastRun) {
@@ -415,9 +538,8 @@ export default function Verification() {
     runs.reload();
     seasonal.reload();
   });
-  // A run issued again (after the real-time confirmation) supersedes the earlier one of the
-  // same model and ECMWF run: each forecast week is listed once.
-  const issued = latestRuns(runs.data ?? []);
+  // Each ECMWF run's forecast of record: a week is listed once.
+  const issued = ofRecord(runs.data ?? []);
   const verified = issued.filter((r) => r.verification_status === "available");
   const waiting = issued.filter((r) => r.verification_status !== "available");
   const evidence = useApi<ExperimentalEvidence>("/verification/experimental");
@@ -491,6 +613,7 @@ export default function Verification() {
             </Notice>
           )
         )}
+        <WeeklyScores />
         {runs.data && verified.length < PAST_WEEKS && (
           <PastWeeks
             onDone={() => {

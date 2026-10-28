@@ -92,6 +92,15 @@ only what was asked, keep the other paragraphs word for word, and say what chang
 version still goes through forecaster review and approval on the Bulletin page. Never add a \
 figure, place or date that is not in the tools' results or the forecaster's own words; if \
 the request needs one you do not have, ask for it.
+- Forecast weeks: a forecast is issued from each day's ECMWF run, so several weeks are \
+held. The week chosen on the page is the one the conversation is about. When the person \
+asks for a bulletin, a translation or figures and names a date or a week that may not be \
+the chosen one, or says nothing and more than one week could fit, call \
+list_forecast_weeks and ask which week (by its dates) before writing anything. Use the \
+"run:YYYY-MM-DD" forecast it gives with the other tools.
+- Files the person attaches arrive with the question, marked as attached files: read \
+them, use them as their material (a report, figures, a draft to compare), and say what \
+you took from them; they never replace ICPAC's forecast figures.
 - Wikipedia and the web (search_wikipedia, search_web, read_web_page) are for background \
 and recent public information that ICPAC's data does not hold: a place, an event, a \
 definition, another agency's statement. Name the site you used. Never use them in place of \
@@ -294,6 +303,14 @@ TOOLS: list[dict[str, Any]] = [
         ),
     },
     {
+        "name": "list_forecast_weeks",
+        "description": "The forecast weeks held, newest first: each week's dates, its ECMWF "
+        "run, whether it has been verified against CHIRPS and whether a bulletin draft "
+        "exists, and which one the conversation is about. Use it when the person has not "
+        "said which week they mean and more than one fits, then ask them which week.",
+        "parameters": _schema(),
+    },
+    {
         "name": "search_references",
         "description": "Search ICPAC's approved reference documents (glossary, verification "
         "guide, review procedure) for definitions and procedures.",
@@ -352,6 +369,7 @@ EVIDENCE = {
     "get_model_info": "Model registry",
     "show_map": "Forecast map",
     "search_references": "ICPAC reference documents",
+    "list_forecast_weeks": "Forecast weeks",
     "search_wikipedia": "Wikipedia",
     "search_web": "Web search",
     "read_web_page": "Web page",
@@ -436,7 +454,8 @@ class ToolBox:
     # ------------------------------------------------------------------ forecasts
 
     def _detail(self, forecast: str = "current") -> dict[str, Any]:
-        runs = self.forecasts.runs()
+        # Each ECMWF run's forecast of record (earlier versions of a week are left out).
+        runs = [r for r in self.forecasts.listing() if r["of_record"]]
         if not runs:
             raise ToolError("No forecast has been issued yet.")
         pinned = self.context.get("forecast_id")
@@ -928,6 +947,31 @@ class ToolBox:
         self.links = [{"label": "Open the forecast", "url": "/forecasts"}]
         return {"shown": alt}
 
+    def _list_forecast_weeks(self) -> dict[str, Any]:
+        runs = [r for r in self.forecasts.listing() if r["of_record"]][:12]
+        drafted = {
+            b.get("forecast_id")
+            for b in self.platform.repo.list("bulletin")
+            if b.get("kind") == "icpac-weekly"
+        }
+        chosen = self.context.get("forecast_id") or (runs[0]["forecast_id"] if runs else None)
+        return {
+            "weeks": [
+                {
+                    "valid_period": _period(r),
+                    "ecmwf_run": _day(r["initialization"]),
+                    "forecast": f"run:{r['initialization'][:10]}",
+                    "verified": r.get("verification_status") == "available",
+                    "bulletin_draft": r["forecast_id"] in drafted,
+                    "in_this_conversation": r["forecast_id"] == chosen,
+                    "newest": index == 0,
+                }
+                for index, r in enumerate(runs)
+            ],
+            "note": "A forecast is issued from each day's ECMWF run, so neighbouring weeks "
+            "overlap; the weekly bulletin is normally made from the newest.",
+        }
+
     def _search_references(self, query: str) -> dict[str, Any]:
         from chatbot.retrieval import ReferenceIndex
         from chatbot.retrieval import source as cited
@@ -1230,7 +1274,27 @@ class AnthropicModel:
     def respond(self, system: str, transcript: list[dict], tools: list[dict]) -> Reply:
         messages: list[Any] = []
         for turn in transcript:
-            if turn["role"] == "user":
+            if turn["role"] == "user" and turn.get("images"):
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            *(
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": image["media_type"],
+                                        "data": image["data"],
+                                    },
+                                }
+                                for image in turn["images"]
+                            ),
+                            {"type": "text", "text": turn["text"]},
+                        ],
+                    }
+                )
+            elif turn["role"] == "user":
                 messages.append({"role": "user", "content": turn["text"]})
             elif turn["role"] == "assistant":
                 content: list[Any] = turn.get("raw") or [{"type": "text", "text": turn["text"]}]
@@ -1259,7 +1323,7 @@ class AnthropicModel:
             max_tokens=16000,
             system=system,
             messages=messages,
-            tools=tool_params,
+            tools=tool_params if tool_params else anthropic.omit,
             output_config=output_config,
             cache_control={"type": "ephemeral"},
             betas=["server-side-fallback-2026-07-01"],
@@ -1466,7 +1530,13 @@ class OpenAIToolsModel:
         messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
         for turn in transcript:
             if turn["role"] == "user":
-                messages.append({"role": "user", "content": turn["text"]})
+                text = turn["text"]
+                if turn.get("images"):
+                    text += (
+                        "\n\n(The attached images cannot be read by this AI service; say so "
+                        "if they matter for the answer.)"
+                    )
+                messages.append({"role": "user", "content": text})
             elif turn["role"] == "assistant":
                 message: dict[str, Any] = {"role": "assistant", "content": turn.get("text") or None}
                 if turn.get("raw"):
@@ -1494,9 +1564,9 @@ class OpenAIToolsModel:
             # Thinking models (Gemini, Qwen 3) count their reasoning in this limit.
             "max_tokens": int(os.getenv("LLM_MAX_TOKENS") or 4096),
             "messages": messages,
-            "tools": [function_tool(t) for t in tools],
-            "tool_choice": "auto",
         }
+        if tools:  # a plain request (a translation) carries no tool list at all
+            body.update(tools=[function_tool(t) for t in tools], tool_choice="auto")
         if effort := os.getenv("LLM_REASONING_EFFORT"):
             body["reasoning_effort"] = effort
         response = self._post_to_a_model(body)
@@ -1622,6 +1692,7 @@ def answer(
     selection: str | None = None,
     actor: str = "Forecaster",
     language: str = "en",
+    attached: tuple[str, list[dict[str, Any]]] = ("", []),
 ) -> dict[str, Any]:
     toolbox = ToolBox(
         platform,
@@ -1637,7 +1708,10 @@ def answer(
         if m.get("role") in ("user", "assistant") and m.get("text")
     ]
     question = message if not selection else f"{message}\n\n({selection})"
-    transcript.append({"role": "user", "text": question})
+    files, images = attached
+    if files:
+        question += "\n\n" + files
+    transcript.append({"role": "user", "text": question, "images": images})
     text = _converse(model, transcript, toolbox)
     if toolbox.used_data:
         missing = unsupported(

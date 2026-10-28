@@ -1,6 +1,7 @@
+import asyncio
 import re
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import Response
 
 from backend.app.api.access import (
@@ -15,7 +16,9 @@ from backend.app.api.access import (
 )
 from backend.app.db import now
 from backend.app.schemas import (
+    BulletinEditRequest,
     BulletinRequest,
+    BulletinTranslateRequest,
     ChatRequest,
     DescriptorRegisterRequest,
     EmailActionRequest,
@@ -26,7 +29,12 @@ from backend.app.schemas import (
 )
 from backend.app.services import bulletin_mail
 from backend.app.services.bulletin_export import WeeklyHTMLExporter
-from backend.app.services.bulletins import WEEKLY, BulletinService, decision_label
+from backend.app.services.bulletins import (
+    WEEKLY,
+    BulletinService,
+    RevisionRefused,
+    decision_label,
+)
 from backend.app.services.registry import ModelRegistry
 from chatbot.providers import warm_up
 from chatbot.retrieval import ReferenceIndex
@@ -99,6 +107,30 @@ def install(app: FastAPI, dependency):
                 raise HTTPException(422, "Start a new conversation after 50 questions.")
         platform.repo.chat_allowance(user.name)
         return Copilot(platform).answer(body, owner=user.name, actor=acting_name(user, body.actor))
+
+    @app.post("/chat/attachments", status_code=201)
+    async def attach(
+        request: Request,
+        name: str = Query(min_length=1, max_length=200),
+        platform=Depends(dependency),
+        user: Principal = Depends(require_chat),
+    ) -> dict:
+        """A file for the next question (the request body): any format, read as far as it
+        can be; only its owner can use it."""
+        from chatbot.attachments import MAX_BYTES, AttachmentError, Attachments
+
+        limit = f"Files can be up to {MAX_BYTES // 1024**2} MB"
+        if int(request.headers.get("content-length") or 0) > MAX_BYTES:
+            raise HTTPException(413, limit)
+        data = bytearray()
+        async for chunk in request.stream():
+            data += chunk
+            if len(data) > MAX_BYTES:
+                raise HTTPException(413, limit)
+        try:
+            return await asyncio.to_thread(Attachments(platform).save, name, bytes(data), user.name)
+        except AttachmentError as exc:
+            raise HTTPException(422, str(exc)) from None
 
     def first_question(session: dict) -> str:
         """Older conversations have no title: name them by their first question."""
@@ -243,6 +275,38 @@ def install(app: FastAPI, dependency):
         return Response(
             content, media_type="text/html", headers={"Content-Disposition": disposition}
         )
+
+    @app.post("/bulletins/{id}/edit")
+    def edit_bulletin(
+        id: str,
+        body: BulletinEditRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_operator),
+    ) -> dict:
+        """A new version of a draft with the forecaster's own wording."""
+        try:
+            return BulletinService(platform).edit(
+                id,
+                body.model_dump(exclude={"actor"}),
+                acting_name(user, body.actor),
+            )
+        except RevisionRefused as exc:
+            raise HTTPException(422, str(exc)) from None
+
+    @app.post("/bulletins/{id}/translate")
+    def translate_bulletin(
+        id: str,
+        body: BulletinTranslateRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_operator),
+    ) -> dict:
+        """A new version of a draft in another language, every figure checked."""
+        try:
+            return BulletinService(platform).translate(
+                id, body.language, acting_name(user, body.actor)
+            )
+        except RevisionRefused as exc:
+            raise HTTPException(422, str(exc)) from None
 
     @app.post("/bulletins/{id}/resend")
     def resend_bulletin_email(

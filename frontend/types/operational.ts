@@ -138,6 +138,9 @@ export type ForecastRun = {
   /** Rainfall layers the forecast holds (hybrid only when the AI/ML inputs exist). */
   layers?: string[];
   primary_layer?: Variant;
+  /** The ECMWF run's forecast of record (by the model in use); false for an earlier
+   * version of the same week. Older services do not send it. */
+  of_record?: boolean;
   products?: Partial<Record<Variant, ProductStatus>>;
 };
 
@@ -424,7 +427,8 @@ export type OperationAction =
   | "end_to_end"
   | "past_weeks"
   | "check_ecmwf"
-  | "observations";
+  | "observations"
+  | "refresh_archive";
 
 export type Operation = {
   id: string;
@@ -715,4 +719,23 @@ export type ExperimentalEvidence = {
   maps: { id: string; title: string }[];
   country_maps: string[];
   sudan: { cells_outside_vector: number; note: string };
+};
+
+/** A verified week's scores against CHIRPS and the further observations. */
+export type VerifiedWeek = {
+  forecast_id: string;
+  initialization: string;
+  valid_start: string;
+  valid_end: string;
+  model_id?: string;
+  method?: string;
+  primary_layer?: Variant;
+  season?: string;
+  chirps: Partial<Record<Variant, Metrics>>;
+  references: {
+    source: string;
+    name: string;
+    status: string;
+    domain: Partial<Record<Variant, Metrics>>;
+  }[];
 };

@@ -440,6 +440,12 @@ def test_finished_forecasts_are_verified_against_chirps(env, fast_maps, monkeypa
     assert "Downloading CHIRPS for 21 to 27 September 2026 and verifying its forecast" in heard
     verified = env.client.get(f"/forecasts/{record['forecast_id']}/verification").json()
     assert verified["status"] == "available"
+    # The verification table: every verified week with each layer's scores against CHIRPS.
+    weeks = env.client.get("/verification/weeks").json()
+    assert [w["forecast_id"] for w in weeks] == [record["forecast_id"]]
+    scores = weeks[0]["chirps"][weeks[0]["primary_layer"]]
+    assert {"mae", "rmse", "correlation", "bias"} <= set(scores)
+    assert scores["rmse"] >= scores["mae"] >= 0
     assert verified["observation"]["file"] == "chirps_week2_2026-09-21.nc"
     assert verified["domain"]["hybrid"]["observed_mean"] == pytest.approx(21.0)
     windows = env.client.get("/data/chirps").json()
@@ -450,7 +456,10 @@ def test_finished_forecasts_are_verified_against_chirps(env, fast_maps, monkeypa
         service.verify_with_chirps(future["forecast_id"], "Joe N")
 
 
-def test_the_weekly_cycle_runs_as_one_operation(env, fast_maps, mirror, monkeypatch):
+def test_the_weekly_cycle_runs_as_one_operation(env, fast_maps, mirror, monkeypatch, tmp_path):
+    outbox = tmp_path / "outbox"
+    monkeypatch.setenv("MAIL_OUTBOX_DIR", str(outbox))
+    monkeypatch.setenv("BULLETIN_FORECASTERS", "forecaster@icpac.net")
     monkeypatch.setattr(ecmwf_opendata, "latest_initialization", lambda: date(2026, 10, 5))
     monkeypatch.setattr(chirps, "download", chc({}))  # CHIRPS lists nothing yet
     seen_from(monkeypatch, date(2026, 10, 15))
@@ -463,6 +472,12 @@ def test_the_weekly_cycle_runs_as_one_operation(env, fast_maps, mirror, monkeypa
     assert done["result"]["verification"]["waiting"] == [forecast_id]
     texts = [m["text"] for m in done["messages"]]
     assert texts[0] == "Started" and texts[-1] == "Finished"
+    # The bulletin is drafted and the forecasters are told it is ready to check.
+    draft = client.get(f"/bulletins/{done['result']['bulletin_id']}").json()
+    assert draft["status"] == "draft" and draft["forecast_id"] == forecast_id
+    assert "Emailed forecaster@icpac.net that the draft is ready to check" in texts
+    sent = sorted(outbox.glob("*.eml"))
+    assert len(sent) == 1 and b"Draft ready to check" in sent[0].read_bytes()
     # The monitoring follows as its own task; a CHIRPS outage fails that task, and the
     # forecast stands.
     follow_up = wait(client, {"id": done["result"]["follow_up"]})
@@ -475,6 +490,9 @@ def test_the_weekly_cycle_runs_as_one_operation(env, fast_maps, mirror, monkeypa
     )
     assert again["result"]["forecast_id"] == forecast_id
     assert len(client.get("/forecasts").json()) == 1
+    # The open draft is kept, and nobody is emailed twice.
+    assert again["result"]["bulletin_id"] == draft["id"]
+    assert len(sorted(outbox.glob("*.eml"))) == 1
     # Failures are recorded on the operation, not raised at the caller.
     failed = wait(
         client,

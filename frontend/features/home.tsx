@@ -380,8 +380,11 @@ function Trust({ detail }: { detail: ForecastDetail }) {
     scores.find((s) => s.model === "MBC");
   const cases = evidence.data?.scope.cases;
   const refit = evidence.data?.scope.kind === "retrospective";
+  // Each forecast week counts once, as the archive and Verification list it.
   const verified =
-    runs.data?.filter((r) => r.verification_status === "available").length ?? 0;
+    runs.data?.filter(
+      (r) => r.of_record !== false && r.verification_status === "available",
+    ).length ?? 0;
   const end = new Date(new Date(detail.valid_end).getTime() + 2 * 86_400_000);
   return (
     <section className="section trust" aria-labelledby="trust-title">

@@ -263,3 +263,24 @@ test("the ECMWF page reports recorded readiness", async ({ page }) => {
     page.locator("tr").filter({ hasText: "Latest published run" }),
   ).toContainText("00 UTC", { timeout: 60_000 });
 });
+
+test("a draft is edited on the website as a new version", async ({ page }) => {
+  await page.goto("/bulletins");
+  await page
+    .getByRole("button", { name: "Draft this week" })
+    .first()
+    .click()
+    .catch(() => {});
+  await page.waitForURL(/\/bulletins\?id=/, { timeout: 60_000 });
+  await page.getByRole("button", { name: "Edit the text" }).click();
+  const headline = page.getByLabel("Headline", { exact: true });
+  await headline.fill("Light rain over most of the region this week.");
+  await page
+    .getByLabel("What you changed (for the review record)")
+    .fill("Shorter headline");
+  await page.getByRole("button", { name: "Save as a new version" }).click();
+  await expect(page.getByText(/Version \d/).first()).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.getByText("Shorter headline").first()).toBeVisible();
+});
