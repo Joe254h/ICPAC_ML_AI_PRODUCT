@@ -86,39 +86,51 @@ export function weekPeriod(start: string, end: string): string {
   return period(start, last);
 }
 
-/** "Today", "Yesterday" or a short date, for lists of recent items. */
+/** East Africa Time (UTC+3, no daylight saving), the time used across the service. */
+export const EAT_OFFSET_MS = 3 * 3_600_000;
+
+/** The calendar fields of an instant in EAT, read with the getUTC* methods. */
+function inEat(date: Date): Date {
+  return new Date(date.getTime() + EAT_OFFSET_MS);
+}
+
+/** "Today", "Yesterday" or a short date (in EAT), for lists of recent items. */
 export function relativeDay(iso: string | null | undefined): string {
   if (!iso) return "Earlier";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "Earlier";
+  const here = inEat(date);
+  const today = inEat(new Date());
   const days = Math.floor(
-    (Date.UTC(
-      new Date().getUTCFullYear(),
-      new Date().getUTCMonth(),
-      new Date().getUTCDate(),
-    ) -
-      Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())) /
+    (Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()) -
+      Date.UTC(here.getUTCFullYear(), here.getUTCMonth(), here.getUTCDate())) /
       86_400_000,
   );
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
-  return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]}`;
+  return `${here.getUTCDate()} ${MONTHS[here.getUTCMonth()]}`;
 }
 
+/** A recorded moment in East Africa Time, e.g. "20 Oct 2026, 09:09 EAT". */
 export function dateTime(iso: string | null | undefined): string {
   if (!iso) return UNAVAILABLE;
   const date = new Date(iso);
-  return Number.isNaN(date.getTime())
-    ? UNAVAILABLE
-    : date.toLocaleString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: "UTC",
-        timeZoneName: "short",
-      });
+  if (Number.isNaN(date.getTime())) return UNAVAILABLE;
+  return (
+    date.toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Africa/Nairobi",
+    }) + " EAT"
+  );
+}
+
+/** An hour of the day given in UTC, as EAT, e.g. 10 → "13:00 EAT". */
+export function eatHour(hourUtc: number): string {
+  return `${String((hourUtc + 3) % 24).padStart(2, "0")}:00 EAT`;
 }
 
 export function shortHash(value: unknown, length = 12): string {

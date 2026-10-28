@@ -25,13 +25,13 @@ CAPABILITIES = (
     (10, "Model comparison", "/forecasts", "comparison"),
     (11, "Forecast verification", "/verification", "verification"),
     (12, "Spatial verification", "/maps/skill", "spatial_verification"),
-    (13, "Extreme rainfall", "/automations", "extremes"),
+    (13, "Extreme rainfall", "/bulletin", "extremes"),
     (14, "Country summaries", "/countries", "countries"),
     (15, "Forecast maps", "/maps/rainfall", "maps"),
     (16, "Weekly Word bulletin", "/bulletin", "bulletin"),
     (17, "Daily forecast refresh", "/automations", "schedule"),
     (18, "Forecast archives", "/forecasts/archive", "archive"),
-    (19, "Workflow and HPC monitoring", "/automations", "monitoring"),
+    (19, "Workflow and HPC monitoring", "/data/runs", "monitoring"),
     (20, "Reviewed dissemination", "/bulletins", "dissemination"),
 )
 
@@ -107,23 +107,62 @@ class AutomationService:
             else {"available": []}
         )
         extra_names = set(extra.get("available", []))
+        from backend.app.api.access import access_mode
+        from backend.app.services.hpc import HPCService
+        from backend.app.services.monitoring import MonitoringService
+
+        ensemble = forecasts.ecmwf_inputs()
+        upper_air = forecasts.upper_air_inputs()
+        estimates = MonitoringService.estimates(self.platform)
+        held = [e["name"] for e in estimates if e["latest"]]
+        unreachable = [
+            e["name"]
+            for e in estimates
+            if (e["last_check"] or {}).get("status") == "failed" and e["source"] != "chirps"
+        ]
+        chirps_held = any(e["source"] == "chirps" and e["latest"] for e in estimates)
+        staff = access_mode() == "staff"
+        try:
+            hpc = HPCService(self.platform).status()
+        except Exception:
+            hpc = {"enabled": False}
+        supplementary = (
+            "The bulletin's supplementary sections (rainfall anomaly, temperature, heat "
+            "stress) are added when their reviewed reference data are configured."
+            if not set(NAMES).issubset(extra_names)
+            else "Its supplementary anomaly, temperature and heat-stress sections are included."
+        )
         evidence = {
             "acquisition": (
-                "partial",
-                "ENS acquisition and mirror fallback; other feeds need their approved input profiles.",
+                "available" if ensemble else "ready",
+                "The ECMWF ensemble (rainfall, and the upper-air fields the AI/ML layer reads) "
+                "is downloaded each cycle from ECMWF Open Data, with the AWS, Google and ECMWF "
+                f"servers as fallbacks; {len(ensemble)} runs held"
+                + (f", {len(upper_air)} with upper-air fields." if upper_air else ".")
+                + " Further feeds (AIFS, S2S, ERA5) are optional and switched on separately.",
             ),
             "observations": (
-                "partial",
-                "CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG; ERA5 requires an approved "
-                "CDS request and server credentials.",
+                "available" if chirps_held else "ready",
+                "Observed rainfall is updated from "
+                + (", ".join(held) if held else "CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG")
+                + "; CHIRPS is the reference for verification."
+                + (
+                    f" Not reachable at the last check: {', '.join(unreachable)}; it is tried "
+                    "again in the next pass and never holds up the forecast."
+                    if unreachable
+                    else ""
+                ),
             ),
             "quality": (
                 "available",
                 "Input contracts, finite values, units, coordinates and provenance are checked.",
             ),
             "preprocessing": (
-                "partial",
-                "Rainfall regridding remains an explicit operational choice pending the frozen training definition.",
+                "available" if "hybrid" in layers else "ready",
+                "Each forecast is prepared in the order of the model's training code: the "
+                "ensemble's Week-2 rainfall and upper-air fields on the 1.5° grid, "
+                "interpolated bilinearly to the 0.05° cells, then the model's own frozen MBC "
+                "factors and principal components, in the frozen feature order.",
             ),
             "week2": (
                 "available" if latest else "ready",
@@ -173,8 +212,15 @@ class AutomationService:
                 "Correlation maps require at least three valid paired cases per cell.",
             ),
             "extremes": (
-                "available" if "exceptional_rainfall" in extra_names else "partial",
-                "Heavy-rainfall screening is available; reviewed climatology/threshold artifacts are required for exceptional-event products.",
+                "available" if latest else "ready",
+                "Heavy rainfall (above 200 mm in the week) is mapped and named for each member "
+                "state in every bulletin, as in ICPAC's template."
+                + (
+                    " Exceptional rainfall against reviewed climatological thresholds is included."
+                    if "exceptional_rainfall" in extra_names
+                    else " Exceptional rainfall against climatological percentiles is added "
+                    "when a reviewed threshold set is configured."
+                ),
             ),
             "countries": (
                 "available" if latest else "waiting",
@@ -185,28 +231,46 @@ class AutomationService:
                 "Maps are frozen with the forecast and rebuilt only from its data.",
             ),
             "bulletin": (
-                "available"
-                if bulletins and set(NAMES).issubset(extra_names)
-                else "partial"
-                if bulletins
-                else "ready",
-                "The connected cycle prepares an immutable draft, never automatic approval or publication.",
+                "available" if bulletins else "ready",
+                "Each cycle drafts the weekly bulletin in ICPAC's Word template from the "
+                "forecast, for a forecaster's review; it is never approved or published "
+                "automatically. " + supplementary,
             ),
             "schedule": (
                 "enabled" if cfg["enabled"] else "disabled",
-                "Daily scheduling is configured on the server; missed days are not replayed.",
+                f"The connected workflow runs every day at {(cfg['hour_utc'] + 3) % 24:02d}:00 EAT "
+                "(missed days are not replayed)."
+                if cfg["enabled"]
+                else "Daily scheduling is switched off in the server configuration.",
             ),
             "archive": (
                 "available" if runs else "ready",
                 f"{len(runs)} archived forecasts with model and input provenance.",
             ),
             "monitoring": (
-                "partial",
-                "Durable jobs, bounded retries and notifications; actual HPC execution requires its configured adapter.",
+                "available"
+                if not hpc.get("enabled") or hpc.get("connection_verified")
+                else "partial",
+                "Every task is recorded with its steps, who started it, automatic retries for "
+                "late data, alerts and a stop button. "
+                + (
+                    "Jobs on the HPC are followed through the SLURM bridge."
+                    if hpc.get("connection_verified")
+                    else "The HPC bridge is switched on but has not reached SLURM yet; check "
+                    "its script approval and the host."
+                    if hpc.get("enabled")
+                    else "The weekly cycle runs on this service; running it on ICPAC's HPC "
+                    "instead is optional and needs the SLURM bridge on the HPC host."
+                ),
             ),
             "dissemination": (
-                "review_required",
-                "Publication and email remain explicit review transitions. Public evaluation does not verify reviewer identity.",
+                "available" if staff else "partial",
+                "A named reviewer approves every bulletin before it is published on the "
+                "website or emailed; staff sign-in records who did it."
+                if staff
+                else "Approval, web publication and email work, but in the public evaluation "
+                "app the reviewer's name is typed, not verified. Switching on staff sign-in "
+                "makes every approval accountable.",
             ),
         }
         alerts = []

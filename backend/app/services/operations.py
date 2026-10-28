@@ -18,7 +18,7 @@ import traceback
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from backend.app.db import now
 from backend.app.schemas import ForecastRunRequest, OperationRequest
@@ -26,6 +26,15 @@ from backend.app.services.forecasts import ForecastService, RunInProgress, Unava
 from backend.app.services.registry import ModelRegistry
 
 KIND = "operation"
+#: A request to stop a task, kept apart from the task's record so that the worker, which
+#: rewrites that record at every step, cannot overwrite it.
+STOP_KIND = "operation_stop"
+TERMINAL = {"complete", "failed", "interrupted", "cancelled"}
+
+
+class OperationCancelled(BaseException):
+    """A person stopped the task. Like asyncio's CancelledError it is not an Exception, so
+    the steps that let one source fail without stopping the others do not swallow it."""
 
 
 def _today() -> date:
@@ -59,6 +68,7 @@ ACTIONS = {
     "end_to_end": "Connected forecast workflow: acquire, forecast, verify, map and prepare bulletin",
     "past_weeks": "Forecast and verify past weeks (ECMWF archive and CHIRPS)",
     "check_ecmwf": "Check which ECMWF ensemble run is published",
+    "observations": "Update the rainfall monitoring and compare forecasts with ARC 2.0, RFE 2.0 and GPM IMERG",
 }
 #: Weeks tried beyond those asked for, when CHIRPS does not cover the newest ones yet.
 SPARE_WEEKS = 3
@@ -71,10 +81,52 @@ class OperationService:
 
     def list(self, limit: int = 50) -> list[dict[str, Any]]:
         records = sorted(self.repo.list(KIND), key=lambda r: r["created_at"], reverse=True)
-        return records[:limit]
+        stops = {r["operation_id"] for r in self.repo.list(STOP_KIND)}
+        return [self._with_stop(r, stops) for r in records[:limit]]
 
     def get(self, operation_id: str) -> dict[str, Any]:
         return self.repo.get(KIND, operation_id)
+
+    def read(self, operation_id: str) -> dict[str, Any]:
+        """The task as shown to people: a running task says when a stop was asked for."""
+        return self._with_stop(
+            self.get(operation_id), {operation_id} if self._stop_asked(operation_id) else set()
+        )
+
+    @staticmethod
+    def _with_stop(record: dict[str, Any], stops: set[str]) -> dict[str, Any]:
+        if record["id"] in stops and record["status"] not in TERMINAL:
+            return {**record, "stop_requested": True}
+        return record
+
+    def _stop_asked(self, operation_id: str) -> bool:
+        try:
+            self.repo.get(STOP_KIND, f"stop-{operation_id}")
+        except KeyError:
+            return False
+        return True
+
+    def stop(self, operation_id: str, actor: str) -> dict[str, Any]:
+        """Stop a queued task now, or a running one at its next step (a download under way
+        finishes first). Work already done is kept; nothing is half-written."""
+        record = self.get(operation_id)
+        waiting = record["status"] == "queued" or (
+            record["status"] == "failed" and record.get("retry_at")
+        )
+        if not waiting and record["status"] != "running":
+            raise ValueError("Only a queued or running task can be stopped")
+        self.repo.save(
+            STOP_KIND,
+            {"operation_id": operation_id, "requested_at": now(), "requested_by": actor},
+            f"stop-{operation_id}",
+        )
+        self.repo.audit("operation_stop_requested", actor, operation_id, {})
+        if waiting:
+            record["messages"].append({"time": now(), "text": f"Stopped by {actor} before it ran"})
+            record.update(status="cancelled", finished_at=now(), retry_at=None, retryable=False)
+            self.repo.save(KIND, record, operation_id)
+            return record
+        return self.read(operation_id)
 
     def recover(self) -> None:
         """Only called while holding the database lease; legacy tasks lack parameters."""
@@ -215,6 +267,8 @@ class OperationService:
     def _log(self, operation_id: str, message: str, **changes: Any) -> None:
         if getattr(self, "_lease_lost", threading.Event()).is_set():
             raise RunInProgress("The worker lost its lease; another worker will resume")
+        if changes.get("status") not in TERMINAL and self._stop_asked(operation_id):
+            raise OperationCancelled
         record = self.get(operation_id)
         record["messages"].append({"time": now(), "text": message})
         record.update(changes)
@@ -260,6 +314,18 @@ class OperationService:
             result = getattr(self, f"_{body.action}")(operation_id, body)
             self._log(operation_id, "Finished", status="complete", finished_at=now(), result=result)
             self.repo.audit(f"operation_{body.action}", body.actor, operation_id, {})
+        except OperationCancelled:
+            who = self.repo.get(STOP_KIND, f"stop-{operation_id}").get(
+                "requested_by", "a forecaster"
+            )
+            self._log(
+                operation_id,
+                f"Stopped by {who}. The steps already finished are kept",
+                status="cancelled",
+                finished_at=now(),
+                retry_at=None,
+                retryable=False,
+            )
         except Exception as exc:
             if getattr(self, "_lease_lost", threading.Event()).is_set():
                 return
@@ -376,10 +442,12 @@ class OperationService:
         )
         return {"forecast_id": run["forecast_id"], "method": run["method"]}
 
-    def _verify_due(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
+    def _verify_due(
+        self, operation_id: str, body: OperationRequest, compare: bool = True
+    ) -> dict[str, Any]:
         self._log(operation_id, "Checking forecasts whose Week-2 window has ended")
         result = self._forecasts().verify_due(
-            body.actor, progress=lambda text: self._log(operation_id, text)
+            body.actor, progress=lambda text: self._log(operation_id, text), compare=compare
         )
         self._log(
             operation_id,
@@ -639,10 +707,40 @@ class OperationService:
                     operation_id, body.model_copy(update={"initialization": initialization})
                 )
             )
-        result["verification"] = self._verify_due(operation_id, body)
+        result["verification"] = self._verify_due(operation_id, body, compare=False)
+        # The monitoring and the further comparisons download many files from slower
+        # servers; they run as their own task, so the forecast and its bulletin draft are
+        # not held up by them.
+        try:
+            follow_up = self.start(
+                OperationRequest(action="observations", actor=body.actor),
+                identifier=str(uuid5(NAMESPACE_URL, f"icpac/observations/{operation_id}")),
+            )
+        except RunInProgress:
+            self._log(operation_id, "The rainfall monitoring is left for the next cycle")
+        else:
+            result["follow_up"] = follow_up["id"]
+            self._log(
+                operation_id,
+                "The rainfall monitoring and the comparisons with ARC 2.0, RFE 2.0 and "
+                "GPM IMERG follow as a separate task",
+            )
+        return result
+
+    def _observations(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
+        """The rainfall monitoring, then the further comparisons of verified forecasts.
+        A CHIRPS monitoring failure fails the task after the comparisons have had their
+        turn."""
+        result: dict[str, Any] = {}
+        failed: Exception | None = None
         try:
             result["monitoring"] = self._update_chirps(operation_id, body)
-        except Exception as exc:  # the forecast stands; monitoring is retried next time
-            self._log(operation_id, f"The rainfall monitoring could not be updated: {exc}")
-            result["monitoring"] = {"error": str(exc)}
+        except Exception as exc:
+            failed = exc
+        result["compared"] = self._forecasts().compare_due(
+            body.actor, progress=lambda text: self._log(operation_id, text)
+        )
+        self._log(operation_id, f"{result['compared']} comparisons held")
+        if failed is not None:
+            raise failed
         return result

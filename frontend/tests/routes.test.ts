@@ -6,6 +6,7 @@ import {
   ROUTES,
   countrySlug,
   findRoute,
+  menuGroups,
   menuRoutes,
   resolveRoute,
 } from "../features/routes";
@@ -15,16 +16,31 @@ test("every header menu has pages", () => {
     expect(menuRoutes(menu).length, menu).toBeGreaterThan(0);
 });
 
-test("header menus stay short; the rest is reached from its page and search", () => {
+test("every page is listed in the header menus, grouped under its main pages", () => {
   for (const menu of MENUS)
     expect(menuRoutes(menu).length, menu).toBeLessThanOrEqual(6);
-  // Each country, layer and data source has a page, outside the menus.
-  for (const path of ["countries/kenya", "forecasts/raw", "data/tamsat"]) {
-    const route = findRoute(path);
-    expect(route?.sub, path).toBe(true);
-    expect(menuRoutes(route!.menu)).not.toContain(route);
-  }
-  expect(menuRoutes("Countries").map((r) => r.path)).toEqual(["countries"]);
+  const listed = new Set(
+    MENUS.flatMap((menu) =>
+      menuGroups(menu).flatMap((group) => group.routes.map((r) => r.path)),
+    ),
+  );
+  for (const route of ROUTES.filter(
+    (r) => r.nav !== false && r.page !== "home",
+  ))
+    expect(listed.has(route.path), route.path).toBe(true);
+  // Countries, layers and data sources sit under their own headings.
+  const countries = menuGroups("Countries");
+  expect(countries.map((g) => g.label)).toEqual([null, "Member states"]);
+  expect(countries[1].routes).toHaveLength(11);
+  expect(menuGroups("Forecasts").map((g) => g.label)).toEqual([
+    null,
+    "Forecast layers",
+  ]);
+  expect(
+    menuGroups("Operations")
+      .at(-1)
+      ?.routes.map((r) => r.path),
+  ).toContain("data/imerg");
 });
 
 test("the eleven member states each have a country page", () => {

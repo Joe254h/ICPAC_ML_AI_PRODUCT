@@ -24,6 +24,9 @@ ecmwf_opendata:
   # Crop of the global field kept on disk: wide enough for the 1.5 degree averaging
   # windows around the points that surround the model domain.
   area: {south: -16.5, north: 27.0, west: 16.5, east: 55.5}
+  # The upper-air fields are 35 files (5 variables at 7 forecast hours); this many are
+  # downloaded at a time. They are still checked one by one in a fixed order.
+  parallel_downloads: 4
   licence: "ECMWF Open Data, CC BY 4.0 (https://www.ecmwf.int/en/forecasts/datasets/open-data)"
 
 chirps:

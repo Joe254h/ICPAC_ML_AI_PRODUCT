@@ -13,6 +13,7 @@ from backend.app.schemas import (
     ForecastRunRequest,
     OperationRequest,
     PackageImportRequest,
+    StopRequest,
     VerificationRequest,
 )
 from backend.app.services.forecasts import ForecastService
@@ -234,7 +235,24 @@ def install(app: FastAPI, dependency) -> None:
 
     @app.get("/operations/{operation_id}", dependencies=[Depends(require_operator)])
     def operation(operation_id: str, platform=Depends(dependency)) -> dict:
-        return OperationService(platform).get(operation_id)
+        return OperationService(platform).read(operation_id)
+
+    @app.post("/operations/{operation_id}/stop")
+    def stop_operation(
+        operation_id: str,
+        body: StopRequest | None = None,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_operator),
+    ) -> dict:
+        """Stop a queued task now, or a running one at its next step."""
+        try:
+            return OperationService(platform).stop(
+                operation_id, acting_name(user, body.actor if body else None)
+            )
+        except KeyError:
+            raise HTTPException(404, "No such task") from None
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
 
     @app.get("/forecasts")
     def forecasts(platform=Depends(dependency)) -> list[dict]:

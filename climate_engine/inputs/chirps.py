@@ -22,13 +22,16 @@ import hashlib
 import io
 import os
 import re
+import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+import httpcore
 import httpx
 import numpy as np
 import xarray as xr
@@ -180,11 +183,59 @@ def on_model_grid(
 
 Downloader = Callable[[str], bytes | None]
 
+#: A server that does not accept a connection within this many seconds is down for now;
+#: a slow transfer still has the full read timeout.
+CONNECT_SECONDS = 15
+#: After a server could not be reached, its other files fail at once for this long, so one
+#: unreachable server costs one set of retries per pass, not one per file.
+UNREACHABLE_SECONDS = 30 * 60
+_unreachable: dict[str, tuple[float, str]] = {}
+
+
+def reset_unreachable() -> None:
+    _unreachable.clear()
+
+
+class _IPv4(httpcore.SyncBackend):
+    """Connect over IPv4 only. A container without IPv6 otherwise reports the IPv6
+    attempt's "[Errno 97] Address family not supported" in place of the real failure."""
+
+    def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        try:
+            addresses = {
+                info[4][0]
+                for info in socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+            }
+        except OSError as exc:
+            raise httpcore.ConnectError(f"{host} could not be resolved: {exc}") from exc
+        last: Exception | None = None
+        for address in sorted(addresses):
+            try:
+                return super().connect_tcp(address, port, timeout, local_address, socket_options)
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
+                last = exc
+        assert last is not None
+        raise last
+
+
+def client() -> httpx.Client:
+    """An HTTP client for the observation servers: IPv4, a short connect timeout and a long
+    read timeout. A configured proxy (HTTPS_PROXY) is still used."""
+    transport = httpx.HTTPTransport()
+    transport._pool = httpcore.ConnectionPool(
+        ssl_context=httpx.create_ssl_context(), network_backend=_IPv4()
+    )
+    return httpx.Client(
+        timeout=httpx.Timeout(120, connect=CONNECT_SECONDS),
+        follow_redirects=True,
+        transport=transport,
+    )
+
 
 def download(url: str) -> bytes | None:
     """The file at ``url``, or None when it is not published (HTTP 404)."""
-    with httpx.Client(timeout=120, follow_redirects=True) as client:
-        response = client.get(url)
+    with client() as session:
+        response = session.get(url)
     if response.status_code == 404:
         return None
     response.raise_for_status()
@@ -195,6 +246,19 @@ def _transient(exc: Exception) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
         return exc.response.status_code >= 500 or exc.response.status_code == 429
     return isinstance(exc, (httpx.TransportError, OSError))
+
+
+def _unreached(exc: Exception) -> bool:
+    """The server never answered (no connection), as opposed to answering with an error."""
+    return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout))
+
+
+def _reason(exc: Exception) -> str:
+    if isinstance(exc, httpx.ConnectTimeout):
+        return f"it did not accept a connection within {CONNECT_SECONDS} seconds"
+    if isinstance(exc, httpx.ConnectError):
+        return f"the connection failed ({exc})"
+    return str(exc)
 
 
 class Server:
@@ -216,14 +280,23 @@ class Server:
     def fetch(self, url: str) -> bytes | None:
         cfg = settings()
         attempts, wait = int(cfg["retries"]), float(cfg["retry_wait_seconds"])
+        host = urlsplit(url).netloc
+        held = _unreachable.get(host)
+        if held and held[0] > time.monotonic():
+            raise CHIRPSUnavailable(
+                f"The {self.name} server could not be reached a few minutes ago ({held[1]}); "
+                "it is tried again in the next pass"
+            )
         for attempt in range(1, attempts + 1):
             try:
                 return (self.get or download)(url)
             except Exception as exc:
                 if not _transient(exc) or attempt == attempts:
+                    if _unreached(exc):
+                        _unreachable[host] = (time.monotonic() + UNREACHABLE_SECONDS, _reason(exc))
                     raise CHIRPSUnavailable(
                         f"The {self.name} server could not be reached after {attempt} "
-                        f"attempt{'s' if attempt > 1 else ''}: {exc}"
+                        f"attempt{'s' if attempt > 1 else ''}: {_reason(exc)}"
                     ) from exc
                 self.sleep(wait)
                 wait *= 2

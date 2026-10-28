@@ -83,7 +83,8 @@ def system_health(platform) -> dict:
     components["Release"] = (
         "Healthy · production release gates enabled"
         if os.getenv("RELEASE_MODE", "evaluation") == "production"
-        else "Warning · evaluation release; candidate forecasts are not a production release"
+        else "Warning · evaluation release: forecasts are labelled for evaluation until the "
+        "service is switched to a production release with staff sign-in"
     )
     model = forecasts.current_record(platform)
     if model is None:
@@ -92,16 +93,26 @@ def system_health(platform) -> dict:
         healthy = operational.OperationalModel(model).health_check()
         production = model["status"] == "production"
         name = model.get("model_name") or "The registered model"
+        refit = model.get("validation_period") == "none"
         tested = {
             "passed": "independent test passed",
             "failed": "independent test failed",
-        }.get(str(model.get("test_status")), "independent test not yet recorded")
+        }.get(
+            str(model.get("test_status")),
+            # A final refit is fitted on every development year: its evidence is the test
+            # of the same configuration before the refit, and its own retrospective.
+            "evidence: the 2022–2024 independent test of the same model before the refit "
+            "and the refit's 2022–2024 retrospective"
+            if refit
+            else "independent test not yet recorded",
+        )
         components["Operational model"] = (
             f"Unavailable · {name}: its files changed since registration"
             if not healthy
             else f"Healthy · {name} (production model; {tested})"
             if production
-            else f"Warning · {name} (candidate in use, no production model yet; {tested})"
+            else f"Warning · {name} is in use as a candidate ({tested}). A reviewer "
+            "promotes it to production on the Models page in a production release"
         )
     issues = [i for i in platform.repo.list("registration_issue") if i.get("current")]
     if issues:

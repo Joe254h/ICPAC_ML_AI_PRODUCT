@@ -33,8 +33,10 @@ export type Route = {
   param?: string;
   /** Listed in the menus and search; false keeps an older URL working. */
   nav?: boolean;
-  /** Found by search and reached from its parent page, but not listed in the header menu. */
+  /** A page under a main page (a layer, a country, a data source): listed under its
+   * ``group`` heading in the header menu, after the menu's main pages. */
   sub?: boolean;
+  group?: string;
   /** Shown as "coming later" (planned data sources). */
   soon?: boolean;
 };
@@ -117,6 +119,7 @@ export const ROUTES: Route[] = [
     page: "layer",
     param: "raw",
     sub: true,
+    group: "Forecast layers",
   },
   {
     path: "forecasts/mbc",
@@ -125,6 +128,7 @@ export const ROUTES: Route[] = [
     page: "layer",
     param: "mbc",
     sub: true,
+    group: "Forecast layers",
   },
   {
     path: "forecasts/hybrid",
@@ -133,6 +137,7 @@ export const ROUTES: Route[] = [
     page: "layer",
     param: "hybrid",
     sub: true,
+    group: "Forecast layers",
   },
   // Countries: one page with all eleven; each opens from it.
   {
@@ -148,6 +153,7 @@ export const ROUTES: Route[] = [
     page: "country" as const,
     param: name,
     sub: true,
+    group: "Member states",
   })),
   // Bulletin
   {
@@ -196,6 +202,7 @@ export const ROUTES: Route[] = [
     page: "maps",
     param: "rmse",
     sub: true,
+    group: "Maps by measure",
   },
   {
     path: "maps/correlation",
@@ -204,6 +211,7 @@ export const ROUTES: Route[] = [
     page: "maps",
     param: "correlation",
     sub: true,
+    group: "Maps by measure",
   },
   {
     path: "maps/skill",
@@ -212,6 +220,7 @@ export const ROUTES: Route[] = [
     page: "maps",
     param: "skill",
     sub: true,
+    group: "Maps by measure",
   },
   {
     path: "monitoring",
@@ -258,6 +267,7 @@ export const ROUTES: Route[] = [
     page: "source",
     param: "ecmwf",
     sub: true,
+    group: "Data sources",
   },
   {
     path: "data/chirps",
@@ -266,6 +276,7 @@ export const ROUTES: Route[] = [
     page: "source",
     param: "chirps",
     sub: true,
+    group: "Data sources",
   },
   {
     path: "data/tamsat",
@@ -274,6 +285,7 @@ export const ROUTES: Route[] = [
     page: "source",
     param: "tamsat",
     sub: true,
+    group: "Data sources",
   },
   ...DAILY_SOURCES.map((source) => ({
     path: "data/" + source.id,
@@ -282,6 +294,7 @@ export const ROUTES: Route[] = [
     page: "source" as const,
     param: source.id,
     sub: true,
+    group: "Data sources",
   })),
   // Earlier URLs keep working without a place in the menus.
   ...(
@@ -318,7 +331,25 @@ export function href(route: Route) {
   return "/" + route.path;
 }
 
-/** The pages listed in a header menu. */
+/** The main pages of a header menu. */
 export function menuRoutes(menu: Menu): Route[] {
   return ROUTES.filter((r) => r.menu === menu && r.nav !== false && !r.sub);
+}
+
+/** Everything a header menu lists: its main pages, then each group of pages under them
+ * (the layers, the member states, the data sources), so no page has to be hunted for. */
+export function menuGroups(
+  menu: Menu,
+): { label: string | null; routes: Route[] }[] {
+  const groups: { label: string | null; routes: Route[] }[] = [
+    { label: null, routes: menuRoutes(menu) },
+  ];
+  for (const route of ROUTES) {
+    if (route.menu !== menu || !route.sub || route.nav === false) continue;
+    const label = route.group ?? "More";
+    const group = groups.find((g) => g.label === label);
+    if (group) group.routes.push(route);
+    else groups.push({ label, routes: [route] });
+  }
+  return groups;
 }

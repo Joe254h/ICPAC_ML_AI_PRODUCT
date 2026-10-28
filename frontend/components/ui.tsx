@@ -154,14 +154,17 @@ export function Card({
 export function Disclosure({
   title,
   subtitle,
+  open,
   children,
 }: {
   title: string;
   subtitle?: string;
+  /** Open on first render. */
+  open?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <details className="card disclosure">
+    <details className="card disclosure" open={open}>
       <summary>
         <span>
           <h2>{title}</h2>

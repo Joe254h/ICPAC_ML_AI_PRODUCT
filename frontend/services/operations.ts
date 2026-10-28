@@ -69,6 +69,28 @@ export function useOperation(onFinished?: (operation: Operation) => void) {
     [poll],
   );
 
+  /** Ask the followed task to stop: a queued one stops at once, a running one at its
+   * next step. */
+  const stop = useCallback(
+    async (actor: string) => {
+      if (!operation) return;
+      setError(null);
+      try {
+        const record = await mutate<Operation>(
+          `/operations/${operation.id}/stop`,
+          { actor },
+        );
+        if (timer.current) clearTimeout(timer.current);
+        setOperation(record);
+        if (operationActive(record)) poll(record.id);
+        else done.current?.(record);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [operation, poll],
+  );
+
   const running = operation !== null && operationActive(operation);
-  return { operation, error, running, start, follow };
+  return { operation, error, running, start, follow, stop };
 }

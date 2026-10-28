@@ -76,8 +76,13 @@ test("a header menu opens on click and its pages are links", async ({
   await tools.click();
   await page.keyboard.press("Escape");
   await expect(tools).toHaveAttribute("aria-expanded", "false");
-  // Countries is one page; each member state opens from it.
-  await nav.getByRole("link", { name: "Countries" }).click();
+  // Every page is in the menus: the member states under their own heading.
+  await nav.getByRole("button", { name: "Countries" }).click();
+  await expect(nav.getByText("Member states", { exact: true })).toBeVisible();
+  await nav.getByRole("link", { name: "South Sudan" }).click();
+  await expect(page).toHaveURL(/\/countries\/south-sudan$/);
+  await nav.getByRole("button", { name: "Countries" }).click();
+  await nav.getByRole("link", { name: "All member states" }).click();
   await expect(page).toHaveURL(/\/countries$/);
 });
 

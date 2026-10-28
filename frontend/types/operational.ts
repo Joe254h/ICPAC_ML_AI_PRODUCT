@@ -423,13 +423,22 @@ export type OperationAction =
   | "cycle"
   | "end_to_end"
   | "past_weeks"
-  | "check_ecmwf";
+  | "check_ecmwf"
+  | "observations";
 
 export type Operation = {
   id: string;
   action: OperationAction;
   title: string;
-  status: "queued" | "running" | "complete" | "failed" | "interrupted";
+  status:
+    | "queued"
+    | "running"
+    | "complete"
+    | "failed"
+    | "interrupted"
+    | "cancelled";
+  /** A person asked to stop the task; it stops at its next step. */
+  stop_requested?: boolean;
   initialization: string | null;
   forecast_id: string | null;
   created_at: string;

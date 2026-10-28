@@ -5,6 +5,7 @@ import { Fragment, useEffect, useState } from "react";
 import {
   BarChart3,
   CheckCircle2,
+  CircleStop,
   CloudDownload,
   History,
   Loader2,
@@ -15,6 +16,7 @@ import {
 import {
   Button,
   Card,
+  Disclosure,
   ErrorState,
   KeyValues,
   Notice,
@@ -25,11 +27,15 @@ import {
 import type { Tone } from "@/components/ui";
 import { useApp } from "@/components/shell";
 import { useActor } from "@/lib/actor";
-import { dateTime, personName } from "@/lib/format";
+import { dateTime, day, personName } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
 import { operationActive, operationLabel } from "@/services/operation-state";
-import type { Operation, OperationAction } from "@/types/operational";
+import type {
+  ForecastRun,
+  Operation,
+  OperationAction,
+} from "@/types/operational";
 
 const TONE: Record<Operation["status"], Tone> = {
   queued: "info",
@@ -37,6 +43,7 @@ const TONE: Record<Operation["status"], Tone> = {
   complete: "ok",
   failed: "bad",
   interrupted: "bad",
+  cancelled: "planned",
 };
 
 const STEPS: {
@@ -70,9 +77,9 @@ const STEPS: {
     icon: History,
   },
   {
-    action: "update_chirps",
+    action: "observations",
     title: "Update rainfall monitoring",
-    text: "Download the newest dekad of CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG, if new ones are out.",
+    text: "Download the newest dekad of CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG, and compare recent forecasts with them.",
     icon: BarChart3,
   },
 ];
@@ -117,14 +124,20 @@ function resultLink(operation: Operation) {
 
 export default function Operations() {
   const history = useApi<Operation[]>("/operations");
+  const forecasts = useApi<ForecastRun[]>("/forecasts");
+  const newest = forecasts.data?.find((r) => !r.synthetic);
   const { refresh } = useApp();
   const [actor, setActor] = useActor();
   const [date, setDate] = useState("");
+  const older = !!date && !!newest && date < newest.initialization.slice(0, 10);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const { operation, error, running, start, follow } = useOperation(() => {
-    history.reload();
-    refresh();
-  });
+  const { operation, error, running, start, follow, stop } = useOperation(
+    () => {
+      history.reload();
+      forecasts.reload();
+      refresh();
+    },
+  );
 
   // A task started elsewhere (another tab, the scheduler) is followed here too.
   useEffect(() => {
@@ -164,7 +177,11 @@ export default function Operations() {
               </li>
               <li>
                 Verify every earlier forecast whose week CHIRPS now covers, and
-                download the newest CHIRPS dekad for rainfall monitoring.
+                prepare the bulletin draft for review.
+              </li>
+              <li>
+                Then, as a separate task, update the rainfall monitoring and
+                compare recent forecasts with ARC 2.0, RFE 2.0 and GPM IMERG.
               </li>
             </ol>
             <div className="grid-2" style={{ gap: 14 }}>
@@ -187,6 +204,14 @@ export default function Operations() {
                 <span className="hint">Empty: the newest published run.</span>
               </label>
             </div>
+            {older && newest && (
+              <Notice tone="amber">
+                The newest forecast is from the run of{" "}
+                {day(newest.initialization)}. A forecast from this earlier run
+                goes to the archive; the website, the bulletin drafts and the
+                Copilot keep showing the newest one.
+              </Notice>
+            )}
             <div style={{ marginTop: 22 }}>
               <Button
                 variant="amber"
@@ -201,6 +226,17 @@ export default function Operations() {
                 )}
                 {running ? "Running…" : "Run the weekly cycle"}
               </Button>
+              {running && (
+                <Button
+                  variant="outline"
+                  disabled={!!operation?.stop_requested}
+                  onClick={() => stop(name || "Forecaster")}
+                  style={{ marginLeft: 10 }}
+                >
+                  <CircleStop size={18} />
+                  {operation?.stop_requested ? "Stopping…" : "Stop the run"}
+                </Button>
+              )}
             </div>
           </Card>
           <Card
@@ -236,6 +272,13 @@ export default function Operations() {
                   </span>
                 </p>
                 <Timeline operation={operation} />
+                {running && (
+                  <p className="hint" style={{ margin: "10px 0 0" }}>
+                    {operation.stop_requested
+                      ? "The task stops at its next step; a download under way finishes first."
+                      : "Stop the run at any time: the steps already finished are kept."}
+                  </p>
+                )}
                 {operation.error && (
                   <Notice tone={operation.retry_at ? "amber" : "red"}>
                     {operation.error}
@@ -272,14 +315,19 @@ export default function Operations() {
             </div>
           ))}
         </div>
-        <Card
+        <Disclosure
           title="Task history"
-          action={
+          subtitle={
+            history.data?.length
+              ? `${history.data.length} recorded tasks · latest ${dateTime(history.data[0].created_at)}`
+              : "Every task, who started it and its full log"
+          }
+        >
+          <div>
             <Button variant="outline" size="sm" onClick={history.reload}>
               <RefreshCw size={15} /> Refresh
             </Button>
-          }
-        >
+          </div>
           {history.loading && !history.data && <Skeleton height={180} />}
           {history.error && (
             <ErrorState message={history.error} retry={history.reload} />
@@ -355,13 +403,13 @@ export default function Operations() {
               </table>
             </div>
           )}
-        </Card>
+        </Disclosure>
         <Card title="Schedule">
           <KeyValues
             items={[
               [
                 "Weekly",
-                "Run the cycle once ECMWF has published the 00 UTC run of the issue day (about 09:00 UTC).",
+                "Run the cycle once ECMWF has published the 00 UTC run of the issue day (about 12:00 EAT).",
               ],
               [
                 "Daily",

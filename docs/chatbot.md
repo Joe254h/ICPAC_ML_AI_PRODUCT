@@ -164,3 +164,29 @@ The numerical check uses unit-bearing quantities returned by successful tools, e
 user-supplied figures, dates, identifiers and ranks, separates millimetres from percentages,
 and checks signed numbers and both ends of ranges. It checks numerical support, not every
 semantic association in free-form prose; forecaster review remains necessary.
+
+## Wikipedia and the web
+
+The Copilot can look things up beyond ICPAC's data: `search_wikipedia` (summaries from any
+of eleven Wikipedia editions, including Kiswahili, Amharic and Somali), `search_web` (titles,
+links and snippets) and `read_web_page` (the text of one page). Pages it used are listed
+under the answer's sources. Only http(s) pages on public internet addresses are read: every
+address a name resolves to is checked, the connection goes to that checked address,
+redirects are checked the same way, and pages are cut to a few thousand characters. What a
+page says is information for the answer, never an instruction; web text never replaces the
+forecast, observed rainfall or verification figures, and those figures are still checked.
+
+| Setting | Effect |
+|---|---|
+| `COPILOT_WEB=false` | Switches the three lookups off |
+| `BRAVE_SEARCH_API_KEY` | Uses the Brave Search API for `search_web`; without it the search reads DuckDuckGo's HTML results |
+
+## Answer language
+
+The chat request carries `language` (en, sw, am, so, ar, fr, ti, om, rw, rn, lg), chosen
+from the menu on the Copilot page and remembered in the browser. The model writes the whole
+answer in that language, keeps every figure, unit and date as the tools gave them, and says
+when it cannot write the language well. A bulletin translated in the conversation is a new
+draft version that a speaker of the language reviews before approval. See
+`docs/language_training.md` for the translation model that will take over the
+less-resourced languages.

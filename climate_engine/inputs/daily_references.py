@@ -24,12 +24,11 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-import httpx
 import numpy as np
 import xarray as xr
 
 from climate_engine.core import config
-from climate_engine.inputs.chirps import CHIRPSUnavailable, Server, crop, read_geotiff
+from climate_engine.inputs.chirps import CHIRPSUnavailable, Server, client, crop, read_geotiff
 from climate_engine.inputs.chirps_dekad import Dekad
 from climate_engine.operational.grid import DomainGrid
 
@@ -59,8 +58,8 @@ def token(source: str) -> str | None:
 
 def authorised_download(url: str, secret: str) -> bytes | None:
     """A file from NASA Earthdata with its bearer token; None when not published (404)."""
-    with httpx.Client(timeout=120, follow_redirects=True) as client:
-        response = client.get(url, headers={"Authorization": f"Bearer {secret}"})
+    with client() as session:
+        response = session.get(url, headers={"Authorization": f"Bearer {secret}"})
     if response.status_code == 404:
         return None
     if response.status_code in (401, 403):

@@ -13,7 +13,7 @@ import {
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
 import { operationActive, operationLabel } from "@/services/operation-state";
-import { dateTime } from "@/lib/format";
+import { dateTime, eatHour } from "@/lib/format";
 import type { Operation } from "@/types/operational";
 
 type Workspace = {
@@ -134,6 +134,16 @@ export default function Automations() {
               ? "Workflow running…"
               : "Prepare forecast and bulletin"}
           </Button>
+          {task.running && (
+            <Button
+              variant="outline"
+              disabled={!!task.operation?.stop_requested}
+              onClick={() => task.stop("website automation")}
+              style={{ marginLeft: 10 }}
+            >
+              {task.operation?.stop_requested ? "Stopping…" : "Stop the run"}
+            </Button>
+          )}
           {task.error && <p role="alert">{task.error}</p>}
           {cycle && (
             <div aria-live="polite">
@@ -252,7 +262,7 @@ export default function Automations() {
         >
           <p>
             {data.schedule.enabled
-              ? `Enabled at ${String(data.schedule.hour_utc).padStart(2, "0")}:00 UTC`
+              ? `Enabled, daily at ${eatHour(data.schedule.hour_utc)}`
               : "Disabled — enable the reviewed schedule in the backend deployment."}
           </p>
           {data.schedule.next_due && (

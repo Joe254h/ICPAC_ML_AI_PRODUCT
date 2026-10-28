@@ -1,6 +1,7 @@
 "use client";
 /** Forecaster Copilot: questions about the latest forecast, answered from its own numbers. */
 import Link from "next/link";
+import Markdown from "@/components/markdown";
 import { useEffect, useRef, useState } from "react";
 import {
   Archive,
@@ -255,7 +256,9 @@ function Message({ message }: { message: ChatMessage }) {
       )}
       <div className="chat-bubble">
         <div className="chat-who">{user ? "You" : "Copilot"}</div>
-        <div className="chat-text">{message.text}</div>
+        <div className="chat-text">
+          {user ? message.text : <Markdown text={message.text} />}
+        </div>
         {message.bulletin && <BulletinCard bulletin={message.bulletin} />}
         {message.comparison && (
           <ComparisonCard comparison={message.comparison} />
@@ -294,8 +297,42 @@ function Message({ message }: { message: ChatMessage }) {
   );
 }
 
+/** Answer languages: the member states' languages and the region's working languages.
+ * Answers in the less-resourced ones need a speaker's review before they are used. */
+const LANGUAGES: Record<string, string> = {
+  en: "English",
+  sw: "Kiswahili",
+  am: "Amharic (አማርኛ)",
+  so: "Somali (Soomaali)",
+  ar: "Arabic (العربية)",
+  fr: "French (Français)",
+  ti: "Tigrinya (ትግርኛ)",
+  om: "Afaan Oromo",
+  rw: "Kinyarwanda",
+  rn: "Kirundi",
+  lg: "Luganda",
+};
+const LANGUAGE_KEY = "icpac-copilot-language";
+
 export default function Copilot() {
   const [actor] = useActor();
+  const [language, setLanguage] = useState("en");
+  useEffect(() => {
+    try {
+      const kept = localStorage.getItem(LANGUAGE_KEY);
+      if (kept && kept in LANGUAGES) setLanguage(kept);
+    } catch {
+      // Storage blocked: English until chosen.
+    }
+  }, []);
+  const chooseLanguage = (code: string) => {
+    setLanguage(code);
+    try {
+      localStorage.setItem(LANGUAGE_KEY, code);
+    } catch {
+      // The choice lasts for this page.
+    }
+  };
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [session, setSession] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -585,6 +622,7 @@ export default function Copilot() {
         variant: variant || null,
         reset_context: resetContext,
         actor: actor || null,
+        language,
         ...extra,
       });
       setMessages((old) => [...old, { ...answer, role: "assistant" }]);
@@ -849,6 +887,20 @@ export default function Copilot() {
                   {layers.map((layer) => (
                     <option key={layer} value={layer}>
                       {LAYER_TEXT[layer].title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="context-select context-language">
+                <span>Language</span>
+                <select
+                  aria-label="Answer language"
+                  value={language}
+                  onChange={(e) => chooseLanguage(e.target.value)}
+                >
+                  {Object.entries(LANGUAGES).map(([code, name]) => (
+                    <option key={code} value={code}>
+                      {name}
                     </option>
                   ))}
                 </select>

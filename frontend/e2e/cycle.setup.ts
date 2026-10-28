@@ -12,8 +12,18 @@ setup("the weekly cycle issues this week's forecast", async ({ page }) => {
   const open = page.getByRole("link", { name: "Open forecast →" }).first();
   await expect(open).toBeVisible({ timeout: 280_000 });
   await expect(
-    page.getByText("complete", { exact: true }).first(),
+    page.getByText("Complete", { exact: true }).first(),
   ).toBeVisible();
+  // The rainfall monitoring follows as its own task; other tests read its dekads.
+  await page.getByText("Task history", { exact: true }).click();
+  const monitoring = page
+    .locator("tbody tr")
+    .filter({ hasText: "Update the rainfall monitoring" })
+    .first();
+  await expect(async () => {
+    await page.getByRole("button", { name: "Refresh" }).click();
+    await expect(monitoring).toContainText("Complete", { timeout: 3000 });
+  }).toPass({ timeout: 240_000 });
   await open.click();
   await page.waitForURL(/\/forecasts\?id=w2-/);
 });

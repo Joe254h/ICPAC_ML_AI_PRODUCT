@@ -773,11 +773,14 @@ class ForecastService:
         )
 
     def verify_due(
-        self, actor: str, progress: Callable[[str], None] | None = None
+        self,
+        actor: str,
+        progress: Callable[[str], None] | None = None,
+        compare: bool = True,
     ) -> dict[str, Any]:
         """Verify every unverified forecast whose window CHIRPS should now cover, then
-        compare recent verified forecasts with the further references. ``progress`` hears
-        each step, so a slow download shows where the pass is."""
+        (``compare``) compare recent verified forecasts with the further references.
+        ``progress`` hears each step, so a slow download shows where the pass is."""
         say = progress or (lambda _text: None)
         verified, waiting, failed = [], [], []
         server = chirps.Server()  # one set of directory listings for the whole pass
@@ -796,6 +799,26 @@ class ForecastService:
                 waiting.append(f"{record['forecast_id']}: {exc}")
             except Exception as exc:  # recorded for the forecaster, then the next one
                 failed.append(f"{record['forecast_id']}: {type(exc).__name__}: {exc}")
+        compared = self.compare_due(actor, progress) if compare else 0
+        from backend.app.services.external import ExternalForecasts
+
+        try:  # other models' uploaded forecasts whose week is now observed
+            uploads = ExternalForecasts(self.platform).verify_due()
+        except Exception:
+            uploads = 0
+        return {
+            "verified": verified,
+            "waiting": waiting,
+            "failed": failed,
+            "compared": compared,
+            "uploads_verified": uploads,
+        }
+
+    def compare_due(self, actor: str, progress: Callable[[str], None] | None = None) -> int:
+        """Compare the recent verified forecasts with ARC 2.0, RFE 2.0 and GPM IMERG, for
+        at most REFERENCE_BUDGET_SECONDS; the rest continue in the next pass. Returns the
+        number of comparisons held."""
+        say = progress or (lambda _text: None)
         compared = 0
         recent = [r for r in self.runs() if r.get("verification_status") == "available"]
         began = time.monotonic()
@@ -818,19 +841,7 @@ class ForecastService:
                 )
             except Exception:  # the further comparisons never hold up verification
                 continue
-        from backend.app.services.external import ExternalForecasts
-
-        try:  # other models' uploaded forecasts whose week is now observed
-            uploads = ExternalForecasts(self.platform).verify_due()
-        except Exception:
-            uploads = 0
-        return {
-            "verified": verified,
-            "waiting": waiting,
-            "failed": failed,
-            "compared": compared,
-            "uploads_verified": uploads,
-        }
+        return compared
 
     def references(self, forecast_id: str) -> list[dict[str, Any]]:
         """A forecast's comparisons with the further references, in their order."""

@@ -17,6 +17,8 @@ class ChatRequest(BaseModel):
     actor: str | None = Field(default=None, max_length=80)
     #: An uploaded forecast of another model the question is about.
     external_id: str | None = Field(default=None, pattern=r"^[0-9a-f-]{36}$")
+    #: The answer's language (chatbot.agent.LANGUAGES).
+    language: Literal["en", "sw", "am", "so", "ar", "fr", "ti", "om", "rw", "rn", "lg"] = "en"
 
     @field_validator("message")
     @classmethod
@@ -128,12 +130,19 @@ class OperationRequest(BaseModel):
         "end_to_end",
         "past_weeks",
         "check_ecmwf",
+        "observations",
     ]
     initialization: date | None = None
     forecast_id: str | None = Field(default=None, pattern=FORECAST_ID)
     #: past_weeks: how many past weeks to forecast and verify.
     weeks: int = Field(default=4, ge=1, le=12)
     actor: str = Field(min_length=2, max_length=80)
+
+
+class StopRequest(BaseModel):
+    """Who stops a task (the name typed in the public evaluation app)."""
+
+    actor: str | None = Field(default=None, max_length=80)
 
 
 class PackageImportRequest(BaseModel):

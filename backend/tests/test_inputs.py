@@ -125,12 +125,19 @@ def test_upper_air_predictors_download_checked_and_averaged(env, tmp_path, monke
         result = ecmwf_opendata.fetch_pressure(
             date(2026, 10, 5), tmp_path / "in", STEPS, progress=progress.append
         )
+        # One file at a time gives the same checksum: files are checked in a fixed order.
+        cfg = ecmwf_opendata.settings()
+        monkeypatch.setattr(ecmwf_opendata, "settings", lambda: {**cfg, "parallel_downloads": 1})
+        serial = ecmwf_opendata.fetch_pressure(date(2026, 10, 5), tmp_path / "serial", STEPS)
+        monkeypatch.setattr(ecmwf_opendata, "settings", lambda: cfg)
         with pytest.raises(ValueError, match="seven"):
             ecmwf_opendata.fetch_pressure(date(2026, 10, 5), tmp_path / "in", STEPS[:6])
         with pytest.raises(ecmwf_opendata.ECMWFDataUnavailable):
             ecmwf_opendata.fetch_pressure(date(2026, 10, 4), tmp_path / "in", STEPS)
     assert result.path.name == "ecmwf_s2s_pl_2026-10-05.nc" and result.members == 3
-    assert progress[0] == "Upper-air fields: forecast hour 168 (1 of 7)" and len(progress) == 7
+    assert serial.grib_sha256 == result.grib_sha256 and serial.grib_bytes == result.grib_bytes
+    assert progress[0].startswith("Downloading the upper-air fields: 7 forecast hours, 4 files")
+    assert progress[1] == "Upper-air fields: forecast hour 168 (1 of 7)" and len(progress) == 8
     with xr.open_dataset(result.path) as data:
         assert list(data["number"].values) == [1, 2, 3]
         assert list(data["isobaricInhPa"].values) == [850, 700, 500, 200]
@@ -356,8 +363,61 @@ def test_chirps_downloads_retry_with_a_doubling_wait():
 
     waits.clear()
     with pytest.raises(chirps.CHIRPSUnavailable, match="after 1 attempt"):
-        chirps.Server(forbidden, sleep=waits.append).fetch("https://x/f.tif")
+        chirps.Server(forbidden, sleep=waits.append).fetch("https://y/f.tif")
     assert waits == []
+
+
+def test_an_unreachable_server_costs_one_set_of_retries_per_pass():
+    """After a server never answered, its other files fail at once (no 11-minute wait per
+    file); a server that answered with an error is not marked."""
+    calls: list[str] = []
+
+    def down(url: str) -> bytes | None:
+        calls.append(url)
+        raise httpx.ConnectTimeout("timed out")
+
+    server = chirps.Server(down, sleep=lambda _s: None, name="GPM IMERG")
+    with pytest.raises(chirps.CHIRPSUnavailable, match="did not accept a connection within 15"):
+        server.fetch("https://gpm.example/a.nc4")
+    assert len(calls) == 5
+    with pytest.raises(chirps.CHIRPSUnavailable, match="tried again in the next pass"):
+        server.fetch("https://gpm.example/b.nc4")
+    assert len(calls) == 5  # no further attempt
+    assert chirps.Server(lambda _u: b"ok").fetch("https://other.example/c") == b"ok"
+
+    def refused(url: str) -> bytes | None:
+        request = httpx.Request("GET", url)
+        raise httpx.HTTPStatusError("503", request=request, response=httpx.Response(503))
+
+    with pytest.raises(chirps.CHIRPSUnavailable):
+        chirps.Server(refused, sleep=lambda _s: None).fetch("https://busy.example/a")
+    assert chirps.Server(lambda _u: b"ok").fetch("https://busy.example/b") == b"ok"
+
+
+def test_downloads_connect_over_ipv4(tmp_path):
+    """The client resolves IPv4 addresses only, so the real failure is reported instead of
+    an IPv6 "address family not supported" error, and a local server is still reached."""
+    import http.server
+    import threading
+
+    (tmp_path / "f.txt").write_bytes(b"rain")
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(tmp_path), **kwargs)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Quiet)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = httpd.server_address[1]
+        assert chirps.download(f"http://localhost:{port}/f.txt") == b"rain"
+        assert chirps.download(f"http://localhost:{port}/missing.txt") is None
+    finally:
+        httpd.shutdown()
 
 
 def seen_from(monkeypatch, today: date) -> None:
@@ -403,9 +463,12 @@ def test_the_weekly_cycle_runs_as_one_operation(env, fast_maps, mirror, monkeypa
     assert done["result"]["verification"]["waiting"] == [forecast_id]
     texts = [m["text"] for m in done["messages"]]
     assert texts[0] == "Started" and texts[-1] == "Finished"
-    # A CHIRPS outage is recorded, and the forecast stands.
-    assert "error" in done["result"]["monitoring"]
-    assert any("monitoring could not be updated" in text for text in texts)
+    # The monitoring follows as its own task; a CHIRPS outage fails that task, and the
+    # forecast stands.
+    follow_up = wait(client, {"id": done["result"]["follow_up"]})
+    assert follow_up["action"] == "observations"
+    assert follow_up["status"] == "failed", follow_up
+    assert any("CHIRPS could not be updated" in m["text"] for m in follow_up["messages"])
     # A second cycle for the same run does not forecast it again.
     again = wait(
         client, client.post("/operations", json={"action": "cycle", "actor": "Joe N"}).json()

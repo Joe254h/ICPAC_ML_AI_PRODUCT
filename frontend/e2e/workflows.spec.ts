@@ -145,11 +145,13 @@ test("the model registry shows the candidate and guards promotion", async ({
 
 test("operations lists the weekly cycle with who ran it", async ({ page }) => {
   await page.goto("/data/runs");
+  // The task history opens in place.
+  await page.getByText("Task history", { exact: true }).click();
   const row = page
     .locator("tbody tr")
     .filter({ hasText: "Weekly cycle" })
     .first();
-  await expect(row).toContainText("complete");
+  await expect(row).toContainText("Complete");
   await expect(row).toContainText("Joe254h");
   await row.getByRole("button", { name: "Details" }).click();
   await expect(

@@ -9,9 +9,26 @@ A green software test does not make a missing dataset or an untested model opera
 The **Prepare forecast and bulletin** action queues `end_to_end` and returns immediately.
 The worker selects the newest run for which both rainfall accumulation endpoints are
 published, rather than assuming today's run is ready. It then reuses or issues the
-forecast, verifies due cases against CHIRPS, updates CHIRPS/TAMSAT monitoring, checks
-the package, maps and country summaries, builds supplementary products when their
-reviewed inputs exist, and freezes a Word bulletin draft. A matching draft is reused.
+forecast, verifies due cases against CHIRPS, checks the package, maps and country
+summaries, builds supplementary products when their reviewed inputs exist, and freezes a
+Word bulletin draft. A matching draft is reused.
+
+The rainfall monitoring (CHIRPS, TAMSAT, ARC 2.0, RFE 2.0, GPM IMERG) and the further
+comparisons of verified forecasts read slower servers. They follow as their own task
+("Update the rainfall monitoring and compare forecasts…"), queued once per cycle, so the
+forecast and its bulletin draft are ready in about ten minutes. The 35 upper-air files
+are downloaded four at a time (`parallel_downloads` in `config/data_sources.yaml`) and
+checked one by one in a fixed order, so the recorded checksum is unchanged.
+
+Observation servers are reached over IPv4 with a 15-second connect timeout. A server
+that does not answer is skipped for 30 minutes after one set of retries, instead of
+costing about eleven minutes per file. (A container without IPv6 used to report
+"[Errno 97] Address family not supported" in place of the real failure.)
+
+Any queued or running task can be stopped from Operations or this page. A queued task
+stops at once; a running one at its next step (a download under way finishes first).
+Steps already finished are kept, the stop is recorded with who asked for it, and a
+stopped task is not retried.
 
 This workflow never trains, promotes, approves, publishes or sends an email. Existing
 explicit review transitions remain responsible for distribution. Public evaluation
@@ -37,6 +54,25 @@ files are fetched again. The browser keeps following scheduled retries, includin
 a page reload, and prevents a duplicate start while the followed task is active.
 Old failures remain in task history; a subsequent successful connected cycle clears
 their obsolete current-workspace alerts.
+
+## What each capability needs
+
+Seventeen capabilities are available once a forecast with the MBC + AI/ML layer has
+been issued, verified and drafted as a bulletin. The others depend on a decision or an
+input that only ICPAC can provide; the workspace says which.
+
+| Capability | Available when | What ICPAC provides |
+|---|---|---|
+| 2 Observational updates | CHIRPS has been downloaded | Nothing more. ERA5 is an optional reanalysis feed (an approved CDS profile, below), not an observation input. A source that cannot be reached is named and retried. |
+| 13 Extreme rainfall | A forecast exists | Heavy rainfall (above 200 mm) is in every bulletin. For exceptional rainfall against climatology, a reviewed weekly reference manifest with the threshold field (`WEEKLY_REFERENCE_MANIFEST`, see "Supplementary products and the bulletin" below). |
+| 16 Weekly Word bulletin | A draft exists | Optional: the same reference manifest adds the anomaly, temperature and heat-stress sections. |
+| 19 Workflow and HPC monitoring | Always, unless the HPC bridge is switched on but not reaching SLURM | Optional: `ENABLE_SLURM`, `HPC_SCRIPT_ROOT`, `HPC_WORKFLOW_SCRIPT` and its `HPC_WORKFLOW_SHA256`, with the bridge running on the HPC host (`docs/hpc_integration_report.md`). |
+| 20 Reviewed dissemination | Staff sign-in (`ACCESS_MODE=staff`) | Staff credentials, reviewers and publishers. In the public evaluation app approvals work, but reviewer names are typed, not verified. |
+
+The model and release warnings on the Status page are decisions, not faults: the final
+refit is in use as a candidate until a reviewer records its test and promotes it on the
+Models page, and `RELEASE_MODE=production` (which requires staff sign-in) turns on the
+production release gates.
 
 ## Daily scheduling
 

@@ -25,8 +25,11 @@ step, units) before it is used.
 import hashlib
 import os
 import tempfile
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
@@ -544,27 +547,49 @@ def fetch_pressure(
     ``steps`` are the seven Week-2 forecast hours of the training definition. Each field is
     averaged to the ``degrees`` grid of the training forecasts (ECMWF S2S, 1.5 degrees)
     before it is kept. Mirrors are tried in order; the file is written atomically.
+
+    The 35 files (5 variables at 7 hours) are downloaded ``parallel_downloads`` at a time
+    and checked one by one in their fixed order, so the recorded checksum does not depend
+    on which download finished first.
     """
     if len(steps) != 7:
         raise ValueError("The upper-air predictors need exactly seven forecast hours")
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
+    tasks = [(step, name, levels) for step in steps for name, levels in PRESSURE_INPUTS.items()]
+    last_name = list(PRESSURE_INPUTS)[-1]
+    workers = max(1, int(settings().get("parallel_downloads", 4)))
     failures = []
     for mirror in mirrors():
         digest, size, urls = hashlib.sha256(), 0, []
         kept: dict[tuple[str, int, int, int], np.ndarray] = {}
         axes: tuple[np.ndarray, np.ndarray] | None = None
         unavailable = None
-        for position, step in enumerate(steps, start=1):
-            if progress:
-                progress(f"Upper-air fields: forecast hour {step} ({position} of 7)")
-            for name, levels in PRESSURE_INPUTS.items():
-                with tempfile.TemporaryDirectory(prefix="ecmwf-pl-") as scratch:
-                    grib = Path(scratch) / f"{name}.grib2"
+        if progress:
+            progress(
+                f"Downloading the upper-air fields: 7 forecast hours, {workers} files at a time"
+            )
+        with tempfile.TemporaryDirectory(prefix="ecmwf-pl-") as scratch:
+
+            def get(task, mirror=mirror, scratch=scratch):
+                step, name, levels = task
+                grib = Path(scratch) / f"{name}-{step}.grib2"
+                result = client(mirror).retrieve(
+                    target=str(grib), **pressure_request(initialization, name, levels, step)
+                )
+                return grib, result
+
+            pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="ecmwf-pl")
+            try:
+                queue = iter(tasks)
+                pending = deque((task, pool.submit(get, task)) for task in islice(queue, workers))
+                while pending:
+                    (step, name, levels), future = pending.popleft()
+                    following = next(queue, None)
+                    if following is not None:  # keep the pool busy while this file is checked
+                        pending.append((following, pool.submit(get, following)))
                     try:
-                        result = client(mirror).retrieve(
-                            target=str(grib), **pressure_request(initialization, name, levels, step)
-                        )
+                        grib, result = future.result()
                     except Exception as exc:  # network errors and "no index entries" alike
                         unavailable = f"{mirror}: {name} at {step} h: {type(exc).__name__}: {exc}"
                         break
@@ -592,8 +617,14 @@ def fetch_pressure(
                         if key in kept:
                             raise ValueError(f"Duplicate message {key}")
                         kept[key] = da.values.astype(np.float32)
-            if unavailable:
-                break
+                    grib.unlink()
+                    if progress and name == last_name:
+                        position = steps.index(step) + 1
+                        progress(f"Upper-air fields: forecast hour {step} ({position} of 7)")
+            finally:
+                # Downloads not started are dropped; those under way finish before the
+                # scratch directory goes.
+                pool.shutdown(wait=True, cancel_futures=True)
         if unavailable:
             failures.append(unavailable)
             continue

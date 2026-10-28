@@ -142,6 +142,7 @@ class Copilot:
                     previous,
                     selection(body),
                     actor,
+                    body.language,
                 )
                 response = {**result, "created_at": now(), "grounding": GROUNDING}
                 session["context"] = response["context"]

@@ -14,6 +14,10 @@ def _no_startup_registration(monkeypatch):
     # Unit/API mirrors deliberately contain three members. Production requests ten;
     # browser mirrors use the actual production member count.
     monkeypatch.setattr("climate_engine.inputs.ecmwf_opendata.member_numbers", lambda: [1, 2, 3])
+    # A server found unreachable in one test is not unreachable in the next.
+    from climate_engine.inputs import chirps
+
+    chirps.reset_unreachable()
     # Tests may write an outbox explicitly, but never inherit a live mail configuration.
     for name in (
         "SMTP_HOST",

@@ -122,7 +122,10 @@ def main() -> None:
         eval_dataset=concatenate_datasets(valid) if valid else None,
         data_collator=DataCollatorForSeq2Seq(tokenizer, model=model),
     )
-    trainer.train()
+    # A run stopped part-way (the GPU was needed, the machine restarted) continues from its
+    # newest checkpoint instead of starting again.
+    resume = any(args.out.glob("checkpoint-*"))
+    trainer.train(resume_from_checkpoint=resume or None)
     trainer.save_model(str(args.out / "final"))
     tokenizer.save_pretrained(str(args.out / "final"))
 

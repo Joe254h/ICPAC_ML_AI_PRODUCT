@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
 import {
   UNAVAILABLE,
+  dateTime,
   day,
+  eatHour,
   num,
   period,
   shortPeriod,
@@ -48,4 +50,11 @@ test("periods read as headlines", () => {
   expect(
     weekPeriod("2026-10-14T00:00:00+00:00", "2026-10-21T00:00:00+00:00"),
   ).toBe("14–20 October 2026");
+});
+
+test("recorded times are shown in East Africa Time", () => {
+  expect(dateTime("2026-10-20T06:09:00Z")).toBe("20 Oct 2026, 09:09 EAT");
+  expect(dateTime("2026-10-20T22:30:00+00:00")).toBe("21 Oct 2026, 01:30 EAT");
+  expect(eatHour(10)).toBe("13:00 EAT");
+  expect(eatHour(22)).toBe("01:00 EAT");
 });

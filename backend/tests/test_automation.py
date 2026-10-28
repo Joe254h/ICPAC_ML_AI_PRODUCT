@@ -205,6 +205,24 @@ def test_catalogue_is_read_only_and_never_claims_missing_hybrid_is_available(pla
     assert status["capabilities"][8]["status"] == "blocked"
     assert status["schedule"]["enabled"] is False
     assert platform.repo.list("operation") == []
+    # Nothing is claimed before it has happened: no ensemble, observation or bulletin yet.
+    states = {item["name"]: item["status"] for item in status["capabilities"]}
+    for name in (
+        "ECMWF acquisition",
+        "Observational updates",
+        "Forecast preprocessing",
+        "Extreme rainfall",
+        "Weekly Word bulletin",
+    ):
+        assert states[name] == "ready", name
+    # Optional HPC runs do not hold back workflow monitoring; approvals by signed-in
+    # staff are accountable, typed names in the public evaluation app are not.
+    assert states["Workflow and HPC monitoring"] == "available"
+    assert states["Reviewed dissemination"] == "available"
+    monkeypatch.setenv("ACCESS_MODE", "public")
+    public = {item["name"]: item for item in AutomationService(platform).status()["capabilities"]}
+    assert public["Reviewed dissemination"]["status"] == "partial"
+    assert "staff sign-in" in public["Reviewed dissemination"]["detail"]
 
 
 def test_overdue_schedule_stays_due_until_the_daily_outbox_exists(platform, monkeypatch):
@@ -265,3 +283,83 @@ def test_connected_workflow_prepares_one_draft_and_never_takes_review_actions(
     assert first["result"]["review_required"] is True
     assert first["result"]["bulletin_id"] == second["result"]["bulletin_id"]
     assert generated == ["forecast"]
+
+
+def test_a_task_can_be_stopped_queued_or_at_its_next_step(platform, monkeypatch):
+    """A queued task stops at once; a running one at its next step, with the stop recorded
+    by name; the steps already finished stand, and it is not retried."""
+    service = OperationService(platform)
+    queued = service.start(OperationRequest(action="verify_due", actor="Operator"))
+    stopped = service.stop(queued["id"], "Joe254h")
+    assert stopped["status"] == "cancelled"
+    assert stopped["messages"][-1]["text"] == "Stopped by Joe254h before it ran"
+    assert not service.run_pending()  # nothing left to run
+    with pytest.raises(ValueError, match="queued or running"):
+        service.stop(queued["id"], "Joe254h")
+
+    steps: list[str] = []
+
+    def slow_pass(self, operation_id, body, compare=True):
+        self._log(operation_id, "Verifying the first week")
+        steps.append("first")
+        # A forecaster presses Stop while the pass is under way.
+        service.stop(operation_id, "Joe254h")
+        assert service.read(operation_id)["stop_requested"] is True
+        self._log(operation_id, "Verifying the second week")
+        steps.append("second")
+        return {}
+
+    monkeypatch.setattr(OperationService, "_verify_due", slow_pass)
+    running = service.start(OperationRequest(action="verify_due", actor="Operator"))
+    assert service.run_pending()
+    record = service.read(running["id"])
+    assert steps == ["first"]
+    assert record["status"] == "cancelled" and not record.get("retry_at")
+    assert "stop_requested" not in record
+    texts = [m["text"] for m in record["messages"]]
+    assert texts[-1] == "Stopped by Joe254h. The steps already finished are kept"
+    assert "Verifying the second week" not in texts
+    assert not service.run_pending()
+    assert len(platform.repo.list("operation")) == 2
+
+
+def test_the_weekly_cycle_leaves_the_slow_monitoring_to_a_follow_up_task(platform, monkeypatch):
+    """The forecast and its verification finish first; the rainfall monitoring and the
+    further comparisons, which read slower servers, follow as their own task, queued once
+    even when the cycle is retried."""
+    service = OperationService(platform)
+    calls: list[str] = []
+    monkeypatch.setattr(OperationService, "_issued", lambda self, day: [{"forecast_id": "f-1"}])
+
+    def verify(self, op, body, compare=True):
+        calls.append(f"verify compare={compare}")
+        return {}
+
+    def monitoring(self, op, body):
+        calls.append("monitoring")
+        return {"new": False}
+
+    monkeypatch.setattr(OperationService, "_verify_due", verify)
+    monkeypatch.setattr(OperationService, "_update_chirps", monitoring)
+
+    class Forecasts:
+        def compare_due(self, actor, progress=None):
+            calls.append("compare")
+            return 6
+
+    monkeypatch.setattr(OperationService, "_forecasts", lambda self: Forecasts())
+    body = OperationRequest(action="cycle", actor="Operator", initialization=date(2026, 10, 20))
+    cycle = service.start(body)
+    assert service.run_pending()
+    done = service.get(cycle["id"])
+    assert done["status"] == "complete"
+    assert calls == ["verify compare=False"]
+    follow_up = service.get(done["result"]["follow_up"])
+    assert follow_up["action"] == "observations" and follow_up["status"] == "queued"
+    # A retried cycle does not queue the follow-up twice.
+    assert service._cycle(cycle["id"], body)["follow_up"] == follow_up["id"]
+    assert sum(r["action"] == "observations" for r in platform.repo.list("operation")) == 1
+    assert service.run_pending()
+    assert calls[-2:] == ["monitoring", "compare"]
+    finished = service.get(follow_up["id"])
+    assert finished["status"] == "complete" and finished["result"]["compared"] == 6

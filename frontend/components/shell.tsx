@@ -20,7 +20,9 @@ import {
   ChevronDown,
   ExternalLink,
   Menu as MenuIcon,
+  Moon,
   Search,
+  Sun,
   X,
 } from "lucide-react";
 import { BannerSlot } from "@/components/banner";
@@ -31,9 +33,11 @@ import {
   STAFF_MENU,
   findRoute,
   href,
+  menuGroups,
   menuRoutes,
 } from "@/features/routes";
 import type { Menu, Route } from "@/features/routes";
+import { useTheme } from "@/lib/theme";
 import { useApi } from "@/services/hooks";
 import type { Loaded } from "@/services/hooks";
 import type { Config } from "@/types";
@@ -77,7 +81,8 @@ function MenuEntry({
   setState: (state: MenuState) => void;
 }) {
   const open = state.menu === menu;
-  const routes = menuRoutes(menu);
+  const groups = menuGroups(menu);
+  const routes = groups.flatMap((group) => group.routes);
   const current = active?.menu === menu;
   const staff = menu === STAFF_MENU;
   if (routes.length === 1)
@@ -118,17 +123,28 @@ function MenuEntry({
       >
         {menu} <ChevronDown size={16} aria-hidden className="chevron" />
       </button>
-      <div className="dropdown">
-        {routes.map((route) => (
-          <Link
-            key={route.path}
-            href={href(route)}
-            aria-current={active?.path === route.path ? "page" : undefined}
-            onClick={() => setState({ menu: null, pinned: false })}
+      <div className={cx("dropdown", groups.length > 1 && "grouped")}>
+        {groups.map((group) => (
+          <div
+            key={group.label ?? "main"}
+            className={cx(
+              "dropdown-group",
+              group.routes.length > 6 && "columns",
+            )}
           >
-            {route.title}
-            {route.soon && <span className="soon">Coming later</span>}
-          </Link>
+            {group.label && <p className="dropdown-label">{group.label}</p>}
+            {group.routes.map((route) => (
+              <Link
+                key={route.path}
+                href={href(route)}
+                aria-current={active?.path === route.path ? "page" : undefined}
+                onClick={() => setState({ menu: null, pinned: false })}
+              >
+                {route.title}
+                {route.soon && <span className="soon">Coming later</span>}
+              </Link>
+            ))}
+          </div>
         ))}
       </div>
     </li>
@@ -268,6 +284,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const current = useApi<CurrentModel>("/models/current");
   const health = useApi<Health>("/health");
   const status = statusOf(health);
+  const [theme, setTheme] = useTheme();
   const [menuState, setMenuState] = useState<MenuState>({
     menu: null,
     pinned: false,
@@ -365,6 +382,23 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             >
               <Search size={18} aria-hidden />
             </button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              aria-label={
+                theme === "dark"
+                  ? "Switch to light mode"
+                  : "Switch to dark mode"
+              }
+              title={theme === "dark" ? "Light mode" : "Dark mode"}
+            >
+              {theme === "dark" ? (
+                <Sun size={18} aria-hidden />
+              ) : (
+                <Moon size={18} aria-hidden />
+              )}
+            </button>
             <Link
               href="/system"
               className="icon-button"
@@ -421,6 +455,20 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
         </div>
+        <nav className="wrap sitemap" aria-label="Site map">
+          {MENUS.map((menu) => (
+            <div key={menu}>
+              <h2>{menu}</h2>
+              <ul>
+                {menuRoutes(menu).map((route) => (
+                  <li key={route.path}>
+                    <Link href={href(route)}>{route.title}</Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </nav>
         <div className="wrap legal">
           <span>
             © ICPAC {new Date().getUTCFullYear()} · WMO Regional Climate Centre

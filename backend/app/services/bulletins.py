@@ -151,6 +151,23 @@ class BulletinService:
                     "no operational forecast yet: run a forecast before drafting a bulletin"
                 )
             forecast_id = runs[0]["forecast_id"]
+        if parent is None:
+            # A forecast has one open draft: asking again opens it instead of adding a
+            # duplicate (a revision, or a draft after a rejection, is still a new one).
+            from backend.app.services.supplemental import SupplementalService
+
+            extra = (SupplementalService(self.platform).appendix(forecast_id) or {}).get(
+                "record_id"
+            )
+            for held in reversed(self.repo.list("bulletin")):
+                if (
+                    held.get("kind") == WEEKLY
+                    and held.get("forecast_id") == forecast_id
+                    and held["status"] in {"draft", "under_review"}
+                    and ((held.get("facts") or {}).get("supplemental") or {}).get("record_id")
+                    == extra
+                ):
+                    return {**held, "reused": True}
         return self.generate_weekly(forecast_id, parent_id, actor)
 
     def generate_weekly(

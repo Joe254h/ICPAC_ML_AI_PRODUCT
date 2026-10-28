@@ -20,10 +20,38 @@ import {
 import type { Tone } from "@/components/ui";
 import type { PageProps } from "@/features/view";
 import { useActor } from "@/lib/actor";
-import { dateTime, day, personName } from "@/lib/format";
+import { dateTime, day, personName, weekPeriod } from "@/lib/format";
 import { mutate, request } from "@/services/api";
 import { useApi } from "@/services/hooks";
+import type { ForecastRun } from "@/types/operational";
 import type { Bulletin, EmailNotice, EmailStatus } from "@/types/workflows";
+
+/** A forecast as people know it: its week and the ECMWF run it came from. */
+function forecastLabel(run: ForecastRun): string {
+  return `${weekPeriod(run.valid_start, run.valid_end)} · run of ${day(run.initialization)}`;
+}
+
+/** Drafts grouped by their forecast, newest forecast week first; drafts of a forecast no
+ * longer listed come last. */
+function byForecast(drafts: Bulletin[], runs: ForecastRun[]) {
+  const order = new Map(runs.map((run, i) => [run.forecast_id, i]));
+  const groups = new Map<string, Bulletin[]>();
+  for (const draft of drafts) {
+    const key = draft.forecast_id ?? draft.facts.forecast_id;
+    groups.set(key, [...(groups.get(key) ?? []), draft]);
+  }
+  return [...groups.entries()]
+    .map(([forecastId, items]) => ({
+      forecastId,
+      run: runs.find((r) => r.forecast_id === forecastId),
+      items,
+    }))
+    .sort(
+      (a, b) =>
+        (order.get(a.forecastId) ?? Number.MAX_SAFE_INTEGER) -
+        (order.get(b.forecastId) ?? Number.MAX_SAFE_INTEGER),
+    );
+}
 
 const STATUS: Record<Bulletin["status"], [string, Tone]> = {
   draft: ["Draft", "info"],
@@ -326,7 +354,7 @@ function Detail({
             <table className="data">
               <thead>
                 <tr>
-                  <th>When (UTC)</th>
+                  <th>When (EAT)</th>
                   <th>Decision</th>
                   <th>Reviewer</th>
                   <th>Justification</th>
@@ -373,23 +401,41 @@ function Detail({
 
 export default function Bulletins({ id }: PageProps) {
   const drafts = useApi<Bulletin[]>("/bulletins");
+  const forecasts = useApi<ForecastRun[]>("/forecasts");
   const router = useRouter();
   const [actor] = useActor();
   const [selected, setSelected] = useState<string | undefined>(id);
+  const [chosen, setChosen] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [opened, setOpened] = useState<string | null>(null);
   useEffect(() => setSelected(id), [id]);
+  const runs = (forecasts.data ?? []).filter((r) => !r.synthetic);
+  const newest = runs[0];
+  const target = chosen || newest?.forecast_id || "";
+  const groups = byForecast(drafts.data ?? [], runs);
   const active =
-    drafts.data?.find((d) => d.id === selected) ?? drafts.data?.[0];
+    drafts.data?.find((d) => d.id === selected) ?? groups[0]?.items[0];
+  const newestDrafted =
+    !newest ||
+    (drafts.data ?? []).some((d) => d.forecast_id === newest.forecast_id);
 
-  const create = async (parent?: Bulletin) => {
+  const create = async (parent?: Bulletin, forecastId?: string) => {
     setBusy(true);
     setError(null);
+    setOpened(null);
     try {
-      const draft = await mutate<Bulletin>(
+      const draft = await mutate<Bulletin & { reused?: boolean }>(
         "/bulletins/generate" + (parent ? `?parent_id=${parent.id}` : ""),
-        { actor: actor || "Forecaster" },
+        {
+          actor: actor || "Forecaster",
+          ...(parent || !forecastId ? {} : { forecast_id: forecastId }),
+        },
       );
+      if (draft.reused)
+        setOpened(
+          "This forecast already has a draft waiting for review, so it is opened instead of making a second one.",
+        );
       drafts.reload();
       router.replace(`/bulletins?id=${draft.id}`);
       setSelected(draft.id);
@@ -399,6 +445,33 @@ export default function Bulletins({ id }: PageProps) {
       setBusy(false);
     }
   };
+
+  const picker = runs.length > 0 && (
+    <div className="draft-picker">
+      <label className="field">
+        Forecast to draft
+        <select
+          value={target}
+          onChange={(e) => setChosen(e.target.value)}
+          aria-label="Forecast to draft"
+        >
+          {runs.map((run, i) => (
+            <option key={run.forecast_id} value={run.forecast_id}>
+              {forecastLabel(run)}
+              {i === 0 ? " (newest)" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      <Button
+        variant="amber"
+        onClick={() => create(undefined, target)}
+        disabled={busy || !target}
+      >
+        <FilePlus2 size={18} /> {busy ? "Preparing…" : "Draft this week"}
+      </Button>
+    </div>
+  );
 
   return (
     <div className="page">
@@ -410,13 +483,24 @@ export default function Bulletins({ id }: PageProps) {
             { label: "Drafts and review" },
           ]}
           subtitle="Every weekly bulletin goes from draft to review, approval and publication. Each decision needs a named reviewer and a justification, and approved content is sealed so it cannot change."
-          actions={
-            <Button variant="amber" onClick={() => create()} disabled={busy}>
-              <FilePlus2 size={18} />{" "}
-              {busy ? "Preparing…" : "New draft from the latest forecast"}
-            </Button>
-          }
         />
+        <Card
+          title="Draft a weekly bulletin"
+          subtitle={
+            newest
+              ? `The newest forecast is for ${weekPeriod(newest.valid_start, newest.valid_end)}, from the ECMWF run of ${day(newest.initialization)}. Drafts below are grouped by forecast week, newest first.`
+              : "A draft is made from a forecast; none has been issued yet."
+          }
+        >
+          {forecasts.loading && !forecasts.data && <Skeleton height={60} />}
+          {picker}
+          {newest && !newestDrafted && (
+            <Notice tone="amber">
+              The newest forecast has no bulletin draft yet.
+            </Notice>
+          )}
+          {opened && <Notice>{opened}</Notice>}
+        </Card>
         {error && <ErrorState message={error} />}
         {drafts.loading && <Skeleton height={420} />}
         {drafts.error && (
@@ -426,7 +510,11 @@ export default function Bulletins({ id }: PageProps) {
           <EmptyState
             title="No bulletin draft yet"
             action={
-              <Button variant="amber" onClick={() => create()} disabled={busy}>
+              <Button
+                variant="amber"
+                onClick={() => create(undefined, target)}
+                disabled={busy || !target}
+              >
                 Create the first draft
               </Button>
             }
@@ -447,24 +535,46 @@ export default function Bulletins({ id }: PageProps) {
             className="drafts-layout"
           >
             <aside className="draft-list" aria-label="Drafts">
-              {drafts.data.map((draft) => (
-                <button
-                  key={draft.id}
-                  type="button"
-                  aria-current={draft.id === active.id}
-                  onClick={() => {
-                    setSelected(draft.id);
-                    router.replace(`/bulletins?id=${draft.id}`);
-                  }}
-                >
-                  <strong>{draft.title}</strong>
-                  <span>
-                    <Status tone={STATUS[draft.status][1]}>
-                      {STATUS[draft.status][0]}
-                    </Status>
-                  </span>
-                  <small>Created {day(draft.created_at)}</small>
-                </button>
+              {groups.map((group) => (
+                <section key={group.forecastId} className="draft-group">
+                  <h3>
+                    {group.run
+                      ? weekPeriod(group.run.valid_start, group.run.valid_end)
+                      : group.items[0].facts.period}
+                    <small>
+                      {group.run
+                        ? `Run of ${day(group.run.initialization)}${
+                            group.run.forecast_id === newest?.forecast_id
+                              ? " · newest forecast"
+                              : ""
+                          }`
+                        : "Forecast no longer listed"}
+                    </small>
+                  </h3>
+                  {group.items.map((draft) => (
+                    <button
+                      key={draft.id}
+                      type="button"
+                      aria-current={draft.id === active.id}
+                      onClick={() => {
+                        setSelected(draft.id);
+                        router.replace(`/bulletins?id=${draft.id}`);
+                      }}
+                    >
+                      <strong>
+                        {draft.version && draft.version > 1
+                          ? `Version ${draft.version}`
+                          : "First draft"}
+                      </strong>
+                      <span>
+                        <Status tone={STATUS[draft.status][1]}>
+                          {STATUS[draft.status][0]}
+                        </Status>
+                      </span>
+                      <small>Created {dateTime(draft.created_at)}</small>
+                    </button>
+                  ))}
+                </section>
               ))}
             </aside>
             <div style={{ display: "grid", gap: 28, minWidth: 0 }}>

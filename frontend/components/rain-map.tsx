@@ -250,6 +250,15 @@ export default function RainMap({
       }),
       "bottom-right",
     );
+    // The credits the basemap and data licences require stay one click away behind the
+    // small (i) button, and in the footer; they do not cover the map.
+    const collapse = () => {
+      const credits = frame.querySelector(".maplibregl-ctrl-attrib");
+      credits?.classList.remove("maplibregl-compact-show");
+      credits?.removeAttribute("open");
+    };
+    instance.on("load", collapse);
+    instance.on("resize", collapse);
     const popup = new maplibregl.Popup({
       closeButton: false,
       closeOnClick: false,

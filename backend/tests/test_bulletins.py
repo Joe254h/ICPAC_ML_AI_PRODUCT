@@ -45,6 +45,10 @@ def test_drafts_are_the_weekly_bulletin_of_the_latest_forecast(env, fast_maps, m
     draft = client.post("/bulletins/generate", json={}).json()
     assert draft["kind"] == "icpac-weekly" and draft["forecast_id"] == record["forecast_id"]
     assert draft["title"] == "Weekly Forecast for 12-19 October 2026"
+    # Asking again opens the forecast's open draft instead of adding a duplicate.
+    again = client.post("/bulletins/generate", json={"forecast_id": record["forecast_id"]}).json()
+    assert again["id"] == draft["id"] and again["reused"] is True
+    assert len(client.get("/bulletins").json()) == 1
     assert draft["consistency"]["status"] == "PASS"
     assert draft["text"].startswith("Weekly Forecast for 12-19 October 2026\n\nHeadline")
     assert {f"bulletins/{draft['id']}/map.png", f"bulletins/{draft['id']}/bulletin.docx"} <= set(

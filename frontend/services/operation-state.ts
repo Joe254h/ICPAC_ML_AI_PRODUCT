@@ -9,8 +9,18 @@ export function operationActive(operation: Operation): boolean {
   );
 }
 
+const LABELS: Record<Operation["status"], string> = {
+  queued: "Queued",
+  running: "Running",
+  complete: "Complete",
+  failed: "Failed",
+  interrupted: "Interrupted",
+  cancelled: "Stopped",
+};
+
 export function operationLabel(operation: Operation): string {
-  return operation.status === "failed" && operation.retry_at
-    ? "Waiting for retry"
-    : operation.status;
+  if (operation.status === "failed" && operation.retry_at)
+    return "Waiting for retry";
+  if (operation.stop_requested && operationActive(operation)) return "Stopping";
+  return LABELS[operation.status] ?? operation.status;
 }
