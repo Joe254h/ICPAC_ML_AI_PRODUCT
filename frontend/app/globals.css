@@ -3862,9 +3862,13 @@ ol.lifecycle li:not(:last-child)::after {
   font: 500 12.5px var(--font-body);
   cursor: pointer;
 }
-.chat-edit:hover {
+.chat-edit:hover:not(:disabled) {
   color: var(--ink);
   background: var(--ground);
+}
+.chat-edit:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .chat-edit-form {
   display: grid;

@@ -2,7 +2,7 @@
 /** Forecaster Copilot: questions about the latest forecast, answered from its own numbers. */
 import Link from "next/link";
 import Markdown from "@/components/markdown";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -251,10 +251,13 @@ function AnswerBasis({ message }: { message: ChatMessage }) {
 function Message({
   message,
   onEdit,
+  editable = true,
 }: {
   message: ChatMessage;
   /** Ask again with changed words (your own questions only). */
   onEdit?: (text: string) => void;
+  /** False while an answer is on its way: the button stays, so nothing above moves. */
+  editable?: boolean;
 }) {
   const user = message.role === "user";
   const [editing, setEditing] = useState(false);
@@ -287,7 +290,11 @@ function Message({
               onChange={(e) => setDraft(e.target.value)}
             />
             <div>
-              <Button size="sm" type="submit" disabled={!draft.trim()}>
+              <Button
+                size="sm"
+                type="submit"
+                disabled={!draft.trim() || !editable}
+              >
                 Ask again
               </Button>
               <Button
@@ -322,6 +329,7 @@ function Message({
             className="chat-edit"
             aria-label="Edit this question"
             title="Edit this question"
+            disabled={!editable}
             onClick={() => {
               setDraft(message.text);
               setEditing(true);
@@ -545,7 +553,9 @@ export default function Copilot() {
     return () => document.removeEventListener("keydown", escape);
   }, [deleting, removing]);
 
-  useEffect(() => {
+  // Before the browser paints: a scroll event in between (the browser keeping its place
+  // while the page changes) would otherwise read as the reader scrolling away.
+  useLayoutEffect(() => {
     if (stickToBottom.current && stream.current)
       stream.current.scrollTop = stream.current.scrollHeight;
   }, [messages, pending, restoring]);
@@ -1159,10 +1169,11 @@ export default function Copilot() {
                     key={`${index}-${message.text}`}
                     message={message}
                     onEdit={
-                      message.role === "user" && !pending && !locked
+                      message.role === "user"
                         ? (text) => send(text, { edit_index: index })
                         : undefined
                     }
+                    editable={!locked}
                   />
                 ))
               )}
