@@ -176,4 +176,4 @@ def test_web_lookups_can_be_switched_off(env, fast_maps, claude, monkeypatch):
 
 def test_an_unknown_answer_language_is_refused():
     with pytest.raises(ValueError):
-        ChatRequest(message="Habari", language="xx")
+        ChatRequest.model_validate({"message": "Habari", "language": "xx"})

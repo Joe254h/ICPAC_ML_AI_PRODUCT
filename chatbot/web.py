@@ -272,11 +272,11 @@ def search(query: str, count: int = 5) -> list[dict[str, str]]:
             }
             for r in (response.get("web") or {}).get("results", [])[:count]
         ]
-    response = get("https://html.duckduckgo.com/html/", params={"q": query})
-    if response.status_code >= 400:
+    page = get("https://html.duckduckgo.com/html/", params={"q": query})
+    if page.status_code >= 400:
         raise WebUnavailable("The web search did not answer")
     results = []
-    for match in _RESULT.finditer(response.text):
+    for match in _RESULT.finditer(page.text):
         url = _target(match.group("href"))
         if not url.startswith(("http://", "https://")):
             continue

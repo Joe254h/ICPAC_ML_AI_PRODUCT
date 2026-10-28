@@ -203,7 +203,7 @@ class _IPv4(httpcore.SyncBackend):
     def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
         try:
             addresses = {
-                info[4][0]
+                str(info[4][0])
                 for info in socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
             }
         except OSError as exc:
