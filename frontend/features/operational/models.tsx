@@ -1,7 +1,7 @@
 "use client";
 /** The operational model registry: versions, evidence and reviewed transitions. */
 import { useState } from "react";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Upload } from "lucide-react";
 import ReviewDialog from "@/components/review-dialog";
 import {
   Button,
@@ -18,7 +18,7 @@ import {
 import { useApp } from "@/components/shell";
 import { useActor } from "@/lib/actor";
 import { dateTime, num, personName, versionLabel } from "@/lib/format";
-import { mutate } from "@/services/api";
+import { ApiError, mutate, uploadInParts } from "@/services/api";
 import { useApi } from "@/services/hooks";
 import type {
   EcmwfReadiness,
@@ -629,6 +629,88 @@ function ActivationHistory({ models }: { models: OperationalModel[] }) {
   );
 }
 
+/** A new model bundle (a ZIP), sent in parts, checked and registered as experimental. */
+function UploadModel({ changed }: { changed: () => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [sent, setSent] = useState<number | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [done, setDone] = useState<OperationalModel | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const busy = sent !== null || checking;
+  const send = async () => {
+    if (!file) return;
+    setError(null);
+    setDone(null);
+    try {
+      setSent(0);
+      const id = await uploadInParts(file, "model", setSent);
+      setSent(null);
+      setChecking(true);
+      const model = await mutate<OperationalModel>("/models/upload", {
+        upload_id: id,
+      });
+      setDone(model);
+      setFile(null);
+      changed();
+    } catch (e) {
+      setError(
+        e instanceof ApiError && e.status === 401
+          ? "Uploading a model needs your staff access key: choose Staff access at the top of the page, then try again."
+          : (e as Error).message,
+      );
+    } finally {
+      setSent(null);
+      setChecking(false);
+    }
+  };
+  return (
+    <Card
+      title="Upload a model"
+      subtitle="A ZIP file holding the model's registration file and the bundle folder it names, as the training pipeline exports them. Every file is checked as for a reviewed model; it is registered as experimental, and a reviewer approves and activates it here."
+    >
+      <div className="model-upload">
+        <label className="field">
+          Model bundle (a ZIP file, up to 300 MB)
+          <input
+            type="file"
+            accept=".zip,application/zip"
+            disabled={busy}
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null);
+              setDone(null);
+              setError(null);
+            }}
+          />
+        </label>
+        <Button onClick={send} disabled={!file || busy}>
+          <Upload size={16} />{" "}
+          {sent !== null && file
+            ? `Sending… ${Math.round((100 * sent) / file.size)}%`
+            : checking
+              ? "Checking the files…"
+              : "Upload and check"}
+        </Button>
+      </div>
+      {error && <ErrorState message={error} />}
+      {done && (
+        <Notice tone="green" title={`${done.model_name} registered.`}>
+          Its files passed every check and it is experimental. Run forecasts
+          with it from Operations (Model for this run) to compare it with the
+          model in use; approve and activate it below when the evidence is
+          enough.
+        </Notice>
+      )}
+      <p className="card-note">
+        The bundle is the kind the refit is: monthly bias correction plus
+        CatBoost on the 24 inputs, exported by the training pipeline. A model of
+        another kind (a neural network, a different set of inputs) needs its own
+        loader first; until then its weekly forecasts can be uploaded in the
+        Copilot to be compared and verified.
+      </p>
+    </Card>
+  );
+}
+
 export default function Models() {
   const models = useApi<OperationalModel[]>("/models");
   const ready = useApi<EcmwfReadiness>("/data/ecmwf/readiness");
@@ -664,6 +746,7 @@ export default function Models() {
           </Notice>
         )}
         {models.data && <ActivationHistory models={models.data} />}
+        <UploadModel changed={changed} />
         {models.loading && <Skeleton height={420} />}
         {models.error && (
           <ErrorState message={models.error} retry={models.reload} />

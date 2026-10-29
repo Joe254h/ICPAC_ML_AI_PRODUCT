@@ -78,6 +78,30 @@ every status change are single database transactions, so concurrent requests can
 register a model twice or leave a test result without its approval. Each model keeps a
 status history (`status_history`), the basis for checking imported packages.
 
+### Uploading a bundle on the website
+
+A model retrained with the same pipeline (MBC plus CatBoost on the 24 inputs) can be added
+without a release: on the Models page, *Upload a model* takes a ZIP holding its
+registration descriptor (`.yaml`, written like the ones in `config/model_registry/`, its
+artifact paths relative to the top of the ZIP) and the bundle folder it names. It needs a
+staff access key with the admin role, also on the public site.
+
+* The file goes in parts of at most 4 MB (the website's proxy limit) and is joined on the
+  server (`backend/app/services/staged_uploads.py`); bundles can be up to 300 MB.
+* It is unpacked under `MODEL_UPLOAD_ROOT` (default `RUN_ROOT/model_uploads`) and checked
+  exactly like a reviewed descriptor: every checksum, the bundle manifest, the 24-input
+  schema, the domain mask and a smoke prediction. Unsafe file names are refused, and
+  nothing in the bundle is run as code. A bundle that fails a check leaves nothing behind.
+* It is always registered as **experimental**, whatever the descriptor declares; approval
+  and activation stay with the reviewers (below).
+* With Blob Storage configured, the ZIP is kept as `models/<model_id>.zip`, so a restarted
+  replica unpacks it again before loading the model.
+
+To compare it with the model in use, choose it under *Model for this run* on the
+Operations page: its forecasts are kept next to the model in use's, verified the same way,
+and labelled with its name on the Archive. The bulletin and the Copilot stay with the
+model in use.
+
 ### Lifecycle: approval and activation are separate decisions
 
 A registered model has passed every integrity check. The registry then keeps these states

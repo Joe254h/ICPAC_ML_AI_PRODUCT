@@ -201,3 +201,26 @@ def test_the_copilot_can_list_the_weeks_to_ask_which_one(env, fast_maps, claude)
     assert newer["forecast_id"] != older["forecast_id"]
     request = json.dumps(fake.requests[-1])
     assert "forecast week chosen on the page" in request
+
+
+def test_without_the_ai_a_question_about_a_file_shows_the_file(env, fast_maps, monkeypatch):
+    from chatbot import agent
+
+    run(env)
+    monkeypatch.setattr(agent, "chat_model", lambda: None)
+    lines = "\n".join(f"Line {n}: rainfall at station {n} was normal." for n in range(400))
+    note = env.client.post(
+        "/chat/attachments?name=field-report.txt",
+        content=f"Field report\n\n{lines}".encode(),
+        headers={"Content-Type": "application/octet-stream"},
+    ).json()
+    answer = env.client.post(
+        "/chat", json={"message": "What is in this document?", "attachment_ids": [note["id"]]}
+    )
+    assert answer.status_code == 200, answer.text
+    body = answer.json()
+    assert body["kind"] == "document" and body["evidence"] == ["Attached file"]
+    assert body["text"].startswith("**field-report.txt**")
+    assert "It begins:\n\nField report\n\nLine 0:" in body["text"]
+    assert "more lines" in body["text"]  # a long document is shown in part
+    assert "Week-2" not in body["text"]  # not this week's forecast

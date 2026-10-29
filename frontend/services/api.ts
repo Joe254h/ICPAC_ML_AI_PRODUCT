@@ -106,3 +106,30 @@ export function mutate<T>(path: string, body: unknown) {
     body: JSON.stringify(body),
   });
 }
+
+/** Requests through the website's proxy carry at most about 4.5 MB: a larger file goes in
+ * numbered parts. Returns the upload's id, for the endpoint that finishes it. */
+export async function uploadInParts(
+  file: File,
+  purpose: "model" | "attachment",
+  progress?: (sent: number) => void,
+): Promise<string> {
+  const started = await mutate<{ id: string; part_bytes: number }>("/uploads", {
+    purpose,
+    name: file.name,
+    size: file.size,
+  });
+  for (
+    let index = 0, offset = 0;
+    offset < file.size;
+    index += 1, offset += started.part_bytes
+  ) {
+    await request(`/uploads/${started.id}/parts/${index}`, {
+      method: "POST",
+      body: file.slice(offset, offset + started.part_bytes),
+      headers: { "Content-Type": "application/octet-stream" },
+    });
+    progress?.(Math.min(file.size, offset + started.part_bytes));
+  }
+  return started.id;
+}

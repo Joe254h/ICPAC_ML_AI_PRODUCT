@@ -184,9 +184,26 @@ forecast, observed rainfall or verification figures, and those figures are still
 ## Answer language
 
 The chat request carries `language` (en, sw, am, so, ar, fr, ti, om, rw, rn, lg), chosen
-from the menu on the Copilot page and remembered in the browser. The model writes the whole
-answer in that language, keeps every figure, unit and date as the tools gave them, and says
-when it cannot write the language well. A bulletin translated in the conversation is a new
-draft version that a speaker of the language reviews before approval. See
-`docs/language_training.md` for the translation model that will take over the
-less-resourced languages.
+from the menu on the Copilot page. The choice is the site's: the bulletin page's
+*Translate this draft* uses the same one, and choosing a language in either place changes it
+in both (`frontend/lib/language.ts`). The model writes the whole answer in that language,
+keeps every figure, unit and date as the tools gave them, and says when it cannot write the
+language well.
+
+Asked for the bulletin, the Copilot shows the newest draft in the chosen language when
+there is one (a draft's language is kept through later edits); when there is none, it can
+make one with `translate_bulletin`, the same checked translation as the bulletin page: a new
+draft version, kept only if every paragraph keeps its figures, that a speaker of the
+language reviews before approval. See `docs/language_training.md` for the translation model
+that will take over the less-resourced languages.
+
+## Files, editing and retrying
+
+Files of any format go with a question (`chatbot/attachments.py`): text, PDF, Word,
+PowerPoint and Excel are read; images go to an AI service that reads them; NetCDF forecasts
+go to the comparison above. Files over 4 MB are sent in parts, up to 20 MB. When the AI
+service cannot answer, a question with files shows what was read from them (the start of
+each document's text) instead of this week's forecast.
+
+Each question can be copied or edited and asked again (the answers after it are replaced,
+its files kept); the latest answer can be copied or asked for again.

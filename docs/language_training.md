@@ -31,9 +31,16 @@ text. Those four start from forecaster-translated templates.
 |---|---|---|
 | 1 | Kiswahili, Amharic, Somali, Afaan Oromo | Together they reach most people in the region. Kiswahili is the common language of Kenya, Tanzania, Uganda, Rwanda and Burundi. Amharic is Ethiopia's working language, and Afaan Oromo its largest mother tongue. Somali covers Somalia, Djibouti, Ethiopia's Somali Region and north-eastern Kenya, where drought and flood warnings matter most. General AI models are weakest in Amharic and Oromo, so fine-tuning gains most there. |
 | 2 | Tigrinya, Kinyarwanda, Kirundi | National languages of Eritrea, Rwanda and Burundi; less training data, so the forecasters' templates carry more weight. |
-| 3 | Luganda | Uganda; the SALT corpus adds farming and health sentences. |
-| Templates only | Afar, Tigre, Dinka, Nuer | Too little usable data for a model yet; forecasters translate the templates. |
+| 3 | Luganda, Dholuo, Kikuyu, Kamba | Uganda's and Kenya's largest further languages. NLLB-200 already knows all four; SALT (Luganda), SMOL (Dholuo, Kikuyu) and mined pairs (Kikuyu, Kamba) supply the data. |
+| 4 | Afar, Tigre, Sudanese Arabic, Acholi, Alur, Rukiga, Lugbara, Runyankole, Ateso, Dinka, Nuer | Public data exists but is small (SMOL sentences and documents, GATITOS word lists, SALT). NLLB-200 lacks the first nine: each gets a new language code started from a related language (Afar from Somali, Tigre from Tigrinya, Sudanese Arabic from Arabic, the Luo-group languages from Dholuo, the Bantu ones from Luganda). Expect rough output: a speaker reviews everything, and the forecasters' translated templates matter most. Dinka and Nuer mined pairs are mostly religious text and are left out unless `--mined-anyway` is given. |
 | No fine-tune | Arabic, French | General AI models already write them well; a reviewed glossary of ICPAC terms is enough. |
+
+Data checked on Hugging Face on 29 October 2026: `google/smol` (CC-BY-4.0) has sentence and
+document translations for Afar, Tigre, Sudanese Arabic, Acholi, Alur, Rukiga, Dinka, Dholuo
+and Kikuyu, and GATITOS word lists for those and Nuer; `Sunbird/salt` (CC-BY-SA-4.0, gated)
+has Luganda, Acholi, Lugbara, Runyankole, Ateso and Kiswahili; NLLB-v1 mined pairs are
+mirrored for Kikuyu, Kamba and Nuer. MAFAND-MT has Dholuo news sentences but is
+CC-BY-NC-4.0, so it is not used.
 
 Start with phase 1 on one model (all four in one run): NLLB-600M takes 4-5 hours on the
 RTX 5000 Ada once its memory is free, or under an hour on one GH200.
@@ -141,6 +148,27 @@ templates (and, with permission, past Swahili and Amharic bulletins of KMD, TMA 
 Ethiopian Meteorology Institute) are the in-domain data. Mined pairs are noisy and mostly
 religious; they are capped (150,000 by default) and mixed about 1 in-domain : 3 general.
 Dinka and Nuer mined data is almost all Bible text: use human templates only.
+
+## Training on Kaggle (two T4 GPUs, free)
+
+`training/translation/kaggle_finetune_2xT4.ipynb` runs the same scripts on Kaggle's
+**GPU T4 x2**: import it on Kaggle, choose *GPU T4 x2* and *Internet on*, add a Hugging Face
+token as the secret `HF_TOKEN` (for SALT), set `PHASE`, and *Save & Run All*.
+
+* `torchrun` starts one training process per GPU (data parallel), so the two T4s together
+  do about twice the work of one. T4s have no bf16: training uses fp16 mixed precision
+  with fp32 master weights.
+* Adafactor keeps the optimizer state small: a checkpoint of the 600M model is about
+  2.5 GB, so two fit in Kaggle's 20 GB working space with the final model.
+* Kaggle stops a GPU session after 9 or 12 hours (check your account) and gives about 30
+  GPU hours a week. Training saves and stops after `HOURS` (8.5 by default); attach the
+  version's output to the next session and run it again to continue from the newest
+  checkpoint with the same prepared data.
+* After 200 steps the log prints how long the run will take on your data, which is the
+  figure to plan sessions with.
+* The 1.3B model trains as LoRA adapters with gradient checkpointing (`LORA = True`). The
+  new language codes of phase 4 then stay as started (only the adapters train), so phase 4
+  is better trained on the 600M model in full.
 
 ## Training on a GPU
 

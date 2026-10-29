@@ -218,6 +218,14 @@ function VerificationMap({ metric }: { metric: string }) {
                 src={`/api/verification/maps/${metric}?variant=${shown}&${scope}`}
                 alt={`${info.title} of ${SERIES[shown].label} over verified forecasts`}
               />
+              {metric === "correlation" && data.correlation_threshold && (
+                <p className="card-note">
+                  With {data.cases} weeks the correlation is noisy: only r above{" "}
+                  {data.correlation_threshold.toFixed(2)} differs from chance.
+                  White areas had no rain, observed or forecast, in those weeks,
+                  so there is nothing to correlate.
+                </p>
+              )}
             </Card>
           ) : (
             <>

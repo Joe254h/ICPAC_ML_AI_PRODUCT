@@ -51,7 +51,12 @@ from climate_engine.products import weekly_bulletin as weekly
 from climate_engine.products.bulletin import BulletinInputs, WordTemplateGenerator
 from climate_engine.products.store import package_store
 from climate_engine.provenance import file_checksum, permitted_file
-from climate_engine.verification import CELL_METRICS, CellStatistics, pooled_metrics
+from climate_engine.verification import (
+    CELL_METRICS,
+    CellStatistics,
+    critical_correlation,
+    pooled_metrics,
+)
 
 KIND = "forecast_run"
 INPUT_KIND = "ecmwf_input"
@@ -1064,6 +1069,8 @@ class ForecastService:
                 for name, (_, title) in VERIFICATION_MAPS.items()
             },
             "variants": [v for v in VARIANTS if counts[v]] or ["raw", "mbc"],
+            # The smallest correlation that differs from chance with this many weeks.
+            "correlation_threshold": critical_correlation(cases),
         }
 
     def verification_map(
@@ -1135,11 +1142,16 @@ class ForecastService:
         else:
             values = stats[variant].metric(metric)
         label = {"raw": "RAW ECMWF", "mbc": "MBC", "hybrid": method}[variant]
-        note = f"{len(records)} verified weekly forecasts against CHIRPS | cell-based\n" + (
-            "Includes the protected 2022-2024 test period: display only"
-            if include_protected
-            else f"Excludes the protected 2022-2024 test period ({skipped} forecasts)"
-        )
+        weeks = len(records)
+        lines = [f"{weeks} verified {'week' if weeks == 1 else 'weeks'} against CHIRPS"]
+        if metric == "correlation" and (r := critical_correlation(weeks)) is not None:
+            # Few weeks make r noisy; white cells had no rain to correlate.
+            lines.append(
+                f"Only r above {r:.2f} differs from chance | white: no rain in these weeks"
+            )
+        if include_protected:
+            lines.append("Includes 2022-2024 (display only)")
+        note = "\n".join(lines)
         figure = maps.Figure(
             f"verification_{metric}_{variant}",
             [

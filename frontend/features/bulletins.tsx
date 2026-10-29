@@ -10,7 +10,12 @@ import {
   PenLine,
   RefreshCw,
 } from "lucide-react";
-import { DraftEditor, TranslateDraft } from "@/features/bulletin-editor";
+import Link from "next/link";
+import {
+  DraftEditor,
+  TRANSLATIONS,
+  TranslateDraft,
+} from "@/features/bulletin-editor";
 import ReviewDialog from "@/components/review-dialog";
 import type { Review } from "@/components/review-dialog";
 import {
@@ -28,6 +33,7 @@ import {
 import type { Tone } from "@/components/ui";
 import type { PageProps } from "@/features/view";
 import { useActor } from "@/lib/actor";
+import { useLanguage } from "@/lib/language";
 import { dateTime, day, personName, weekPeriod } from "@/lib/format";
 import { mutate, request } from "@/services/api";
 import { useApi } from "@/services/hooks";
@@ -249,12 +255,15 @@ function EmailLine({
 
 function Detail({
   draft,
+  inLanguage,
   onChanged,
   onRevise,
   onVersion,
   busy,
 }: {
   draft: Bulletin;
+  /** This forecast's newest draft in the site's language, when that is another one. */
+  inLanguage?: Bulletin;
   onChanged: (draft: Bulletin) => void;
   onRevise: () => void;
   /** A new version was made (edited or translated): show it. */
@@ -335,6 +344,13 @@ function Detail({
             <Globe2 size={16} /> Web page
           </LinkButton>
         </div>
+        {inLanguage && (
+          <Notice title={`${inLanguage.edited?.language} version.`}>
+            This week&apos;s bulletin is also drafted in{" "}
+            {inLanguage.edited?.language}, your chosen language.{" "}
+            <Link href={`/bulletins?id=${inLanguage.id}`}>Open it</Link>
+          </Notice>
+        )}
         {draft.edited?.language && (
           <Notice title={`${draft.edited.language} version.`}>
             Machine translation of the wording, every figure checked. A{" "}
@@ -469,6 +485,19 @@ export default function Bulletins({ id }: PageProps) {
   ];
   const active =
     drafts.data?.find((d) => d.id === selected) ?? groups[0]?.items[0];
+  // The same week drafted in the site's language (chosen here or in the Copilot).
+  const [language] = useLanguage();
+  const languageName = TRANSLATIONS[language];
+  const inLanguage =
+    active && languageName && active.edited?.language !== languageName
+      ? (drafts.data ?? [])
+          .filter(
+            (d) =>
+              d.forecast_id === active.forecast_id &&
+              d.edited?.language === languageName,
+          )
+          .sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
+      : undefined;
   const newestDrafted =
     !newest ||
     (drafts.data ?? []).some((d) => d.forecast_id === newest.forecast_id);
@@ -644,6 +673,7 @@ export default function Bulletins({ id }: PageProps) {
               <Detail
                 key={active.id}
                 draft={active}
+                inLanguage={inLanguage}
                 busy={busy}
                 onRevise={() => create(active)}
                 onChanged={() => drafts.reload()}

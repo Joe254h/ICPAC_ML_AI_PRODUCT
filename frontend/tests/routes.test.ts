@@ -25,7 +25,8 @@ test("every page is listed in the header menus, grouped under its main pages", (
     ),
   );
   for (const route of ROUTES.filter(
-    (r) => r.nav !== false && r.page !== "home",
+    // Home and About are reached from the logo and the footer, not a header menu.
+    (r) => r.nav !== false && r.menu !== "Home",
   ))
     expect(listed.has(route.path), route.path).toBe(true);
   // Countries, layers and data sources sit under their own headings.

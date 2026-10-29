@@ -543,13 +543,6 @@ def _summary(which: str, stamp: str) -> dict[str, Any]:
             {"id": _figure_id(name), "title": title, "group": group}
             for name, (title, group) in ev.figures.items()
         ],
-        "sudan": {
-            "cells_outside_vector": 813,
-            "note": "813 authoritative cells labelled Sudan lie outside the reference Sudan "
-            "outline (mainly the Halaib triangle north of 22°N, plus border fringe cells). "
-            "They remain in the scoring mask exactly as frozen; maps draw the official "
-            "outline. No cell was reassigned and no verification result was changed.",
-        },
     }
 
 

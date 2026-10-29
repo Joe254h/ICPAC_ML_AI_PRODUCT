@@ -19,6 +19,7 @@ first registry change pins that model so that no approval or registration switch
 
 import json
 import os
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
@@ -141,7 +142,43 @@ class ModelRegistry:
 
     # ------------------------------------------------------------------ registration
 
-    def register_descriptor(self, descriptor_path: str, actor: str = "registry") -> dict:
+    def register_upload(self, data: bytes, actor: str) -> dict:
+        """Register a model bundle uploaded through the website (a ZIP with its registration
+        descriptor; see climate_engine/models/uploads.py). It is checked exactly like a
+        reviewed descriptor and registered as experimental: a reviewer approves it and makes
+        it the model in use on the Models page. A failed check leaves nothing behind."""
+        import shutil
+
+        from climate_engine.models import uploads
+        from climate_engine.products.store import package_store
+
+        descriptor = uploads.read_descriptor(data)
+        model_id = str(descriptor.get("model_id") or "")
+        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", model_id):
+            raise uploads.BundleError(
+                "The descriptor's model_id may contain letters, digits, '_' and '-' only"
+            )
+        self._require_new_id(model_id)
+        path = uploads.unpack(data, model_id)
+        upload = {
+            "sha256": uploads.sha256(data),
+            "bytes": len(data),
+            "uploaded_by": actor,
+            "uploaded_at": now(),
+        }
+        try:
+            record = self.register_descriptor(str(path), actor, extra={"upload": upload})
+        except Exception:
+            shutil.rmtree(path.parent, ignore_errors=True)
+            raise
+        store = package_store()
+        if store is not None:  # a restarted replica unpacks it again from here
+            store.put(uploads.store_name(model_id), data)
+        return record
+
+    def register_descriptor(
+        self, descriptor_path: str, actor: str = "registry", extra: dict | None = None
+    ) -> dict:
         """Register an operational model only after every artifact check passes."""
         descriptor, fields = operational.describe(descriptor_path)
         self._require_new_id(descriptor.model_id)
@@ -176,6 +213,7 @@ class ModelRegistry:
             "registered_by": actor,
             "descriptor_data": descriptor.data,
             "deployment_date": None,
+            **(extra or {}),
         }
         # Checks and inserts in one locked transaction; the primary keys on the model ID
         # and on the artifact claim make a concurrent duplicate fail instead of merging.

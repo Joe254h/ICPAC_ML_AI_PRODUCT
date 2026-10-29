@@ -329,7 +329,9 @@ def test_the_weekly_cycle_leaves_the_slow_monitoring_to_a_follow_up_task(platfor
     even when the cycle is retried."""
     service = OperationService(platform)
     calls: list[str] = []
-    monkeypatch.setattr(OperationService, "_issued", lambda self, day: [{"forecast_id": "f-1"}])
+    monkeypatch.setattr(
+        OperationService, "_issued", lambda self, day, model_id=None: [{"forecast_id": "f-1"}]
+    )
 
     def verify(self, op, body, compare=True):
         calls.append(f"verify compare={compare}")

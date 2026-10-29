@@ -127,6 +127,11 @@ def check_consistency(bulletin: dict) -> dict:
     }
 
 
+def language_of(record: dict[str, Any]) -> str | None:
+    """The language a draft is written in (its name), or None for English."""
+    return (record.get("edited") or {}).get("language") or None
+
+
 class BulletinService:
     def __init__(self, platform):
         self.platform = platform
@@ -293,6 +298,18 @@ class BulletinService:
         self.repo.audit("generate_bulletin_draft", actor, identifier, {"forecast": forecast_id})
         return record
 
+    def latest_in(self, forecast_id: str, language: str | None) -> dict | None:
+        """The newest weekly draft of a forecast written in ``language`` (its name, e.g.
+        "Kiswahili"; None for English)."""
+        drafts = [
+            b
+            for b in self.repo.list("bulletin")
+            if b.get("kind") == WEEKLY
+            and b.get("forecast_id") == forecast_id
+            and language_of(b) == language
+        ]
+        return max(drafts, key=lambda b: b["created_at"]) if drafts else None
+
     def latest(self, forecast_id: str) -> dict | None:
         """The newest weekly draft of a forecast, whatever its review state."""
         drafts = [
@@ -391,12 +408,19 @@ class BulletinService:
             changed.append(title)
         if not changed:
             raise RevisionRefused("The requested wording is the same as the current draft.")
+        # A translated draft stays in its language through later edits.
+        language = edited.get("language") or language_of(base)
         record = self.generate_weekly(
             forecast_id,
             base["id"],
             actor,
             revised=sections,
-            edited={**edited, "changed": list(dict.fromkeys(changed)), "at": now()},
+            edited={
+                **edited,
+                **({"language": language} if language else {}),
+                "changed": list(dict.fromkeys(changed)),
+                "at": now(),
+            },
         )
         self.repo.audit(
             "revise_bulletin_draft",

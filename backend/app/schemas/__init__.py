@@ -152,7 +152,22 @@ class OperationRequest(BaseModel):
     #: past_weeks: how many past weeks to forecast and verify; refresh_archive: how many of
     #: the newest ECMWF runs to bring up to the model in use.
     weeks: int = Field(default=4, ge=1, le=12)
+    #: The registered model to forecast with (run_forecast, cycle, end_to_end, past_weeks,
+    #: refresh_archive); empty: the model in use.
+    model_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]+$", max_length=80)
     actor: str = Field(min_length=2, max_length=80)
+
+
+class UploadStartRequest(BaseModel):
+    """A file sent in parts (backend/app/services/staged_uploads.py)."""
+
+    purpose: Literal["model", "attachment"]
+    name: str = Field(min_length=1, max_length=200)
+    size: int = Field(gt=0)
+
+
+class UploadFinishRequest(BaseModel):
+    upload_id: str = Field(pattern=r"^[0-9a-f-]{32,36}$")
 
 
 class StopRequest(BaseModel):

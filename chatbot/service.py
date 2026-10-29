@@ -101,6 +101,42 @@ def provider_said(exc: Exception) -> str | None:
     return None
 
 
+#: How much of a file's text an answer without the AI shows.
+PREVIEW_CHARACTERS = 1800
+
+
+def document_preview(record: dict) -> str:
+    """A file as read: its name and size, then the start of its text."""
+    size = record.get("bytes") or 0
+    head = (
+        f"**{record['name']}** ({size / 1024:.0f} KB)"
+        if size >= 1024
+        else (f"**{record['name']}** ({size} bytes)")
+    )
+    if record.get("kind") == "image":
+        return f"{head}: an image. The AI assistant describes images when it is available."
+    text = str(record.get("text") or "").strip()
+    if not text:
+        return f"{head}: {record.get('note') or 'its content cannot be read as text'}."
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    shown: list[str] = []
+    used = 0
+    for line in lines:
+        if used + len(line) > PREVIEW_CHARACTERS and shown:
+            break
+        shown.append(line[:PREVIEW_CHARACTERS])
+        used += len(line)
+    rest = len(lines) - len(shown)
+    words = len(text.split())
+    body = "\n\n".join(shown)
+    more = (
+        f"\n\n… {rest} more {'line' if rest == 1 else 'lines'} ({words:,} words in all)."
+        if rest
+        else ""
+    )
+    return f"{head}, {words:,} words. It begins:\n\n{body}{more}"
+
+
 def model_name(model) -> str:
     return str(getattr(model, "model", "") or "the language model")
 
@@ -111,6 +147,8 @@ class Copilot:
         self.references = ReferenceIndex()
         #: The files attached to the question being answered, as the page shows them.
         self._files: list[dict] = []
+        #: The same files with what was read from them, for an answer without the AI.
+        self._read: list[dict] = []
 
     @request_budget
     def answer(
@@ -133,6 +171,7 @@ class Copilot:
             session["messages"] = held[: body.edit_index]
         files = [Attachments(self.platform).get(i, owner) for i in body.attachment_ids]
         self._files = [public(f) for f in files]
+        self._read = files
         fallback = None
         reason = None
         try:
@@ -190,6 +229,8 @@ class Copilot:
     ) -> dict:
         if body.external_id:
             return self._fixed_comparison(body, session, fallback, reason)
+        if self._read:
+            return self._fixed_documents(body, session, fallback, reason)
         history = session["messages"]
         evidence = OperationalConversation(self.platform).compose(body, session)
         tools = {t["tool"] for t in evidence["tool_trace"]}
@@ -223,6 +264,28 @@ class Copilot:
             "grounding": GROUNDING,
         }
         session["context"] = response["context"]
+        return self._save(body, session, response)
+
+    def _fixed_documents(
+        self, body: ChatRequest, session: dict, fallback: str | None, reason: str | None
+    ) -> dict:
+        """The attached files as read, when the AI cannot answer about them: a question about
+        a document should show the document, not this week's forecast."""
+        response = {
+            "text": "\n\n".join(document_preview(f) for f in self._read),
+            "kind": "document",
+            "evidence": ["Attached file" if len(self._read) == 1 else "Attached files"],
+            "provider": "fixed",
+            "fallback": fallback,
+            "fallback_reason": reason,
+            "tool_trace": [],
+            "images": [],
+            "links": [],
+            "sources": [],
+            "context": dict(session.get("context") or {}),
+            "created_at": now(),
+            "grounding": GROUNDING,
+        }
         return self._save(body, session, response)
 
     def _fixed_comparison(

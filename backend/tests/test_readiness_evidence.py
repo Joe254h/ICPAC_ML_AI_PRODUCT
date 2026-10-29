@@ -69,7 +69,7 @@ def test_the_experimental_verification_is_served_from_the_frozen_tables(env):
     assert sorted(body["thresholds_mmweek"]) == [1.0, 10.0, 25.0, 50.0, 100.0]
     assert {c["model"] for c in body["deterministic_roc"]} >= {"CatBoost", "MBC"}
     assert all(len(c["curve"]) <= 80 for c in body["deterministic_roc"])
-    assert body["sudan"]["cells_outside_vector"] == 813
+    assert "sudan" not in body  # an internal mask check, not shown to readers
     assert body["comparison"] is None and body["figures"] == []
     png = client.get("/verification/experimental/maps/added_value_mbc?set=prerefit")
     assert png.status_code == 200 and png.content[:4] == b"\x89PNG"

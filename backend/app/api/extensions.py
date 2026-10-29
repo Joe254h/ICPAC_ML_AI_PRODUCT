@@ -1,7 +1,7 @@
 import asyncio
 import re
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import Response
 
 from backend.app.api.access import (
@@ -13,6 +13,7 @@ from backend.app.api.access import (
     require_admin,
     require_chat,
     require_operator,
+    require_staff_key,
 )
 from backend.app.db import now
 from backend.app.schemas import (
@@ -26,6 +27,8 @@ from backend.app.schemas import (
     RealtimeReviewRequest,
     ResendRequest,
     ReviewRequest,
+    UploadFinishRequest,
+    UploadStartRequest,
 )
 from backend.app.services import bulletin_mail
 from backend.app.services.bulletin_export import WeeklyHTMLExporter
@@ -43,6 +46,17 @@ from chatbot.service import Copilot
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
+def uploader(purpose: str, authorization: str | None, visitor: str | None) -> Principal:
+    """Who may send an upload: a model bundle needs a staff key with the admin role, even on
+    the public site; a Copilot file, whoever may use the Copilot."""
+    if purpose == "model":
+        return require_staff_key(authorization)
+    user = principal(authorization, visitor)
+    if not user.roles & {"admin", "chat"}:
+        raise HTTPException(403, "The chat role is required.")
+    return user
+
+
 def install(app: FastAPI, dependency):
     @app.post("/models/register")
     def register_model(
@@ -52,6 +66,75 @@ def install(app: FastAPI, dependency):
     ) -> dict:
         """Operational models register from a reviewed descriptor."""
         return ModelRegistry(platform).register_descriptor(body.descriptor, acting_name(user))
+
+    @app.post("/uploads", status_code=201)
+    def start_upload(
+        body: UploadStartRequest,
+        platform=Depends(dependency),
+        authorization: str | None = Header(default=None),
+        x_visitor_id: str | None = Header(default=None),
+    ) -> dict:
+        """Begin a file sent in parts: a model bundle (staff key with the admin role) or a
+        file for the Copilot."""
+        from backend.app.services.staged_uploads import StagedUploads, UploadError
+
+        user = uploader(body.purpose, authorization, x_visitor_id)
+        try:
+            return StagedUploads(platform).start(body.purpose, body.name, body.size, user.name)
+        except UploadError as exc:
+            raise HTTPException(422, str(exc)) from None
+
+    @app.post("/uploads/{id}/parts/{index}")
+    async def upload_part(
+        id: str,
+        index: int,
+        request: Request,
+        platform=Depends(dependency),
+        authorization: str | None = Header(default=None),
+        x_visitor_id: str | None = Header(default=None),
+    ) -> dict:
+        """One numbered part of an upload (the request body), in order from 0."""
+        from backend.app.services.staged_uploads import (
+            KIND,
+            PART_BYTES,
+            StagedUploads,
+            UploadError,
+        )
+
+        try:
+            purpose = platform.repo.get(KIND, id)["purpose"]
+        except KeyError:
+            raise HTTPException(404, "No such upload") from None
+        user = uploader(purpose, authorization, x_visitor_id)
+        data = bytearray()
+        async for chunk in request.stream():
+            data += chunk
+            if len(data) > PART_BYTES:
+                raise HTTPException(413, f"A part can be up to {PART_BYTES:,} bytes")
+        try:
+            return StagedUploads(platform).part(id, index, bytes(data), user.name)
+        except UploadError as exc:
+            raise HTTPException(422, str(exc)) from None
+        except KeyError:
+            raise HTTPException(404, "No such upload") from None
+
+    @app.post("/models/upload", status_code=201)
+    async def upload_model(
+        body: UploadFinishRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_staff_key),
+    ) -> dict:
+        """Register a model bundle sent in parts: checked like a reviewed descriptor and
+        registered as experimental (climate_engine/models/uploads.py)."""
+        from backend.app.services.staged_uploads import StagedUploads, UploadError
+
+        try:
+            _, data = StagedUploads(platform).finish(body.upload_id, user.name, "model")
+            return await asyncio.to_thread(ModelRegistry(platform).register_upload, data, user.name)
+        except KeyError:
+            raise HTTPException(404, "No such upload") from None
+        except (UploadError, ValueError, FileNotFoundError) as exc:
+            raise HTTPException(422, str(exc)) from None
 
     @app.post("/models/{id}/independent-test")
     def independent_test(
@@ -130,6 +213,24 @@ def install(app: FastAPI, dependency):
         try:
             return await asyncio.to_thread(Attachments(platform).save, name, bytes(data), user.name)
         except AttachmentError as exc:
+            raise HTTPException(422, str(exc)) from None
+
+    @app.post("/chat/attachments/staged", status_code=201)
+    async def attach_staged(
+        body: UploadFinishRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_chat),
+    ) -> dict:
+        """A file for the next question that arrived in parts (larger than one request)."""
+        from backend.app.services.staged_uploads import StagedUploads, UploadError
+        from chatbot.attachments import AttachmentError, Attachments
+
+        try:
+            name, data = StagedUploads(platform).finish(body.upload_id, user.name, "attachment")
+            return await asyncio.to_thread(Attachments(platform).save, name, data, user.name)
+        except KeyError:
+            raise HTTPException(404, "No such upload") from None
+        except (UploadError, AttachmentError) as exc:
             raise HTTPException(422, str(exc)) from None
 
     def first_question(session: dict) -> str:

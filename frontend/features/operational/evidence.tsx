@@ -240,7 +240,7 @@ function Overview({ e }: { e: ExperimentalEvidence }) {
     <>
       <Card
         title={`Regional scores, 551 ${casesWord(e)} cases`}
-        subtitle="Area-weighted over every matched cell of the eleven member states (113,285,600 cell observations). Lowest RMSE in bold."
+        subtitle="Area-weighted over the eleven member states. Lowest RMSE in bold."
       >
         <Chart
           option={option}
@@ -401,7 +401,7 @@ function OverTime({ e }: { e: ExperimentalEvidence }) {
       />
       <Card
         title="By initialization month"
-        subtitle="Pooled exactly from the per-case sums of the 551 cases (about 46 per month). Correlation cannot be pooled from those sums, so it is not shown here."
+        subtitle="About 46 cases per month."
       >
         <Chart
           option={option}
@@ -458,7 +458,7 @@ function Countries({ e }: { e: ExperimentalEvidence }) {
       />
       <Card
         title="Member states"
-        subtitle="Cells of each country in the authoritative scoring mask; lowest score in bold."
+        subtitle="Each member state's own cells; lowest score in bold."
       >
         <Matrix groups={e.countries} metric={metric} label="Country" />
       </Card>
@@ -888,7 +888,7 @@ function Maps({ e }: { e: ExperimentalEvidence }) {
   return (
     <Card
       title="Spatial verification"
-      subtitle={`Frozen maps of the 551 ${casesWord(e)} cases, with ICPAC's outlines and logo.`}
+      subtitle={`Maps of the 551 ${casesWord(e)} cases.`}
     >
       <Tabs
         label="Map"
@@ -901,9 +901,6 @@ function Maps({ e }: { e: ExperimentalEvidence }) {
         src={asset(e, "maps", map)}
         alt={e.maps.find((m) => m.id === map)?.title ?? "Verification map"}
       />
-      <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 0 }}>
-        {e.sudan.note}
-      </p>
     </Card>
   );
 }

@@ -1,10 +1,12 @@
 """Build English -> East African language training and test files (JSONL).
 
 For each language: in-domain pairs from the translated bulletin templates (filled by
-native-speaker forecasters, see templates.en.tsv), SMOL professional translations, and the
+native-speaker forecasters, see templates.en.tsv), SMOL professional translations (sentences
+and documents) and GATITOS word lists, SALT sentences for Uganda's languages, and the
 best-scoring NLLB-v1 mined pairs (the mirrors are sorted by similarity, best first), mixed
-so that general data does not drown the weather domain. NTREX-128 news sentences are kept
-apart as the test set. Nothing here downloads more than the rows it keeps.
+so that general data does not drown the weather domain. NTREX-128 news sentences (or SALT's
+test split) are kept apart as the test set; a language with neither keeps 300 SMOL
+sentences apart instead. Nothing here downloads more than the rows it keeps.
 
     python prepare_data.py --languages sw am so om ti rw rn lg --out data \\
         --templates translations/ --mined-rows 150000
@@ -24,6 +26,7 @@ from datasets import load_dataset
 from languages import LANGUAGES, Language
 
 SMOL = "google/smol"
+SALT = "Sunbird/salt"  # gated: accept its terms on Hugging Face and sign in first
 NTREX = "masakhane/ntrex_african"
 MIN_SIMILARITY = 1.06  # NLLB-v1 margin score; lower-scored mined pairs are mostly noise
 
@@ -52,6 +55,53 @@ def smol(language: Language) -> list[dict]:
             src, tgt = clean(row["src"]), clean(target)
             if usable(src, tgt):
                 out.append({"src": src, "tgt": tgt, "source": "smol"})
+    return out
+
+
+def smol_extra(config: str | None, source: str) -> list[dict]:
+    """SMOL's document translations or GATITOS word list: rows with ``src`` and ``trgs``
+    like the sentences; long documents fall out at the length check."""
+    if not config:
+        return []
+    try:
+        rows = load_dataset(SMOL, config, split="train")
+    except Exception as exc:  # a config renamed or not yet published
+        print(f"  {config}: not loaded ({type(exc).__name__})")
+        return []
+    if "src" not in rows.column_names or "trgs" not in rows.column_names:
+        print(f"  {config}: unexpected columns {rows.column_names}; skipped")
+        return []
+    out = []
+    for row in rows:
+        for target in row["trgs"]:
+            src, tgt = clean(row["src"]), clean(target)
+            if usable(src, tgt):
+                out.append({"src": src, "tgt": tgt, "source": source})
+    return out
+
+
+def salt(language: Language) -> dict[str, list[dict]]:
+    """SALT's English-<language> sentences by split (train, dev, test). Its columns are
+    named by language code; a missing column or no access skips it with a message."""
+    if not language.salt:
+        return {}
+    out: dict[str, list[dict]] = {}
+    for split in ("train", "dev", "test"):
+        try:
+            rows = load_dataset(SALT, "text-all", split=split)
+        except Exception as exc:
+            print(f"  SALT {split}: not loaded ({type(exc).__name__}); request access first")
+            return out
+        columns = rows.column_names
+        english = next((c for c in ("eng_text", "eng") if c in columns), None)
+        target = next((c for c in (f"{language.salt}_text", language.salt) if c in columns), None)
+        if not english or not target:
+            print(f"  SALT: no English/{language.salt} columns in {columns}; skipped")
+            return out
+        pairs = (
+            {"src": clean(r[english]), "tgt": clean(r[target]), "source": "salt"} for r in rows
+        )
+        out[split] = [p for p in pairs if usable(p["src"], p["tgt"])]
     return out
 
 
@@ -115,23 +165,44 @@ def main() -> None:
     parser.add_argument("--templates", type=Path, default=Path("translations"))
     parser.add_argument("--mined-rows", type=int, default=150_000)
     parser.add_argument("--template-weight", type=int, default=20, help="repeat in-domain pairs")
+    parser.add_argument(
+        "--mined-anyway",
+        action="store_true",
+        help="also use mined pairs for Dinka and Nuer (mostly religious text)",
+    )
     parser.add_argument("--seed", type=int, default=20261025)
     args = parser.parse_args()
     rng = random.Random(args.seed)
     for key in args.languages:
         language = LANGUAGES[key]
         domain = templates(args.templates, key)
-        general = smol(language) + (
-            mined(language, args.mined_rows) if language.machine_translation else []
+        sentences = smol(language)
+        uganda = salt(language)
+        general = (
+            smol_extra(language.smol_doc, "smol-doc")
+            + smol_extra(language.gatitos, "gatitos")
+            + uganda.get("train", [])
+            + (
+                mined(language, args.mined_rows)
+                if language.machine_translation or args.mined_anyway
+                else []
+            )
         )
         rng.shuffle(domain)
+        rng.shuffle(sentences)
+        test = ntrex(language) or uganda.get("test", [])
+        if not test and len(sentences) >= 1000:
+            # No published test set: professional SMOL sentences are held out instead.
+            test, sentences = sentences[:300], sentences[300:]
+        general = sentences + general
         rng.shuffle(general)
-        # Hold out a tenth of the in-domain pairs (at least 20) and 1,000 general pairs.
+        # Hold out a tenth of the in-domain pairs (at least 20) and up to 1,000 general pairs.
         held = max(20, len(domain) // 10) if len(domain) >= 40 else 0
-        valid = domain[:held] + general[:1000]
-        train = domain[held:] * args.template_weight + general[1000:]
+        spare = uganda.get("dev", []) or general[: min(1000, len(general) // 10)]
+        valid = domain[:held] + spare
+        rest = general if uganda.get("dev") else general[len(spare) :]
+        train = domain[held:] * args.template_weight + rest
         rng.shuffle(train)
-        test = ntrex(language)
         write(args.out / key / "train.jsonl", train, language.code)
         write(args.out / key / "valid.jsonl", valid, language.code)
         write(args.out / key / "test.jsonl", test, language.code)

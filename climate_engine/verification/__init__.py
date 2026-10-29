@@ -138,6 +138,18 @@ class CellStatistics:
         return np.where(enough, values, np.nan)
 
 
+def critical_correlation(cases: int, level: float = 0.05) -> float | None:
+    """The smallest |r| that differs from zero at ``level`` (two-sided) with ``cases``
+    pairs; None with fewer than three."""
+    if cases < 3:
+        return None
+    from scipy.stats import t
+
+    df = cases - 2
+    value = float(t.ppf(1 - level / 2, df))
+    return value / float(np.sqrt(df + value * value))
+
+
 def season_of(day: date) -> str:
     return next(name for name, months in SEASONS.items() if day.month in months)
 

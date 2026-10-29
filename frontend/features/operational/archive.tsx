@@ -16,7 +16,7 @@ import { useActor } from "@/lib/actor";
 import { dateTime, day, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
-import type { ForecastRun } from "@/types/operational";
+import type { OperationalModel, ForecastRun } from "@/types/operational";
 import { NoForecast, methodName } from "@/features/operational/shared";
 
 /** The forecasts of each ECMWF run: the one of record first, then earlier versions. */
@@ -36,17 +36,18 @@ function Row({
   run,
   latest,
   earlier,
+  model,
 }: {
   run: ForecastRun;
   latest?: boolean;
   earlier?: boolean;
+  /** The model's name, shown for another version of the week. */
+  model?: string;
 }) {
   return (
     <tr className={earlier ? "earlier-version" : undefined}>
       <td className="strong">
-        {earlier
-          ? "Earlier version"
-          : validDays(run.valid_start, run.valid_end)}
+        {earlier ? "Other version" : validDays(run.valid_start, run.valid_end)}
         {latest && (
           <span style={{ marginLeft: 10 }}>
             <Status tone="info">Latest</Status>
@@ -54,7 +55,14 @@ function Row({
         )}
       </td>
       <td>{day(run.initialization)}, 00 UTC</td>
-      <td>{methodName(run)}</td>
+      <td>
+        {methodName(run)}
+        {model && (
+          <span style={{ display: "block", color: "var(--muted)" }}>
+            {model}
+          </span>
+        )}
+      </td>
       <td>
         {run.verification_status === "available" ? (
           <Status tone="ok">Verified · CHIRPS</Status>
@@ -74,6 +82,10 @@ function Row({
 
 export default function Archive() {
   const runs = useApi<ForecastRun[]>("/forecasts");
+  const models = useApi<OperationalModel[]>("/models");
+  const names = new Map(
+    (models.data ?? []).map((m) => [m.model_id, m.model_name] as const),
+  );
   const [actor] = useActor();
   const [open, setOpen] = useState<Set<string>>(new Set());
   const task = useOperation(() => runs.reload());
@@ -125,7 +137,7 @@ export default function Archive() {
             title={`${groups.length} forecast week${groups.length === 1 ? "" : "s"}`}
             subtitle={
               versions
-                ? `${versions} earlier version${versions === 1 ? "" : "s"} of these weeks are kept for the record.`
+                ? `${versions} other version${versions === 1 ? "" : "s"} of these weeks (earlier runs of the model, or other models) are kept for the record.`
                 : undefined
             }
           >
@@ -163,8 +175,8 @@ export default function Archive() {
                                   })
                                 }
                               >
-                                {shown ? "Hide" : "Show"} {earlier.length}{" "}
-                                earlier version
+                                {shown ? "Hide" : "Show"} {earlier.length} other
+                                version
                                 {earlier.length === 1 ? "" : "s"} of this week
                               </button>
                             </td>
@@ -172,7 +184,12 @@ export default function Archive() {
                         )}
                         {shown &&
                           earlier.map((run) => (
-                            <Row key={run.forecast_id} run={run} earlier />
+                            <Row
+                              key={run.forecast_id}
+                              run={run}
+                              earlier
+                              model={names.get(run.model_id)}
+                            />
                           ))}
                       </Fragment>
                     );

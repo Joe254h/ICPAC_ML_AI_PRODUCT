@@ -282,6 +282,8 @@ export type MapsStatus = {
   variants: Variant[];
   cases_by_variant?: Partial<Record<Variant, number>>;
   default_variant?: Variant;
+  /** The smallest correlation that differs from chance with this many weeks. */
+  correlation_threshold?: number | null;
 };
 
 export type BulletinStatus = {
@@ -718,7 +720,6 @@ export type ExperimentalEvidence = {
   deterministic_note: string;
   maps: { id: string; title: string }[];
   country_maps: string[];
-  sudan: { cells_outside_vector: number; note: string };
 };
 
 /** A verified week's scores against CHIRPS and the further observations. */

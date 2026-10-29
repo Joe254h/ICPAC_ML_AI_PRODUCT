@@ -448,12 +448,14 @@ def test_verification_maps_pool_one_models_verified_forecasts(env, monkeypatch):
     np.testing.assert_allclose(layer.field().values[MASK], expected[MASK], rtol=1e-5)
     assert np.isnan(layer.field().values[~MASK]).all()
     assert layer.title == "MBC + ATMOS37 CATBOOST | Week-2 Rainfall RMSE"
-    assert "Excludes the protected 2022-2024 test period (1 forecasts)" in drawn[0].note
+    assert drawn[0].note == "2 verified weeks against CHIRPS"
 
     correlation = client.get("/verification/maps/correlation")
     assert correlation.status_code == 404 and "needs 3 verified" in correlation.json()["detail"]
     assert client.get("/verification/maps/correlation?include_protected=true").status_code == 200
     assert "display only" in drawn[-1].note
+    # Three weeks: only a near-perfect correlation differs from chance.
+    assert "Only r above 1.00 differs from chance" in drawn[-1].note
     assert client.get("/verification/maps/skill?variant=raw").status_code == 422
     assert client.get("/verification/maps/skill?variant=mbc").status_code == 200
     assert client.get("/verification/maps/anomaly").status_code == 422

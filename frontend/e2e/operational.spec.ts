@@ -149,7 +149,14 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   await expect(
     page.getByRole("img", { name: /over verified forecasts/ }),
   ).toBeVisible({ timeout: 280_000 });
+  // The map says how noisy a correlation over so few weeks is.
+  await expect(
+    page.getByText(/only r above 0\.\d\d differs from chance/),
+  ).toBeVisible();
   await page.goto("/verification");
+  await expect(
+    page.getByRole("heading", { name: "How to read the scores" }),
+  ).toBeVisible();
   const stat = page.locator(".stat").filter({ hasText: "Verified forecasts" });
   await expect(stat.locator(".value")).toHaveText("4");
   await expect(page.getByRole("cell", { name: /SON/ }).first()).toBeVisible();
@@ -161,6 +168,19 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   // This week's forecast is still the current one.
   await page.goto("/forecasts");
   await expect(page.getByText("Not verified yet.")).toBeVisible();
+});
+
+test("the About page says what the service is for", async ({ page }) => {
+  await page.goto("/");
+  await page
+    .getByRole("contentinfo")
+    .getByRole("link", { name: "About this service" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "About this service", level: 1 }),
+  ).toBeVisible();
+  await expect(page.getByText(/7 to 14 days/)).toBeVisible();
+  await expect(page.locator("main")).not.toContainText(/internship/i);
 });
 
 test("no page shows code, identifiers or checksums", async ({ page }) => {

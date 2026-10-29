@@ -150,6 +150,11 @@ class OperationService:
                 pass
         if body.action == "verify_forecast" and not body.forecast_id:
             raise ValueError("Name the forecast to verify")
+        if body.model_id:
+            try:
+                self._forecasts().model_record(body.model_id)  # registered, not retired
+            except KeyError:
+                raise ValueError(f"No model called {body.model_id} is registered") from None
         if len([r for r in self.repo.list(KIND) if r["status"] in {"queued", "running"}]) >= 10:
             raise RunInProgress("Another operational task is running; wait for it to finish")
         if body.action == "past_weeks" and body.initialization is None:
@@ -157,7 +162,8 @@ class OperationService:
             body = body.model_copy(update={"initialization": _today()})
         payload: dict[str, Any] = {
             "action": body.action,
-            "title": ACTIONS[body.action],
+            "title": ACTIONS[body.action]
+            + (f" with {self._model_name(body.model_id)}" if body.model_id else ""),
             "status": "queued",
             "initialization": body.initialization.isoformat() if body.initialization else None,
             "forecast_id": body.forecast_id,
@@ -353,12 +359,19 @@ class OperationService:
     def _forecasts(self) -> ForecastService:
         return ForecastService(self.platform)
 
-    def _issued(self, initialization: date) -> Sequence[dict[str, Any]]:
-        """Forecasts already issued from this run by the model in use: a retry or a second
-        cycle reuses them; a newly activated model issues its own, and so does a run held
-        for a real-time input confirmation that a reviewer has since recorded."""
+    def _issued(
+        self, initialization: date, model_id: str | None = None
+    ) -> Sequence[dict[str, Any]]:
+        """Forecasts already issued from this run by the model in use (or the model named):
+        a retry or a second cycle reuses them; a newly activated model issues its own, and
+        so does a run held for a real-time input confirmation that a reviewer has since
+        recorded."""
         try:
-            model = ModelRegistry(self.platform).current()["model"]
+            model = (
+                self.platform.repo.get("model", model_id)
+                if model_id
+                else ModelRegistry(self.platform).current()["model"]
+            )
         except KeyError:
             model = {}
         model_id = model.get("model_id")
@@ -425,13 +438,20 @@ class OperationService:
         from climate_engine.inputs import ecmwf_opendata
 
         initialization: date = body.initialization or ecmwf_opendata.latest_initialization()
-        existing = self._issued(initialization)
+        existing = self._issued(initialization, body.model_id)
         if existing:
             return {"forecast_id": existing[0]["forecast_id"], "method": existing[0]["method"]}
-        self._log(operation_id, f"Running the forecast from the run of {_day(initialization)}")
+        self._log(
+            operation_id,
+            f"Running the forecast from the run of {_day(initialization)}"
+            + (f" with {self._model_name(body.model_id)}" if body.model_id else ""),
+        )
         run = self._forecasts().run(
             ForecastRunRequest(
-                initialization=initialization, source="ecmwf_opendata", actor=body.actor
+                initialization=initialization,
+                source="ecmwf_opendata",
+                actor=body.actor,
+                model_id=body.model_id,
             ),
             upper_air=True,
             progress=lambda text: self._log(operation_id, text),
@@ -590,7 +610,7 @@ class OperationService:
         forecasts = self._forecasts()
         cfg = settings()
         today = _today()
-        model_id = self._model_id()
+        model_id = body.model_id or self._model_id()
         held: dict[str, dict[str, Any]] = {}
         issued_days: set[str] = set()
         for issued in forecasts.runs():  # newest first: the newest forecast of each run
@@ -639,6 +659,7 @@ class OperationService:
                             initialization=initialization,
                             source="ecmwf_opendata",
                             actor=body.actor,
+                            model_id=body.model_id,
                         ),
                         upper_air=True,
                         progress=lambda text: self._log(operation_id, text),
@@ -676,6 +697,12 @@ class OperationService:
         compared = self._compare_references(operation_id, verified, body.actor)
         return {"verified": verified, "waiting": waiting, "failed": failed, "compared": compared}
 
+    def _model_name(self, model_id: str | None) -> str:
+        try:
+            return str(self.platform.repo.get("model", model_id)["model_name"])
+        except (KeyError, TypeError):
+            return str(model_id)
+
     def _model_id(self) -> str | None:
         try:
             return ModelRegistry(self.platform).current()["model"].get("model_id")
@@ -688,9 +715,10 @@ class OperationService:
         CHIRPS covers and compare them with ARC 2.0, RFE 2.0 and GPM IMERG. The earlier
         forecasts stay in the archive as earlier versions of their week."""
         forecasts = self._forecasts()
-        model_id = self._model_id()
+        model_id = body.model_id or self._model_id()
         if model_id is None:
             raise ValueError("No model is in use, so there is nothing to forecast with")
+        named = self._model_name(model_id) if body.model_id else "the model in use"
         runs = forecasts.runs()
         done = {r["initialization"][:10] for r in runs if r.get("model_id") == model_id}
         days = sorted({r["initialization"][:10] for r in runs}, reverse=True)[: body.weeks]
@@ -698,14 +726,14 @@ class OperationService:
         self._log(
             operation_id,
             f"{len(days) - len(todo)} of the {len(days)} newest runs already have a forecast "
-            f"from the model in use; forecasting {len(todo)}",
+            f"from {named}; forecasting {len(todo)}",
         )
         issued: list[str] = []
         failed: list[str] = []
         for position, day in enumerate(todo, start=1):
             self._log(
                 operation_id,
-                f"Forecasting the ECMWF run of {_day(day)} with the model in use "
+                f"Forecasting the ECMWF run of {_day(day)} with {named} "
                 f"({position} of {len(todo)})",
             )
             try:
@@ -714,6 +742,7 @@ class OperationService:
                         initialization=date.fromisoformat(day),
                         source="ecmwf_opendata",
                         actor=body.actor,
+                        model_id=body.model_id,
                     ),
                     upper_air=True,
                     progress=lambda text: self._log(operation_id, text),
@@ -755,7 +784,7 @@ class OperationService:
         from climate_engine.inputs import ecmwf_opendata
 
         initialization = body.initialization or ecmwf_opendata.latest_initialization()
-        existing = self._issued(initialization)
+        existing = self._issued(initialization, body.model_id)
         result: dict[str, Any] = {"initialization": initialization.isoformat()}
         if existing:
             self._log(
@@ -770,7 +799,15 @@ class OperationService:
                 )
             )
         result["verification"] = self._verify_due(operation_id, body, compare=False)
-        result.update(self._prepare_draft(operation_id, body, result["forecast_id"]))
+        if body.model_id and body.model_id != self._model_id():
+            # The bulletin follows the model in use; this forecast is for comparison.
+            self._log(
+                operation_id,
+                f"No bulletin draft: {self._model_name(body.model_id)} is not the model in "
+                "use, so its forecast is kept for comparison",
+            )
+        else:
+            result.update(self._prepare_draft(operation_id, body, result["forecast_id"]))
         # The monitoring and the further comparisons download many files from slower
         # servers; they run as their own task, so the forecast and its bulletin draft are
         # not held up by them.

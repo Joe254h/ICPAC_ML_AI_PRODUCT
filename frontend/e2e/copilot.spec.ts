@@ -358,6 +358,17 @@ test("a file of any format goes with a question, and a question can be edited", 
   await expect(page.locator(".chat-message.assistant")).toHaveCount(1, {
     timeout: 60_000,
   });
+  // The latest answer can be copied, and asked for again.
+  const latest = page.locator(".chat-message.assistant").last();
+  await expect(
+    latest.getByRole("button", { name: "Copy this answer" }),
+  ).toBeVisible();
+  await latest.getByRole("button", { name: "Retry this answer" }).click();
+  await expect(page.locator(".chat-message.user")).toHaveCount(1);
+  await expect(page.locator(".chat-message.assistant")).toHaveCount(1, {
+    timeout: 60_000,
+  });
+  await expect(page.getByRole("status")).toHaveCount(0, { timeout: 60_000 });
   // The forecast weeks are offered in the conversation's menu.
   await expect(
     page.getByLabel("Forecast week").locator("option").first(),

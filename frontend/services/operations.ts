@@ -41,6 +41,8 @@ export function useOperation(onFinished?: (operation: Operation) => void) {
         initialization?: string;
         forecast_id?: string;
         weeks?: number;
+        /** The registered model to forecast with; absent: the model in use. */
+        model_id?: string;
       } = {},
     ) => {
       setError(null);

@@ -91,6 +91,26 @@ def principal(
     )
 
 
+def require_staff_key(authorization: str | None = Header(default=None)) -> Principal:
+    """A named staff member with the admin role, signed in with their own key, also on the
+    public evaluation site: what they send (a model bundle) is loaded by the server, so it
+    is not open to every visitor."""
+    scheme, _, supplied = (authorization or "").partition(" ")
+    for record in credentials():
+        if scheme.lower() == "bearer" and secrets.compare_digest(
+            supplied.encode(), record["key"].encode()
+        ):
+            if "admin" not in record["roles"]:
+                raise HTTPException(403, "The admin role is required.")
+            return Principal(record["name"], frozenset(record["roles"]))
+    raise HTTPException(
+        401,
+        "Uploading a model needs a staff access key with the admin role (Staff access, at "
+        "the top of the page).",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 def acting_name(user: Principal, claimed: str | None = None) -> str:
     """Who an action is recorded for. With staff access, the signed-in person. In the public
     evaluation app, the name the visitor typed, marked as unverified; never their one-way

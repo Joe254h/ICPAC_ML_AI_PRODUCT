@@ -5,6 +5,7 @@ import { useId, useState } from "react";
 import { Languages, Plus, Save, Trash2 } from "lucide-react";
 import { Button, Card, ErrorState, Notice } from "@/components/ui";
 import { useActor } from "@/lib/actor";
+import { useLanguage } from "@/lib/language";
 import { mutate } from "@/services/api";
 import type { Bulletin, BulletinSection } from "@/types/workflows";
 
@@ -242,7 +243,9 @@ export function TranslateDraft({
   onDone: (draft: Bulletin) => void;
 }) {
   const [actor] = useActor();
-  const [language, setLanguage] = useState("sw");
+  // The site's language (the Copilot's too): choosing one here changes it there.
+  const [shared, setLanguage] = useLanguage();
+  const language = shared in TRANSLATIONS ? shared : "sw";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (

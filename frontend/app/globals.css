@@ -3848,12 +3848,20 @@ ol.lifecycle li:not(:last-child)::after {
 }
 
 /* Copilot: editing a question, and the files that go with a question */
-.chat-edit {
+.chat-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 8px 0 -4px -6px;
+}
+.chat-actions.user {
+  justify-content: flex-end;
+  margin: 6px -6px -4px 0;
+}
+.chat-action {
+  display: inline-flex;
   align-items: center;
   gap: 4px;
-  width: fit-content;
-  margin: 6px 0 -4px auto;
   padding: 2px 6px;
   border: 0;
   border-radius: 4px;
@@ -3862,11 +3870,11 @@ ol.lifecycle li:not(:last-child)::after {
   font: 500 12.5px var(--font-body);
   cursor: pointer;
 }
-.chat-edit:hover:not(:disabled) {
+.chat-action:hover:not(:disabled) {
   color: var(--ink);
   background: var(--ground);
 }
-.chat-edit:disabled {
+.chat-action:disabled {
   opacity: 0.45;
   cursor: default;
 }
@@ -3977,4 +3985,60 @@ ol.lifecycle li:not(:last-child)::after {
   justify-self: start;
   padding: 6px 12px;
   border-width: 1px;
+}
+
+/* Verification: the scores in plain words */
+.score-terms {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px 24px;
+  margin: 0;
+}
+.score-terms dt {
+  font: 700 14px var(--font-heading);
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.score-terms dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* About this service */
+.about-steps {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding-left: 22px;
+}
+.about-steps li {
+  display: grid;
+  gap: 2px;
+  line-height: 1.55;
+}
+.about-steps b {
+  font-family: var(--font-heading);
+}
+.about-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+.about-list {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+  line-height: 1.5;
+}
+
+/* Models: uploading a bundle */
+.model-upload {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-end;
+  margin-bottom: 12px;
 }

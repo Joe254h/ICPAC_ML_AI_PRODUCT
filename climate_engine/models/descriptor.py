@@ -28,6 +28,7 @@ from climate_engine.models.hybrid7_pc17 import validation_scores as bundle_score
 from climate_engine.models.mbc_atmos37_catboost import MBCAtmos37CatBoost
 from climate_engine.models.residual import ResidualMBCModel
 from climate_engine.models.runtime import MODEL_FORMATS
+from climate_engine.models.uploads import STORE_FLAG, upload_root
 from climate_engine.operational.corrections import load_mbc
 from climate_engine.operational.features import schema
 from climate_engine.operational.grid import DomainGrid
@@ -142,8 +143,16 @@ class ModelDescriptor:
     def bundle(self) -> bool:
         return str(self.data["family"]) in FAMILY_KINDS
 
+    @property
+    def root(self) -> Path:
+        """Where the artifact paths start: ARTIFACT_ROOT, or the upload folder for a bundle
+        uploaded through the website (climate_engine/models/uploads.py)."""
+        if self.data.get(STORE_FLAG) == "upload":
+            return upload_root()
+        return artifact_root()
+
     def artifact(self, kind: str) -> Path:
-        root = artifact_root()
+        root = self.root
         path = (root / self.data["artifacts"][kind]).resolve()
         if not path.is_relative_to(root):
             raise ValueError(f"{kind} artifact must lie inside ARTIFACT_ROOT")
@@ -347,7 +356,7 @@ class ModelDescriptor:
         metrics, manifest = self.check_bundle_metadata() if self.bundle else self.check_metadata()
         model = self.load_model(grid, cfg)
         d = self.data
-        root = artifact_root()
+        root = self.root
         fields = {
             "model_id": d["model_id"],
             "model_name": d["model_name"],

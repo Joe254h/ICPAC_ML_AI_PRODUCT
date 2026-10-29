@@ -10,6 +10,8 @@ import {
   ArrowLeft,
   ArrowUp,
   BarChart3,
+  Check,
+  Copy,
   Ellipsis,
   FileText,
   FileUp,
@@ -20,6 +22,7 @@ import {
   Paperclip,
   Pencil,
   RefreshCw,
+  RotateCcw,
   SquarePen,
   Trash2,
   X,
@@ -29,7 +32,14 @@ import { Button, Notice, PageBanner } from "@/components/ui";
 import { cx } from "@/components/ui";
 import { LAYER_TEXT, layersOf, ofRecord } from "@/features/operational/shared";
 import { day, num, relativeDay, shortPeriod, signed } from "@/lib/format";
-import { mutate, request, upload, uploadFile } from "@/services/api";
+import {
+  mutate,
+  request,
+  upload,
+  uploadFile,
+  uploadInParts,
+} from "@/services/api";
+import { useLanguage } from "@/lib/language";
 import { useApi } from "@/services/hooks";
 import { useStaff } from "@/services/staff";
 import type { ForecastDetail, ForecastRun, Variant } from "@/types/operational";
@@ -204,6 +214,8 @@ function BulletinCard({ bulletin }: { bulletin: ChatBulletin }) {
 const STORAGE = "icpac-copilot-session";
 const MODEL_NAME = "icpac-upload-model";
 const UPLOAD_LIMIT = 4 * 1024 * 1024;
+/** What one request through the website's proxy carries; larger files go in parts. */
+const ONE_REQUEST = 4_000_000;
 const SIDEBAR = "icpac-copilot-sidebar";
 const REGION = "GHA";
 
@@ -251,17 +263,75 @@ function AnswerBasis({ message }: { message: ChatMessage }) {
 function Message({
   message,
   onEdit,
+  onRetry,
   editable = true,
 }: {
   message: ChatMessage;
   /** Ask again with changed words (your own questions only). */
   onEdit?: (text: string) => void;
-  /** False while an answer is on its way: the button stays, so nothing above moves. */
+  /** Ask the question before this answer again, for a new answer. */
+  onRetry?: () => void;
+  /** False while an answer is on its way: the buttons stay, so nothing above moves. */
   editable?: boolean;
 }) {
   const user = message.role === "user";
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.text);
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(message.text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard refused (an insecure page or a browser setting): nothing to undo.
+    }
+  };
+  const actions = !editing && (
+    <div className={cx("chat-actions", user && "user")}>
+      <button
+        type="button"
+        className="chat-action"
+        aria-label={user ? "Copy this question" : "Copy this answer"}
+        title="Copy"
+        onClick={copy}
+      >
+        {copied ? (
+          <Check size={13} aria-hidden />
+        ) : (
+          <Copy size={13} aria-hidden />
+        )}{" "}
+        <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
+      </button>
+      {user && onEdit && (
+        <button
+          type="button"
+          className="chat-action chat-edit"
+          aria-label="Edit this question"
+          title="Edit this question"
+          disabled={!editable}
+          onClick={() => {
+            setDraft(message.text);
+            setEditing(true);
+          }}
+        >
+          <Pencil size={13} aria-hidden /> Edit
+        </button>
+      )}
+      {!user && onRetry && (
+        <button
+          type="button"
+          className="chat-action"
+          aria-label="Retry this answer"
+          title="A new answer to the same question"
+          disabled={!editable}
+          onClick={onRetry}
+        >
+          <RotateCcw size={13} aria-hidden /> Retry
+        </button>
+      )}
+    </div>
+  );
   return (
     <article className={cx("chat-message", user ? "user" : "assistant")}>
       {!user && (
@@ -323,21 +393,7 @@ function Message({
             ))}
           </ul>
         )}
-        {user && onEdit && !editing && (
-          <button
-            type="button"
-            className="chat-edit"
-            aria-label="Edit this question"
-            title="Edit this question"
-            disabled={!editable}
-            onClick={() => {
-              setDraft(message.text);
-              setEditing(true);
-            }}
-          >
-            <Pencil size={13} aria-hidden /> Edit
-          </button>
-        )}
+        {user && actions}
         {message.bulletin && <BulletinCard bulletin={message.bulletin} />}
         {message.comparison && (
           <ComparisonCard comparison={message.comparison} />
@@ -361,8 +417,10 @@ function Message({
         )}
         {message.fallback && (
           <p className="chat-fallback">
-            Answered from the forecast data alone, because the AI assistant did
-            not respond:{" "}
+            {message.kind === "document"
+              ? "Shown as read from the file"
+              : "Answered from the forecast data alone"}
+            , because the AI assistant did not respond:{" "}
             {(
               message.fallback_reason ?? "it could not respond just now"
             ).replace(/\.$/, "")}
@@ -371,6 +429,7 @@ function Message({
         )}
         {!user && <AnswerBasis message={message} />}
         {!!message.sources?.length && <Sources sources={message.sources} />}
+        {!user && actions}
       </div>
     </article>
   );
@@ -391,27 +450,12 @@ const LANGUAGES: Record<string, string> = {
   rn: "Kirundi",
   lg: "Luganda",
 };
-const LANGUAGE_KEY = "icpac-copilot-language";
 
 export default function Copilot() {
   const [actor] = useActor();
-  const [language, setLanguage] = useState("en");
-  useEffect(() => {
-    try {
-      const kept = localStorage.getItem(LANGUAGE_KEY);
-      if (kept && kept in LANGUAGES) setLanguage(kept);
-    } catch {
-      // Storage blocked: English until chosen.
-    }
-  }, []);
-  const chooseLanguage = (code: string) => {
-    setLanguage(code);
-    try {
-      localStorage.setItem(LANGUAGE_KEY, code);
-    } catch {
-      // The choice lasts for this page.
-    }
-  };
+  // The site's language: the bulletin page offers the draft in the same one.
+  const [chosenLanguage, chooseLanguage] = useLanguage();
+  const language = chosenLanguage in LANGUAGES ? chosenLanguage : "en";
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [session, setSession] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -693,12 +737,18 @@ export default function Copilot() {
 
   async function send(
     text: string,
-    extra: { external_id?: string; edit_index?: number } = {},
+    extra: {
+      external_id?: string;
+      edit_index?: number;
+      /** The files of the question being edited or asked again. */
+      files?: ChatAttachment[];
+    } = {},
   ) {
     const message = text.trim();
     if (!message || pending || restoring || restoreFailed || reading) return;
     const before = messages;
-    const attachments = extra.edit_index === undefined ? files : [];
+    const { files: kept, ...sent } = extra;
+    const attachments = kept ?? (extra.edit_index === undefined ? files : []);
     setPending(true);
     setError("");
     if (extra.edit_index === undefined) setInput("");
@@ -722,9 +772,9 @@ export default function Copilot() {
         language,
         forecast_id: week || null,
         attachment_ids: attachments.map((file) => file.id),
-        ...extra,
+        ...sent,
       });
-      if (attachments.length) setFiles([]);
+      if (attachments.length && !kept) setFiles([]);
       setWeek("");
       setMessages((old) => [...old, { ...answer, role: "assistant" }]);
       setSession(answer.session_id);
@@ -777,10 +827,16 @@ export default function Copilot() {
     setReading(true);
     setError("");
     try {
-      const record = await uploadFile<ChatAttachment>(
-        `/chat/attachments?name=${encodeURIComponent(file.name)}`,
-        file,
-      );
+      // A file larger than one request through the website's proxy goes in parts.
+      const record =
+        file.size > ONE_REQUEST
+          ? await mutate<ChatAttachment>("/chat/attachments/staged", {
+              upload_id: await uploadInParts(file, "attachment"),
+            })
+          : await uploadFile<ChatAttachment>(
+              `/chat/attachments?name=${encodeURIComponent(file.name)}`,
+              file,
+            );
       setFiles((old) => [...old, record].slice(-5));
     } catch (e) {
       setError((e as Error).message);
@@ -1170,7 +1226,22 @@ export default function Copilot() {
                     message={message}
                     onEdit={
                       message.role === "user"
-                        ? (text) => send(text, { edit_index: index })
+                        ? (text) =>
+                            send(text, {
+                              edit_index: index,
+                              files: message.attachments ?? [],
+                            })
+                        : undefined
+                    }
+                    onRetry={
+                      message.role === "assistant" &&
+                      index === messages.length - 1 &&
+                      messages[index - 1]?.role === "user"
+                        ? () =>
+                            send(messages[index - 1].text, {
+                              edit_index: index - 1,
+                              files: messages[index - 1].attachments ?? [],
+                            })
                         : undefined
                     }
                     editable={!locked}

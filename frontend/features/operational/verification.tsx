@@ -369,6 +369,50 @@ function OtherModels() {
 
 /** The answer first: how much the correction improves on raw ECMWF on the independent
  * test, and how many live weeks are scored. */
+/** The scores in plain words, for readers who are not verification specialists. */
+function HowToRead() {
+  return (
+    <Card title="How to read the scores">
+      <dl className="score-terms">
+        <div>
+          <dt>RMSE and MAE</dt>
+          <dd>
+            The typical error of the week's rainfall total, in mm. RMSE counts
+            big misses more. Lower is better.
+          </dd>
+        </div>
+        <div>
+          <dt>Bias</dt>
+          <dd>
+            Forecast minus observed, on average: above zero the forecast was too
+            wet, below zero too dry.
+          </dd>
+        </div>
+        <div>
+          <dt>Pearson r</dt>
+          <dd>
+            In the weekly table: how well the forecast placed the wet and dry
+            areas of that week (1 is a perfect match, 0 none). On the
+            correlation map: how well each place's forecast rose and fell with
+            the observed rain from week to week.
+          </dd>
+        </div>
+        <div>
+          <dt>Raw ECMWF</dt>
+          <dd>
+            The uncorrected ECMWF forecast. A lower error than raw ECMWF means
+            the correction added value.
+          </dd>
+        </div>
+      </dl>
+      <p className="card-note">
+        Each week is scored against CHIRPS once CHIRPS covers it. A handful of
+        weeks is indicative only; a season or more gives a firmer picture.
+      </p>
+    </Card>
+  );
+}
+
 function Answer({
   evidence,
   verified,
@@ -601,6 +645,7 @@ export default function Verification() {
             </div>
           </div>
         </div>
+        <HowToRead />
         {runs.loading && <Skeleton height={240} />}
         {verified[0] ? (
           <LatestVerified run={verified[0]} />

@@ -101,3 +101,35 @@ def test_a_draft_is_translated_and_its_figures_are_checked(env, fast_maps, monke
         env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "en"}).status_code
         == 422
     )
+
+
+def test_a_translation_keeps_its_language_and_the_copilot_shows_it(env, fast_maps, monkeypatch):
+    first = draft(env)
+    translator = Translator()
+    monkeypatch.setattr(agent, "chat_model", lambda: translator)
+    swahili = env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "sw"}).json()
+    # A forecaster's later edit of the Kiswahili draft is still in Kiswahili.
+    edited = env.client.post(
+        f"/bulletins/{swahili['id']}/edit",
+        json={"changes": [{"section": "headline", "paragraphs": ["[sw] Mvua kidogo."]}]},
+    ).json()
+    assert edited["edited"]["language"] == "Kiswahili"
+    # The Copilot answering in Kiswahili shows that draft; in English, the newest draft.
+    tools = agent.ToolBox(env.platform, {}, language="sw")
+    tools.run("get_weekly_bulletin", {})
+    assert tools.bulletin is not None and tools.bulletin["id"] == edited["id"]
+    # In Amharic there is none yet: the tool says so, and translate_bulletin makes one
+    # from the English text (never from another translation).
+    tools = agent.ToolBox(env.platform, {}, language="am", model=translator)
+    shown = tools.run("get_weekly_bulletin", {})
+    assert "none in Amharic yet" in shown["translation"]
+    made = tools.run("translate_bulletin", {})
+    assert made["language"] == "Amharic" and "Amharic speaker" in made["next_step"]
+    assert tools.bulletin is not None
+    amharic = env.platform.repo.get("bulletin", tools.bulletin["id"])
+    assert amharic["edited"]["language"] == "Amharic"
+    assert amharic["parent_id"] == first["id"]
+    again = tools.run("translate_bulletin", {"language": "am"})
+    assert again["note"] == "Already translated."
+    refused = tools.run("translate_bulletin", {"language": "en"})
+    assert "Say which language" in refused["error"]

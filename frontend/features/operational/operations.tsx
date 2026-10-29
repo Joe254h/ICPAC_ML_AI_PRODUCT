@@ -35,7 +35,16 @@ import type {
   ForecastRun,
   Operation,
   OperationAction,
+  OperationalModel,
 } from "@/types/operational";
+
+/** The tasks that make forecasts, and so can use a model other than the one in use. */
+const FORECASTING: OperationAction[] = [
+  "cycle",
+  "run_forecast",
+  "past_weeks",
+  "refresh_archive",
+];
 
 const TONE: Record<Operation["status"], Tone> = {
   queued: "info",
@@ -134,9 +143,18 @@ export default function Operations() {
   const newest = forecasts.data?.find(
     (r) => !r.synthetic && r.of_record !== false,
   );
-  const { refresh } = useApp();
+  const { refresh, current } = useApp();
   const [actor, setActor] = useActor();
   const [date, setDate] = useState("");
+  // Any registered model that may forecast; empty: the model in use.
+  const registered = useApi<OperationalModel[]>("/models");
+  const usable = (registered.data ?? []).filter((m) =>
+    ["production", "candidate", "experimental"].includes(m.status),
+  );
+  const inUse = current.data?.model.model_id;
+  const [model, setModel] = useState("");
+  const chosenModel =
+    model && model !== inUse ? usable.find((m) => m.model_id === model) : null;
   const older = !!date && !!newest && date < newest.initialization.slice(0, 10);
   const [expanded, setExpanded] = useState<string | null>(null);
   const { operation, error, running, start, follow, stop } = useOperation(
@@ -155,15 +173,16 @@ export default function Operations() {
 
   const name = actor.trim();
   const launch = (action: OperationAction) =>
-    start(
-      action,
-      name || "Forecaster",
-      action === "refresh_archive"
+    start(action, name || "Forecaster", {
+      ...(action === "refresh_archive"
         ? { weeks: 12 }
         : date
           ? { initialization: date }
-          : {},
-    );
+          : {}),
+      ...(chosenModel && FORECASTING.includes(action)
+        ? { model_id: chosenModel.model_id }
+        : {}),
+    });
 
   return (
     <div className="page">
@@ -219,7 +238,40 @@ export default function Operations() {
                 />
                 <span className="hint">Empty: the newest published run.</span>
               </label>
+              <label className="field" style={{ gridColumn: "1 / -1" }}>
+                Model for this run
+                <select
+                  value={chosenModel ? chosenModel.model_id : ""}
+                  onChange={(e) => setModel(e.target.value)}
+                >
+                  <option value="">
+                    {current.data?.model.model_name
+                      ? `${current.data.model.model_name} (in use)`
+                      : "The model in use"}
+                  </option>
+                  {usable
+                    .filter((m) => m.model_id !== inUse)
+                    .map((m) => (
+                      <option key={m.model_id} value={m.model_id}>
+                        {m.model_name} ({m.status})
+                      </option>
+                    ))}
+                </select>
+                <span className="hint">
+                  New models are added on the <Link href="/models">Models</Link>{" "}
+                  page.
+                </span>
+              </label>
             </div>
+            {chosenModel && (
+              <Notice tone="amber">
+                Forecasts from {chosenModel.model_name} are kept next to the
+                model in use&apos;s for comparison and are verified the same
+                way; the bulletin and the Copilot stay with the model in use. To
+                make it the model in use, approve and activate it on the{" "}
+                <Link href="/models">Models</Link> page.
+              </Notice>
+            )}
             {older && newest && (
               <Notice tone="amber">
                 The newest forecast is from the run of{" "}

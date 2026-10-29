@@ -38,7 +38,7 @@ export type ChatMessage = {
   links?: { label: string; url: string }[];
   images?: { url: string; alt: string }[];
   /** forecast: built from the service's data; general: background knowledge. */
-  kind?: "forecast" | "general";
+  kind?: "forecast" | "general" | "document";
   /** What the answer is based on, in words. */
   evidence?: string[];
   /** The weekly bulletin draft the answer shows (or the new version it wrote). */

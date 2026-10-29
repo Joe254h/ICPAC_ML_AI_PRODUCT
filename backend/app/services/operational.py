@@ -7,6 +7,7 @@ from typing import Any
 from climate_engine.core import ROOT
 from climate_engine.models.descriptor import ModelDescriptor, load_descriptor
 from climate_engine.models.residual import ResidualMBCModel
+from climate_engine.models.uploads import ensure_local
 from climate_engine.operational.grid import DomainGrid
 from climate_engine.operational.pipeline import grid_from_config
 from climate_engine.operational.settings import settings
@@ -43,6 +44,7 @@ class OperationalModel:
 
     def load(self) -> ResidualMBCModel:
         """Verify checksums, then load (cached per model and artifact checksum)."""
+        ensure_local(self.record)  # an uploaded bundle, unpacked again after a restart
         descriptor = descriptor_from_record(self.record)
         checksums = descriptor.verify_checksums()
         if checksums != self.record["artifact_checksums"]:
@@ -60,6 +62,7 @@ class OperationalModel:
 
     def health_check(self) -> bool:
         try:
+            ensure_local(self.record)
             return (
                 descriptor_from_record(self.record).verify_checksums()
                 == self.record["artifact_checksums"]

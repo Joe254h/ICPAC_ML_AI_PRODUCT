@@ -141,9 +141,10 @@ Answer language: write your whole answer in {name}. Keep every number, unit (mm)
 and forecast figure exactly as the tools give them, and keep the names of countries and \
 places recognisable (the usual {name} spelling, with the English name in brackets the \
 first time if it differs). Keep ICPAC, CHIRPS, ECMWF, MBC and AI/ML as they are. If the \
-forecaster asks for the weekly bulletin in {name}, write its paragraphs in {name} with \
-revise_bulletin, every figure unchanged, and say that a {name} speaker must review it \
-before approval. If you cannot write good {name}, answer in English and say so."""
+forecaster asks for the weekly bulletin, get_weekly_bulletin shows its {name} version when \
+there is one; when there is none, make it with translate_bulletin (every figure is checked) \
+and say that a {name} speaker must review it before approval. If you cannot write good \
+{name}, answer in English and say so."""
     )
 
 
@@ -212,6 +213,26 @@ TOOLS: list[dict[str, Any]] = [
         "its newest draft (version, review status, any forecaster edits and added sections) "
         "or, before any draft exists, the computed sections.",
         "parameters": _schema({"forecast": FORECAST_ARG}),
+    },
+    {
+        "name": "translate_bulletin",
+        "description": "Make a new draft version of the weekly bulletin in another language "
+        "(the AI translation of its headline, decision-support note, rainfall statements, "
+        "country focus and added sections, kept only if every figure is unchanged) and show "
+        "it in the conversation. Without a language, the conversation's answer language is "
+        "used. A speaker of the language checks it before a reviewer approves it.",
+        "parameters": _schema(
+            {
+                "language": {
+                    "type": "string",
+                    "enum": [code for code in LANGUAGES if code != "en"],
+                    "description": "Language code: sw Kiswahili, am Amharic, so Somali, "
+                    "ar Arabic, fr French, ti Tigrinya, om Afaan Oromo, rw Kinyarwanda, "
+                    "rn Kirundi, lg Luganda.",
+                },
+                "forecast": FORECAST_ARG,
+            }
+        ),
     },
     {
         "name": "revise_bulletin",
@@ -363,6 +384,7 @@ EVIDENCE = {
     "get_seasonal_skill": "Seasonal verification scores",
     "get_weekly_bulletin": "Weekly bulletin",
     "revise_bulletin": "Weekly bulletin (new draft version)",
+    "translate_bulletin": "Weekly bulletin (translated version)",
     "compare_uploaded_forecast": "Uploaded forecast comparison",
     "get_rainfall_monitoring": "Observed rainfall (CHIRPS and four further estimates)",
     "get_data_sources": "Data sources",
@@ -420,6 +442,8 @@ class ToolBox:
     comparison: dict[str, Any] | None = None
     #: The language the answer is written in.
     language: str = "en"
+    #: The AI service answering, for a tool that needs it (a bulletin translation).
+    model: Any = None
 
     def __post_init__(self) -> None:
         self.forecasts = ForecastService(self.platform)
@@ -679,12 +703,23 @@ class ToolBox:
         from backend.app.services.bulletins import BulletinService
 
         detail = self._detail(forecast)
-        draft = BulletinService(self.platform).latest(detail["forecast_id"])
+        service = BulletinService(self.platform)
+        wanted = LANGUAGES[self.language] if self.language != "en" else None
+        translated = service.latest_in(detail["forecast_id"], wanted) if wanted else None
+        draft = translated or service.latest(detail["forecast_id"])
         if draft is not None:
             self._show_bulletin(draft)
             return {
                 **self._basics(detail),
                 **_bulletin_summary(draft),
+                **(
+                    {
+                        "translation": f"none in {wanted} yet: translate_bulletin makes one "
+                        "if the forecaster wants it"
+                    }
+                    if wanted and translated is None
+                    else {}
+                ),
                 "release": "Drafts are released only after forecaster review and approval.",
             }
         bulletin = self.forecasts.bulletin(detail["forecast_id"])
@@ -709,6 +744,37 @@ class ToolBox:
                 for s in bulletin["sections"]
             ],
             "release": "Drafts are released only after forecaster review and approval.",
+        }
+
+    def _translate_bulletin(self, language: str = "", forecast: str = "current") -> dict[str, Any]:
+        from backend.app.services.bulletins import BulletinService, RevisionRefused
+
+        code = language or self.language
+        if code not in LANGUAGES or code == "en":
+            raise ToolError(
+                "Say which language: " + ", ".join(n for c, n in LANGUAGES.items() if c != "en")
+            )
+        name = LANGUAGES[code]
+        detail = self._detail(forecast)
+        service = BulletinService(self.platform)
+        held = service.latest_in(detail["forecast_id"], name)
+        if held is not None:
+            self._show_bulletin(held)
+            return {**_bulletin_summary(held), "language": name, "note": "Already translated."}
+        # Translated from the English text, never from another translation.
+        english = service.latest_in(detail["forecast_id"], None) or service.generate_weekly(
+            detail["forecast_id"], actor=self.actor
+        )
+        try:
+            record = service.translate(english["id"], code, self.actor, self.model)
+        except RevisionRefused as exc:
+            raise ToolError(str(exc)) from exc
+        self._show_bulletin(record)
+        return {
+            **_bulletin_summary(record),
+            "language": name,
+            "next_step": f"Saved as a new draft version. A {name} speaker checks it on the "
+            "Bulletin page before it is submitted for review.",
         }
 
     def _revise_bulletin(
@@ -1701,6 +1767,7 @@ def answer(
         + [message],
         actor=actor,
         language=language if language in LANGUAGES else "en",
+        model=model,
     )
     transcript: list[dict[str, Any]] = [
         {"role": m["role"], "text": m["text"][:2000]}

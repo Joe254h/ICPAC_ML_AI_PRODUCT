@@ -448,6 +448,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             </div>
           </Link>
           <nav className="footer-links" aria-label="ICPAC">
+            <Link href="/about">About this service</Link>
             {ORGANISATION.map(([label, url]) => (
               <a key={url} href={url} target="_blank" rel="noreferrer">
                 {label} <ExternalLink size={12} aria-hidden />
