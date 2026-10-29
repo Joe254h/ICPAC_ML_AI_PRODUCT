@@ -45,38 +45,38 @@ def usable(src: str, tgt: str, max_ratio: float = 3.0, max_words: int = 120) -> 
     return max(a, b) / max(min(a, b), 1) <= max_ratio
 
 
-def smol(language: Language) -> list[dict]:
-    if not language.smol:
-        return []
-    rows = load_dataset(SMOL, language.smol, split="train")
-    out = []
-    for row in rows:
-        for target in row["trgs"]:  # several professional translations of one sentence
-            src, tgt = clean(row["src"]), clean(target)
-            if usable(src, tgt):
-                out.append({"src": src, "tgt": tgt, "source": "smol"})
-    return out
+def smol_pairs(row: dict) -> list[tuple[str, str]]:
+    """The English-translation pairs in one SMOL row. SmolSent has one translation (``src``,
+    ``trg``), GATITOS a phrase with alternatives (``src``, ``trgs``), SmolDoc a document as
+    sentence lists aligned one to one (``srcs``, ``trgs``)."""
+    if "srcs" in row:
+        sources, targets = row["srcs"] or [], row["trgs"] or []
+        return list(zip(sources, targets)) if len(sources) == len(targets) else []
+    if "trgs" in row:
+        return [(row["src"], target) for target in row["trgs"] or []]
+    return [(row["src"], row["trg"])]
 
 
-def smol_extra(config: str | None, source: str) -> list[dict]:
-    """SMOL's document translations or GATITOS word list: rows with ``src`` and ``trgs``
-    like the sentences; long documents fall out at the length check."""
+def smol(config: str | None, source: str, required: bool = False) -> list[dict]:
+    """SMOL sentences, documents or GATITOS phrases for one language (``config``, e.g.
+    "smolsent__en_sw"). Only the sentences are required; the others are skipped with a
+    message when they cannot be loaded."""
     if not config:
         return []
     try:
         rows = load_dataset(SMOL, config, split="train")
-    except Exception as exc:  # a config renamed or not yet published
-        print(f"  {config}: not loaded ({type(exc).__name__})")
-        return []
-    if "src" not in rows.column_names or "trgs" not in rows.column_names:
-        print(f"  {config}: unexpected columns {rows.column_names}; skipped")
+    except Exception as exc:
+        if required:
+            raise
+        print(f"  {config}: not loaded ({type(exc).__name__}); skipped")
         return []
     out = []
     for row in rows:
-        for target in row["trgs"]:
-            src, tgt = clean(row["src"]), clean(target)
+        for src, tgt in smol_pairs(row):
+            src, tgt = clean(src), clean(tgt)
             if usable(src, tgt):
                 out.append({"src": src, "tgt": tgt, "source": source})
+    print(f"  {config}: {len(out)} pairs")
     return out
 
 
@@ -112,9 +112,10 @@ def mined(language: Language, rows: int) -> list[dict]:
     stream = load_dataset(language.mined, split="train", streaming=True)
     out = []
     for row in stream:
-        if float(row.get("similarity", 0.0)) < MIN_SIMILARITY:
+        # The column is "similarity" in the mirrors' parquet files ("score" in their CSV).
+        if float(row.get("similarity", row.get("score", 0.0))) < MIN_SIMILARITY:
             break  # sorted by similarity: everything after is worse
-        target = next(k for k in row if k not in {"similarity", "English"})
+        target = next(k for k in row if k not in {"similarity", "score", "English"})
         src, tgt = clean(row["English"]), clean(row[target])
         if usable(src, tgt):
             out.append({"src": src, "tgt": tgt, "source": "nllb-mined"})
@@ -126,7 +127,11 @@ def mined(language: Language, rows: int) -> list[dict]:
 def ntrex(language: Language) -> list[dict]:
     if not language.ntrex:
         return []
-    rows = load_dataset(NTREX, language.ntrex, split="test")
+    try:
+        rows = load_dataset(NTREX, language.ntrex, split="test")
+    except Exception as exc:
+        print(f"  NTREX {language.ntrex}: not loaded ({type(exc).__name__}); SMOL is held out")
+        return []
     return [
         {
             "src": clean(r["sentence_eng_Latn"]),
@@ -176,11 +181,12 @@ def main() -> None:
     for key in args.languages:
         language = LANGUAGES[key]
         domain = templates(args.templates, key)
-        sentences = smol(language)
+        print(f"{language.name}:")
+        sentences = smol(language.smol, "smol", required=True)
         uganda = salt(language)
         general = (
-            smol_extra(language.smol_doc, "smol-doc")
-            + smol_extra(language.gatitos, "gatitos")
+            smol(language.smol_doc, "smol-doc")
+            + smol(language.gatitos, "gatitos")
             + uganda.get("train", [])
             + (
                 mined(language, args.mined_rows)
@@ -191,7 +197,7 @@ def main() -> None:
         rng.shuffle(domain)
         rng.shuffle(sentences)
         test = ntrex(language) or uganda.get("test", [])
-        if not test and len(sentences) >= 1000:
+        if not test and len(sentences) >= 600:
             # No published test set: professional SMOL sentences are held out instead.
             test, sentences = sentences[:300], sentences[300:]
         general = sentences + general
