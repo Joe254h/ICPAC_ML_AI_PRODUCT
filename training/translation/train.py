@@ -127,7 +127,9 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     # LoRA keeps the frozen base in half precision; a full fine-tune keeps fp32 master
     # weights and trains in mixed precision.
-    bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+    # By compute capability: is_bf16_supported() also says yes on a T4 (7.5), where bf16 is
+    # only emulated and slow.
+    bf16 = torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] >= 8
     half = torch.bfloat16 if bf16 else torch.float16
     dtype = half if args.lora else torch.float32
     model = AutoModelForSeq2SeqLM.from_pretrained(args.model, torch_dtype=dtype)

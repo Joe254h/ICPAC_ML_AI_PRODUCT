@@ -153,11 +153,15 @@ Dinka and Nuer mined data is almost all Bible text: use human templates only.
 
 `training/translation/kaggle_finetune_2xT4.ipynb` runs the same scripts on Kaggle's
 **GPU T4 x2**: import it on Kaggle, choose *GPU T4 x2* and *Internet on*, add a Hugging Face
-token as the secret `HF_TOKEN` (for SALT), set `PHASE`, and *Save & Run All*.
+token as the secret `HF_TOKEN` (for SALT), set `PHASE`, and *Save & Run All*. Kaggle shows
+the Internet switch only after the account's phone number is verified; without internet the
+first cell stops and says so, and any step that fails (installing, fetching the scripts,
+preparing data, training) stops the run there instead of letting later cells fail.
 
 * `torchrun` starts one training process per GPU (data parallel), so the two T4s together
-  do about twice the work of one. T4s have no bf16: training uses fp16 mixed precision
-  with fp32 master weights.
+  do about twice the work of one. T4s have no bf16 (PyTorch may still report it, as
+  emulated): precision is chosen by compute capability, so training uses fp16 mixed
+  precision with fp32 master weights there, and bf16 on Ampere and newer GPUs.
 * Adafactor keeps the optimizer state small: a checkpoint of the 600M model is about
   2.5 GB, so two fit in Kaggle's 20 GB working space with the final model.
 * Kaggle stops a GPU session after 9 or 12 hours (check your account) and gives about 30
