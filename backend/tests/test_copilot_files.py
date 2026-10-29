@@ -8,8 +8,8 @@ import zipfile
 
 import pytest
 
+from backend.tests.test_agent import GROQ_TOO_LARGE, tool_results
 from backend.tests.test_agent import claude as claude  # noqa: F401
-from backend.tests.test_agent import tool_results
 from backend.tests.test_forecasts import env as env  # noqa: F401
 from backend.tests.test_forecasts import fast_maps as fast_maps  # noqa: F401
 from backend.tests.test_forecasts import run
@@ -224,3 +224,46 @@ def test_without_the_ai_a_question_about_a_file_shows_the_file(env, fast_maps, m
     assert "It begins:\n\nField report\n\nLine 0:" in body["text"]
     assert "more lines" in body["text"]  # a long document is shown in part
     assert "Week-2" not in body["text"]  # not this week's forecast
+
+
+def test_a_file_too_large_for_the_ai_services_limit_is_cut_to_fit(env, fast_maps, monkeypatch):
+    """Groq's free plan takes a few thousand tokens a minute: a long document is cut to fit
+    and the question asked again, instead of failing with a message about billing."""
+    import httpx
+
+    from chatbot import agent
+
+    run(env)
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_TOOLS", "true")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.setenv("LLM_MODEL", "qwen/qwen3.8-27b")
+    monkeypatch.setenv("LLM_FALLBACK_MODELS", "")
+    sent: list[str] = []
+
+    def post(url: str, headers: dict, timeout: float, json: dict) -> httpx.Response:
+        request = httpx.Request("POST", url)
+        sent.append(json["messages"][-1]["content"])
+        if len(sent) == 1:
+            error = {"error": {"message": GROQ_TOO_LARGE, "code": "rate_limit_exceeded"}}
+            return httpx.Response(413, json=error, request=request)
+        message = {"content": "The report covers station rainfall; the end was left out."}
+        return httpx.Response(200, json={"choices": [{"message": message}]}, request=request)
+
+    monkeypatch.setattr(agent.httpx, "post", post)
+    lines = "\n".join(f"Line {n}: rainfall at station {n} was normal." for n in range(800))
+    note = env.client.post(
+        "/chat/attachments?name=field-report.txt",
+        content=lines.encode(),
+        headers={"Content-Type": "application/octet-stream"},
+    ).json()
+    answer = env.client.post(
+        "/chat", json={"message": "What is in this document?", "attachment_ids": [note["id"]]}
+    ).json()
+    assert answer["fallback"] is None and answer["text"].startswith("The report covers")
+    first, second = sent
+    assert "Line 799" in first and "Line 799" not in second
+    # 3,500 tokens too many: at least 17,500 characters fewer, and the model is told.
+    assert len(first) - len(second) >= 17_500
+    assert "left out to fit the AI service's limit" in second
+    assert second.startswith("What is in this document?")

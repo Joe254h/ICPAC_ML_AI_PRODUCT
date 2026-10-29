@@ -446,6 +446,21 @@ def test_tools_select_valid_days_and_run_dates_explicitly(env, fast_maps):
         tools._detail("2026-10-12")
 
 
+GROQ_UPGRADE = (
+    "Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing"
+)
+GROQ_TOO_LARGE = (
+    "Request too large for model `qwen/qwen3.8-27b` in organization `org_01` service tier "
+    "`on_demand` on tokens per minute (TPM): Limit 6000, Requested 9500, please reduce your "
+    f"message size and try again. {GROQ_UPGRADE}"
+)
+GROQ_DAILY = (
+    "Rate limit reached for model `qwen/qwen3.8-27b` in organization `org_01` service tier "
+    "`on_demand` on tokens per day (TPD): Limit 200000, Used 199800, Requested 1500. Please "
+    f"try again in 9m43s. {GROQ_UPGRADE}"
+)
+
+
 @pytest.mark.parametrize(
     "status, body, reason",
     [
@@ -466,6 +481,15 @@ def test_tools_select_valid_days_and_run_dates_explicitly(env, fast_maps):
          "the key has expired: create a new key"),
         (403, '{"error": {"message": "The caller does not have permission"}}', agent.REFUSED_403),
         (403, "{}", agent.REFUSED_403),
+        # Groq's limit messages link to its billing page: they are not about billing.
+        (413, json.dumps({"error": {"message": GROQ_TOO_LARGE, "code": "rate_limit_exceeded"}}),
+         "the question and its files are more than the AI service takes at once on this plan: "
+         "ask about a shorter file, or one part of it"),
+        (429, json.dumps({"error": {"message": GROQ_DAILY, "code": "rate_limit_exceeded"}}),
+         "the AI service's daily limit is used up (the System page says when it frees up)"),
+        (429, json.dumps({"error": {"message": GROQ_DAILY.replace("tokens per day (TPD)",
+                                                                  "tokens per minute (TPM)")}}),
+         "the AI service's usage limit was reached; try again in a minute"),
     ],
 )  # fmt: skip
 def test_a_providers_refusal_is_explained_in_words(status, body, reason):

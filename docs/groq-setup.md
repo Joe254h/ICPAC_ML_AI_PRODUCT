@@ -7,7 +7,12 @@ Create a free Groq account at https://console.groq.com and create an API key at
 https://console.groq.com/keys. Stay on the Free plan. Qwen 3.8 27B is a preview model;
 the published free quotas include 30 requests/minute, 1,000 requests/day and
 200,000 tokens/day. Any request or token quota can be reached first. Check the
-account's Limits page for its actual allowance.
+account's Limits page for its actual allowance, including its tokens per minute: the
+Copilot's instructions and tools are about 5,000 tokens before the question, and an
+attached document adds up to about 10,000 more. A question larger than the per-minute
+allowance is refused as "request too large"; the Copilot then cuts the attached files to fit
+and asks again. For long documents and multi-step answers, Groq's paid Developer plan has
+higher limits.
 
 ## Azure Container Apps
 

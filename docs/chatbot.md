@@ -205,5 +205,13 @@ go to the comparison above. Files over 4 MB are sent in parts, up to 20 MB. When
 service cannot answer, a question with files shows what was read from them (the start of
 each document's text) instead of this week's forecast.
 
+The model gets up to 40,000 characters of each file (about 10,000 tokens). When an AI
+service refuses a question as too large (Groq's free plan allows a few thousand tokens a
+minute, and the Copilot's instructions and tools take about 5,000 of them), the files' text
+is cut by what the service says is too much, the model is told the rest was left out, and
+the question goes again. Groq's limit messages end with a link to its billing page; the
+Copilot reports them as limits ("the question and its files are more than the AI service
+takes at once", "the daily limit is used up"), not as billing.
+
 Each question can be copied or edited and asked again (the answers after it are replaced,
 its files kept); the latest answer can be copied or asked for again.

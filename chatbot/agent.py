@@ -37,7 +37,7 @@ from anthropic.types.beta import (
 )
 
 from backend.app.services.forecasts import ForecastService
-from chatbot import web
+from chatbot import attachments, web
 from chatbot.tone import TONE_RULES, tone_problems
 from climate_engine.core import config
 from climate_engine.inputs import sources as data_sources
@@ -1488,9 +1488,17 @@ def provider_message(text: str, limit: int = 220) -> str | None:
     return message if len(message) <= limit else message[: limit - 1].rstrip() + "…"
 
 
-# What a provider's refusal says, in words for the person asking (Gemini's and OpenAI's
-# error messages; checked in order).
+# What a provider's refusal says, in words for the person asking (Gemini's, Groq's and
+# OpenAI's error messages; checked in order). Groq's limit messages end with a link to its
+# billing page, so they come before "billing".
 REFUSALS = (
+    (("request too large", "reduce your message size"),
+     "the question and its files are more than the AI service takes at once on this plan: "
+     "ask about a shorter file, or one part of it"),
+    (("tokens per day", "requests per day"),
+     "the AI service's daily limit is used up (the System page says when it frees up)"),
+    (("rate limit reached",),
+     "the AI service's usage limit was reached; try again in a minute"),
     (("api_key_invalid", "api key not valid", "invalid api key", "incorrect api key"),
      "the AI service says the key is not valid: enter the key again"),
     (("unregistered callers", "missing api key", "no api key", "api key not found"),
@@ -1554,6 +1562,26 @@ def _model_refused(response: httpx.Response) -> bool:
             word in text for word in ("not found", "not supported", "not available", "deprecated")
         )
     )
+
+
+def _fit_files(transcript: list[dict[str, Any]], response: httpx.Response) -> bool:
+    """After "request too large" (Groq's per-minute token limit on its free plan), cut the
+    attached files' text so the question fits, for this and the later rounds. False when
+    there are no files or too little of them is left to make a difference."""
+    if response.status_code != 413 and "request too large" not in response.text.lower():
+        return False
+    numbers = re.search(r"limit:?\s*(\d+),\s*requested:?\s*(\d+)", response.text, re.I)
+    for turn in reversed(transcript):
+        if turn["role"] == "user" and "<attached_file" in turn["text"]:
+            # About four characters a token; more is cut than needed rather than less.
+            over = int(numbers[2]) - int(numbers[1]) if numbers else len(turn["text"]) // 10
+            shorter = attachments.shorten(turn["text"], 5 * max(over, 0) + 2000)
+            if shorter is None:
+                return False
+            log.warning("Copilot question too large for the model; files cut to fit")
+            turn["text"] = shorter
+            return True
+    return False
 
 
 class OpenAIToolsModel:
@@ -1635,7 +1663,12 @@ class OpenAIToolsModel:
             body.update(tools=[function_tool(t) for t in tools], tool_choice="auto")
         if effort := os.getenv("LLM_REASONING_EFFORT"):
             body["reasoning_effort"] = effort
-        response = self._post_to_a_model(body)
+        try:
+            response = self._post_to_a_model(body)
+        except httpx.HTTPStatusError as exc:
+            if not _fit_files(transcript, exc.response):
+                raise
+            return self.respond(system, transcript, tools)
         choice = response.json()["choices"][0]
         message = choice["message"]
         raw_calls = message.get("tool_calls") or []
