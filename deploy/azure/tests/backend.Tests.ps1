@@ -196,6 +196,19 @@ Reset-DeploymentFixture
 try { & $deployment -ExpectedCommit $global:DeployTestcommit -AccessMode public -ReleaseMode production; throw 'Public production accepted' }
 catch { if ($_.Exception.Message -ne 'Public access requires an evaluation release.') { throw } }
 if ($global:DeployTestwrites -or $global:DeployTestsecretReads) { throw 'Invalid public production configuration touched Azure' }
+# Without -AccessMode a redeployment keeps the access mode the app has.
+Reset-DeploymentFixture
+$global:DeployTestapp.properties.template.containers[0].env += @{name = 'ACCESS_MODE'; value = 'public'}
+$global:DeployTesthealthChanges['access_mode'] = 'public'
+& $deployment -ExpectedCommit $global:DeployTestcommit
+$configuredMode = @($global:DeployTestapp.properties.template.containers[0].env | Where-Object name -EQ ACCESS_MODE)[0].value
+if ($global:DeployTestwrites -ne 1 -or $configuredMode -ne 'public') { throw 'A redeployment without -AccessMode did not keep public access' }
+& $deployment -ExpectedCommit $global:DeployTestcommit -VerifyOnly
+Reset-DeploymentFixture
+$global:DeployTestapp.properties.template.containers[0].env += @{name = 'ACCESS_MODE'; value = 'public'}
+try { & $deployment -ExpectedCommit $global:DeployTestcommit -ReleaseMode production; throw 'Kept public production accepted' }
+catch { if ($_.Exception.Message -ne 'Public access requires an evaluation release.') { throw } }
+if ($global:DeployTestwrites -or $global:DeployTestsecretReads) { throw 'A kept public mode with production touched Azure' }
 Write-Host 'PowerShell deployment contract tests passed (offline).'
 Reset-DeploymentFixture
 $global:DeployTesthealthChanges['automation_scheduler_enabled'] = $true

@@ -107,9 +107,11 @@ Chat concurrency, per-identity request budgets, review transitions and scientifi
 enabled. Anonymous identifiers can be replaced by visitors, so these budgets are not verified
 per-person quotas. Public mode requires an evaluation release.
 
-Use `-AccessMode public` with `-VerifyOnly` to verify a public deployment. Later, redeploy
-with `-AccessMode staff` to restore staff access. Saved staff credentials are preserved when
-public mode is enabled and become usable again in staff mode. The default is staff mode.
+Without `-AccessMode`, a deployment or `-VerifyOnly` keeps the access mode the app already
+has (staff for a new app), so updating the code never opens or closes the site by itself.
+Give `-AccessMode staff` to restore staff access, or `-AccessMode public` to open it again.
+Saved staff credentials are preserved when public mode is enabled and become usable again in
+staff mode.
 
 `STAFF_CREDENTIALS` is a backend-only JSON array. Each person gets a distinct random key
 and stable name; never share Joe254h's key. Roles are `operator` (forecast/data work and

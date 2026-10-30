@@ -12,6 +12,8 @@ change the Copilot's AI service; leave them out to keep the current one. -LlmRea
 sets the reasoning effort sent with each question (off removes it); a new -LlmBaseUrl
 removes the previous service's reasoning effort and fallback models.
 Use -SetEarthdataToken to enter a NASA Earthdata token privately for the GPM IMERG downloads.
+Without -AccessMode the app keeps its current access mode (staff for a new app); give
+-AccessMode staff or -AccessMode public to change it.
 #>
 [CmdletBinding()]
 param(
@@ -19,7 +21,7 @@ param(
     [string]$ResourceGroup = 'icpac',
     [string]$AppName = 'icpac-api',
     [ValidateSet('evaluation', 'production')][string]$ReleaseMode = 'evaluation',
-    [ValidateSet('staff', 'public')][string]$AccessMode = 'staff',
+    [ValidateSet('staff', 'public')][string]$AccessMode,
     [switch]$EnableAutomation,
     [switch]$DisableAutomation,
     [ValidateRange(0, 23)][int]$AutomationHourUtc = 10,
@@ -148,6 +150,14 @@ $image = "ghcr.io/joe254h/icpac-backend@$digest"
 $commitImage = "ghcr.io/joe254h/icpac-backend:$ExpectedCommit"
 $app = Invoke-Azure @('containerapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroup)
 if ($app.properties.template.containers.Count -ne 1) { throw 'This script expects one API container.' }
+# Without -AccessMode, updating the code keeps the access mode the app has, so a
+# redeployment never opens or closes the site by itself.
+if (-not $AccessMode) {
+    $configuredMode = @($app.properties.template.containers[0].env | Where-Object name -EQ 'ACCESS_MODE')
+    $AccessMode = 'staff'
+    if ($configuredMode.Count -and $configuredMode[0]['value'] -in @('staff', 'public')) { $AccessMode = [string]$configuredMode[0]['value'] }
+    if ($AccessMode -eq 'public' -and $ReleaseMode -ne 'evaluation') { throw 'Public access requires an evaluation release.' }
+}
 if ($VerifyOnly) {
     Confirm-Deployment -Once
     Write-Host 'Read-only verification complete. No secrets were read or Azure resources changed.'

@@ -475,10 +475,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             © ICPAC {new Date().getUTCFullYear()} · WMO Regional Climate Centre
             for Eastern Africa
           </span>
-          <span>
-            Forecasts: ECMWF Open Data (CC BY 4.0) · Observations: CHIRPS,
-            TAMSAT, ARC 2.0, RFE 2.0, GPM IMERG
-          </span>
         </div>
       </footer>
       {search && <SearchDialog close={() => setSearch(false)} />}
