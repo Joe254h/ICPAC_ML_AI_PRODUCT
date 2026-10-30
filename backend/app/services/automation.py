@@ -93,15 +93,28 @@ class AutomationService:
             ),
             identifier=outbox_id(sunday),
         )
+        from backend.app.services.operations import RunInProgress
+
+        later = [
+            # After the week's forecast, each of the last twelve weeks keeps its weekly
+            # forecast: a Sunday run not forecast yet (the first weeks of the schedule, a
+            # missed week) is forecast.
+            (
+                OperationRequest(action="refresh_archive", actor="scheduled automation", weeks=12),
+                f"icpac/weeks/{sunday.isoformat()}",
+            )
+        ]
         local = stamp.astimezone(EAT)
         if local.hour >= VERIFY_HOUR_EAT:
-            from backend.app.services.operations import RunInProgress
-
-            try:
-                service.start(
+            later.append(
+                (
                     OperationRequest(action="verify_due", actor="scheduled automation"),
-                    identifier=str(uuid5(NAMESPACE_URL, f"icpac/verify/{local.date()}")),
+                    f"icpac/verify/{local.date()}",
                 )
+            )
+        for request, name in later:
+            try:
+                service.start(request, identifier=str(uuid5(NAMESPACE_URL, name)))
             except RunInProgress:  # a full queue: the next tick tries again
                 pass
         return weekly

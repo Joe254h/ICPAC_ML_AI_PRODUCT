@@ -44,15 +44,24 @@ def test_weekly_outbox_is_explicit_bounded_and_survives_restarts(platform, monke
         def actions():
             return sorted(r["action"] for r in platform.repo.list("operation"))
 
-        # From noon EAT each day the weeks that have ended are verified, once a day (the
-        # ticks above at 00:30 EAT were before noon).
-        assert actions() == ["end_to_end", "verify_due"]
+        # Each week's run is followed by filling the last twelve weeks, once a week; from
+        # noon EAT each day the weeks that have ended are verified, once a day (the ticks
+        # above at 00:30 EAT were before noon).
+        assert actions() == ["end_to_end", "refresh_archive", "verify_due"]
+        fill = next(r for r in platform.repo.list("operation") if r["action"] == "refresh_archive")
+        assert fill["request"]["weeks"] == 12
         service.tick(datetime(2026, 10, 25, 13, 0, tzinfo=eat))
-        assert actions() == ["end_to_end", "verify_due"]
+        assert actions() == ["end_to_end", "refresh_archive", "verify_due"]
         next_week = service.tick(datetime(2026, 10, 26, 0, 0, tzinfo=eat))
         assert next_week is not None and next_week["initialization"] == "2026-10-25"
         assert next_week["id"] != first["id"]
-        assert actions() == ["end_to_end", "end_to_end", "verify_due"]
+        assert actions() == [
+            "end_to_end",
+            "end_to_end",
+            "refresh_archive",
+            "refresh_archive",
+            "verify_due",
+        ]
     finally:
         second_platform.repo.engine.dispose()
     with pytest.raises(ValueError, match="timezone"):
@@ -290,11 +299,6 @@ def test_connected_workflow_prepares_one_draft_and_never_takes_review_actions(
         action="end_to_end", initialization=date(2026, 10, 17), actor="Operator"
     )
     first = service.start(body, background=False)
-    # The last twelve weeks are filled as a task of their own, after the workflow.
-    fill = service.get(first["result"]["weeks_task"])
-    assert fill["action"] == "refresh_archive" and fill["request"]["weeks"] == 12
-    while service.run_pending():
-        pass
     second = service.start(body, background=False)
     assert first["status"] == second["status"] == "complete"
     assert first["result"]["review_required"] is True

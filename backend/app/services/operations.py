@@ -556,17 +556,6 @@ class OperationService:
             operation_id,
             "Products are ready for review; unavailable scientific layers remain labelled pending",
         )
-        # The last twelve weeks each keep their weekly forecast: a Sunday run not forecast
-        # yet (the first weeks of the schedule, a missed week) is forecast as its own task.
-        try:
-            fill = self.start(
-                OperationRequest(action="refresh_archive", actor=body.actor, weeks=12),
-                identifier=str(uuid5(NAMESPACE_URL, f"icpac/weeks/{operation_id}")),
-            )
-        except RunInProgress:
-            self._log(operation_id, "Filling the last 12 weeks is left for the next run")
-        else:
-            result["weeks_task"] = fill["id"]
         return result
 
     def _verify_forecast(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
