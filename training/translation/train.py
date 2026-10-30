@@ -168,7 +168,12 @@ def main() -> None:
         if not (folder / "train.jsonl").is_file():
             print(f"skip {LANGUAGES[key].name}: run prepare_data.py first")
             continue
-        train.append(encode(read(folder / "train.jsonl"), tokenizer, madlad, args.max_length))
+        rows = read(folder / "train.jsonl")
+        if not rows:
+            # Lugbara, Runyankole and Ateso have only SALT, which needs a Hugging Face sign-in.
+            print(f"skip {LANGUAGES[key].name}: no training data (SALT needs HF_TOKEN)")
+            continue
+        train.append(encode(rows, tokenizer, madlad, args.max_length))
         rows = read(folder / "valid.jsonl")
         if rows:
             valid.append(encode(rows, tokenizer, madlad, args.max_length))
