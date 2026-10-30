@@ -1,16 +1,19 @@
-"""Connected automation, an idempotent daily outbox and evidence-based readiness.
+"""Connected automation, an idempotent weekly outbox and evidence-based readiness.
 
 Scheduling is enabled only in server configuration. Reading this service never
 downloads data, launches jobs, sends mail, promotes models or publishes bulletins.
 """
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from uuid import NAMESPACE_URL, uuid5
 
 from backend.app.db import now
 from backend.app.schemas import OperationRequest
 from backend.app.services.forecasts import ForecastService, current_record, hybrid_status
+from climate_engine.inputs.ecmwf_opendata import weekly_run
+
+EAT = timezone(timedelta(hours=3))
 
 CAPABILITIES = (
     (1, "ECMWF acquisition", "/data/ecmwf", "acquisition"),
@@ -29,7 +32,7 @@ CAPABILITIES = (
     (14, "Country summaries", "/countries", "countries"),
     (15, "Forecast maps", "/maps/rainfall", "maps"),
     (16, "Weekly Word bulletin", "/bulletin", "bulletin"),
-    (17, "Daily forecast refresh", "/automations", "schedule"),
+    (17, "Weekly forecast run", "/automations", "schedule"),
     (18, "Forecast archives", "/forecasts/archive", "archive"),
     (19, "Workflow and HPC monitoring", "/data/runs", "monitoring"),
     (20, "Reviewed dissemination", "/bulletins", "dissemination"),
@@ -37,14 +40,23 @@ CAPABILITIES = (
 
 
 def scheduler_settings() -> dict:
-    hour = int(os.getenv("AUTOMATION_DAILY_HOUR_UTC", "10"))
-    if not 0 <= hour <= 23:
-        raise ValueError("AUTOMATION_DAILY_HOUR_UTC must be between 0 and 23")
+    """The weekly forecast is made at the end of each Sunday (00:00 EAT on Monday) from that
+    Sunday's 00 UTC ECMWF run, which is published by about 11:00 EAT."""
     return {
         "enabled": os.getenv("AUTOMATION_SCHEDULER_ENABLED", "false") == "true",
-        "hour_utc": hour,
+        "when": "Every Sunday at midnight (00:00 EAT on Monday)",
         "action": "end_to_end",
     }
+
+
+def due_run(stamp: datetime) -> tuple[date, datetime]:
+    """The Sunday whose weekly forecast is due at ``stamp``, and when it fell due."""
+    sunday = weekly_run(stamp.astimezone(EAT).date() - timedelta(days=1))
+    return sunday, datetime.combine(sunday + timedelta(days=1), time(0), EAT)
+
+
+def outbox_id(sunday: date) -> str:
+    return str(uuid5(NAMESPACE_URL, f"icpac/weekly/{sunday.isoformat()}"))
 
 
 class AutomationService:
@@ -53,7 +65,7 @@ class AutomationService:
         self.repo = platform.repo
 
     def tick(self, stamp: datetime | None = None) -> dict | None:
-        """Enqueue at most one current-day cycle, never replay a backlog of dates.
+        """Enqueue the weekly forecast of the latest Sunday once, never a backlog of weeks.
 
         The deterministic outbox ID and database unique constraint are the claim;
         a crash between enqueue and recording schedule state cannot duplicate work.
@@ -64,13 +76,14 @@ class AutomationService:
         stamp = stamp or datetime.now(timezone.utc)
         if stamp.tzinfo is None:
             raise ValueError("Scheduler timestamps must include a timezone")
-        stamp = stamp.astimezone(timezone.utc)
-        if not cfg["enabled"] or stamp.hour < cfg["hour_utc"]:
+        if not cfg["enabled"]:
             return None
-        identifier = str(uuid5(NAMESPACE_URL, f"icpac/daily/{stamp.date().isoformat()}"))
+        sunday, _ = due_run(stamp)
         return OperationService(self.platform).start(
-            OperationRequest(action="end_to_end", actor="scheduled automation"),
-            identifier=identifier,
+            OperationRequest(
+                action="end_to_end", actor="scheduled automation", initialization=sunday
+            ),
+            identifier=outbox_id(sunday),
         )
 
     def status(self) -> dict:
@@ -85,16 +98,12 @@ class AutomationService:
         layers = (latest or {}).get("layers", [])
         hybrid = hybrid_status(current_record(self.platform))
         cfg = scheduler_settings()
-        stamp = datetime.now(timezone.utc)
-        due = stamp.replace(hour=cfg["hour_utc"], minute=0, second=0, microsecond=0)
-        today_id = str(uuid5(NAMESPACE_URL, f"icpac/daily/{stamp.date().isoformat()}"))
+        sunday, due = due_run(datetime.now(timezone.utc))
         try:
-            self.repo.get("operation", today_id)
-            today_queued = True
+            self.repo.get("operation", outbox_id(sunday))
+            due += timedelta(weeks=1)  # this week's is queued or done: next Sunday's
         except KeyError:
-            today_queued = False
-        if due <= stamp and today_queued:
-            due += timedelta(days=1)
+            pass
         records = sorted(self.repo.list("operation"), key=lambda r: r["created_at"], reverse=True)
         last_cycle = next((r for r in records if r["action"] == "end_to_end"), None)
         bulletins = [b for b in self.repo.list("bulletin") if b.get("kind") == "icpac-weekly"]
@@ -238,10 +247,10 @@ class AutomationService:
             ),
             "schedule": (
                 "enabled" if cfg["enabled"] else "disabled",
-                f"The connected workflow runs every day at {(cfg['hour_utc'] + 3) % 24:02d}:00 EAT "
-                "(missed days are not replayed)."
+                "The weekly forecast is made every Sunday at midnight (00:00 EAT on Monday) "
+                "from that Sunday's ECMWF run; missed weeks are not replayed."
                 if cfg["enabled"]
-                else "Daily scheduling is switched off in the server configuration.",
+                else "The weekly schedule is switched off in the server configuration.",
             ),
             "archive": (
                 "available" if runs else "ready",
@@ -275,13 +284,18 @@ class AutomationService:
         }
         alerts = []
         if latest:
-            age = (stamp.date() - datetime.fromisoformat(latest["initialization"][:10]).date()).days
-            if age > 2:
+            # The weekly forecast is a week apart; a day's grace covers the Sunday-night run.
+            age = (
+                datetime.now(timezone.utc).date()
+                - datetime.fromisoformat(latest["initialization"][:10]).date()
+            ).days
+            if age > 8:
                 alerts.append(
                     {
                         "severity": "warning",
                         "code": "stale_forecast",
-                        "message": f"Latest initialization is {age} days old; check acquisition and scheduling.",
+                        "message": f"The newest forecast is from an ECMWF run {age} days old; "
+                        "check the data download and the weekly schedule.",
                     }
                 )
         else:

@@ -212,10 +212,10 @@ if ($global:DeployTestwrites -or $global:DeployTestsecretReads) { throw 'A kept 
 Write-Host 'PowerShell deployment contract tests passed (offline).'
 Reset-DeploymentFixture
 $global:DeployTesthealthChanges['automation_scheduler_enabled'] = $true
-& $deployment -ExpectedCommit $global:DeployTestcommit -EnableAutomation -AutomationHourUtc 11
+& $deployment -ExpectedCommit $global:DeployTestcommit -EnableAutomation
 $settings = @{}
 foreach ($variable in $global:DeployTestapp.properties.template.containers[0].env) { if ($variable.value) { $settings[$variable.name] = $variable.value } }
-if ($settings['AUTOMATION_SCHEDULER_ENABLED'] -ne 'true' -or $settings['AUTOMATION_DAILY_HOUR_UTC'] -ne '11') { throw 'Reviewed schedule was not configured' }
+if ($settings['AUTOMATION_SCHEDULER_ENABLED'] -ne 'true') { throw 'Reviewed schedule was not configured' }
 Reset-DeploymentFixture
 try { & $deployment -ExpectedCommit $global:DeployTestcommit -EnableAutomation -VerifyOnly; throw 'Verification changed schedule' }
 catch { if ($_.Exception.Message -ne 'Verification cannot change the automation schedule.') { throw } }

@@ -391,8 +391,9 @@ PAST_WEEKS = 4
 
 
 def main() -> None:
-    """Build and serve a mirror holding yesterday's run, the newest a forecaster would find,
-    the newest ended dekads of CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG, and, for past
+    """Build and serve a mirror holding the latest Sunday's run (up to yesterday), from which
+    a forecaster makes the weekly forecast, the newest ended dekads of CHIRPS, TAMSAT, ARC
+    2.0, RFE 2.0 and GPM IMERG, and, for past
     weeks, the archived runs and the daily observations that verify them (browser tests
     point ECMWF_OPENDATA_MIRRORS at the mirror, CHIRPS_BASE_URL at its /chc folder,
     TAMSAT_BASE_URL at /tamsat, and ARC2_BASE_URL, RFE2_BASE_URL and IMERG_BASE_URL at
@@ -410,7 +411,11 @@ def main() -> None:
         help="also serve the newest run's upper-air fields at these forecast hours",
     )
     args = parser.parse_args()
-    day = args.date or datetime.now(timezone.utc).date() - timedelta(days=1)
+    from climate_engine.inputs.ecmwf_opendata import weekly_run
+
+    # The ECMWF runs follow the weekly forecast's Sundays; the dekads end before today.
+    observed = args.date or datetime.now(timezone.utc).date() - timedelta(days=1)
+    day = args.date or weekly_run(observed)
     shutil.rmtree(args.root, ignore_errors=True)
     build(args.root, day, args.members, pressure_steps=tuple(args.pressure_steps))
     past = [day - timedelta(days=14 + 7 * week) for week in range(PAST_WEEKS)]
@@ -418,11 +423,11 @@ def main() -> None:
         build(args.root, run, args.members, wetness=wetness(run))
     # Each run's Week-2 window: days 7 to 13 after it.
     build_chirps_days(args.root, past[-1] + timedelta(days=7), past[0] + timedelta(days=13))
-    build_chirps_dekad(args.root, day + timedelta(days=1))
-    build_tamsat_dekad(args.root, day + timedelta(days=1))
+    build_chirps_dekad(args.root, observed + timedelta(days=1))
+    build_tamsat_dekad(args.root, observed + timedelta(days=1))
     from climate_engine.inputs import daily_references
 
-    newest = daily_references.ended_dekads("arc2", day + timedelta(days=1))[0]
+    newest = daily_references.ended_dekads("arc2", observed + timedelta(days=1))[0]
     first, last = past[-1] + timedelta(days=7), past[0] + timedelta(days=13)
     weeks = [first + timedelta(days=n) for n in range((last - first).days + 1)]
     build_daily_references(args.root, sorted(set(daily_references.dekad_days(newest) + weeks)))

@@ -186,7 +186,9 @@ def test_the_copilot_can_list_the_weeks_to_ask_which_one(env, fast_maps, claude)
     answer = env.client.post("/chat", json={"message": "Draft the bulletin."}).json()
     weeks = tool_results(fake.requests[-1])[0]["weeks"]
     assert [w["forecast"] for w in weeks] == ["run:2026-10-05", "run:2026-09-28"]
-    assert weeks[0]["newest"] and weeks[0]["in_this_conversation"]
+    # Neither is a Sunday run, so the newest stands as the latest.
+    assert weeks[0]["latest"] and weeks[0]["in_this_conversation"]
+    assert not weeks[0]["weekly"]
     assert answer["text"].startswith("Which week")
     # A week chosen on the page is the one the next question is about.
     chosen = env.client.post(

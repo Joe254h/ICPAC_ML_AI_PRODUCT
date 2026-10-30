@@ -31,6 +31,7 @@ import { dateTime, day, personName } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
 import { operationActive, operationLabel } from "@/services/operation-state";
+import { latestOf } from "@/features/operational/shared";
 import type {
   ForecastRun,
   Operation,
@@ -64,7 +65,7 @@ const STEPS: {
   {
     action: "fetch_ecmwf",
     title: "Download ECMWF only",
-    text: "Fetch the ensemble rainfall of a 00 UTC run.",
+    text: "Fetch the ensemble rainfall of one run (03:00 EAT).",
     icon: CloudDownload,
   },
   {
@@ -140,9 +141,7 @@ function resultLink(operation: Operation) {
 export default function Operations() {
   const history = useApi<Operation[]>("/operations");
   const forecasts = useApi<ForecastRun[]>("/forecasts");
-  const newest = forecasts.data?.find(
-    (r) => !r.synthetic && r.of_record !== false,
-  );
+  const newest = latestOf(forecasts.data ?? []);
   const { refresh, current } = useApp();
   const [actor, setActor] = useActor();
   const [date, setDate] = useState("");
@@ -203,8 +202,8 @@ export default function Operations() {
               }}
             >
               <li>
-                Download the newest 00 UTC ECMWF ensemble (or the date chosen
-                below).
+                Download the ECMWF ensemble of the latest Sunday (or the date
+                chosen below).
               </li>
               <li>
                 Run the Week-2 forecast and publish its product package, maps
@@ -236,7 +235,9 @@ export default function Operations() {
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
                 />
-                <span className="hint">Empty: the newest published run.</span>
+                <span className="hint">
+                  Empty: the latest Sunday&apos;s run, the weekly forecast.
+                </span>
               </label>
               <label className="field" style={{ gridColumn: "1 / -1" }}>
                 Model for this run
@@ -477,7 +478,7 @@ export default function Operations() {
             items={[
               [
                 "Weekly",
-                "Run the cycle once ECMWF has published the 00 UTC run of the issue day (about 12:00 EAT).",
+                "Run the cycle once ECMWF has published the run of the issue day (by about 12:00 EAT).",
               ],
               [
                 "Daily",

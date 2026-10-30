@@ -128,6 +128,16 @@ export function dateTime(iso: string | null | undefined): string {
   );
 }
 
+/** An ECMWF run (00 UTC) in East Africa Time, e.g. "25 Oct 2026, 03:00 EAT". */
+export function runTime(initialization: string | null | undefined): string {
+  if (!initialization) return UNAVAILABLE;
+  return dateTime(
+    initialization.length === 10
+      ? initialization + "T00:00:00Z"
+      : initialization,
+  );
+}
+
 /** An hour of the day given in UTC, as EAT, e.g. 10 → "13:00 EAT". */
 export function eatHour(hourUtc: number): string {
   return `${String((hourUtc + 3) % 24).padStart(2, "0")}:00 EAT`;

@@ -141,6 +141,10 @@ export type ForecastRun = {
   /** The ECMWF run's forecast of record (by the model in use); false for an earlier
    * version of the same week. Older services do not send it. */
   of_record?: boolean;
+  /** A weekly forecast: from a Sunday's ECMWF run, for Sunday to Saturday. */
+  weekly?: boolean;
+  /** The forecast the website shows: the latest weekly forecast. */
+  latest?: boolean;
   products?: Partial<Record<Variant, ProductStatus>>;
 };
 

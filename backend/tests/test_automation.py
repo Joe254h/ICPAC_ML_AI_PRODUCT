@@ -22,31 +22,33 @@ def platform(tmp_path, monkeypatch):
     repo.engine.dispose()
 
 
-def test_daily_outbox_is_explicit_bounded_and_survives_restarts(platform, monkeypatch):
-    stamp = datetime(2026, 10, 17, 10, tzinfo=timezone.utc)
+def test_weekly_outbox_is_explicit_bounded_and_survives_restarts(platform, monkeypatch):
+    """The weekly forecast is made at the end of each Sunday (00:00 EAT on Monday) from that
+    Sunday's run, once a week, also across restarts."""
+    eat = timezone(timedelta(hours=3))
+    stamp = datetime(2026, 10, 19, 0, 30, tzinfo=eat)  # just after Sunday 18 October ended
     service = AutomationService(platform)
     assert service.tick(stamp) is None
     monkeypatch.setenv("AUTOMATION_SCHEDULER_ENABLED", "true")
-    assert service.tick(stamp - timedelta(hours=1)) is None
+    assert scheduler_settings()["when"] == "Every Sunday at midnight (00:00 EAT on Monday)"
     first = service.tick(stamp)
     assert first is not None
+    assert first["action"] == "end_to_end" and first["initialization"] == "2026-10-18"
     second_platform = SimpleNamespace(repo=Repository(platform.repo.url))
     try:
-        second = AutomationService(second_platform).tick(stamp + timedelta(hours=2))
-        assert second is not None
-        assert first["id"] == second["id"]
+        # Later in the week, and on Sunday evening, it is still that Sunday's forecast.
+        for later in (stamp + timedelta(days=3), datetime(2026, 10, 25, 23, 59, tzinfo=eat)):
+            again = AutomationService(second_platform).tick(later)
+            assert again is not None and again["id"] == first["id"]
         assert len(platform.repo.list("operation")) == 1
-        tomorrow = service.tick(stamp + timedelta(days=1))
-        assert tomorrow is not None
-        assert tomorrow["id"] != first["id"]
+        next_week = service.tick(datetime(2026, 10, 26, 0, 0, tzinfo=eat))
+        assert next_week is not None and next_week["initialization"] == "2026-10-25"
+        assert next_week["id"] != first["id"]
         assert len(platform.repo.list("operation")) == 2
     finally:
         second_platform.repo.engine.dispose()
     with pytest.raises(ValueError, match="timezone"):
         service.tick(stamp.replace(tzinfo=None))
-    monkeypatch.setenv("AUTOMATION_DAILY_HOUR_UTC", "24")
-    with pytest.raises(ValueError, match="between"):
-        scheduler_settings()
 
 
 def test_concurrent_enqueue_never_overwrites_the_first_request(platform):
@@ -119,7 +121,7 @@ def test_implicit_selection_falls_back_before_pinning_but_explicit_dates_do_not(
             raise ECMWFDataUnavailable("503 Slow Down")
         return {}
 
-    monkeypatch.setattr(ecmwf_opendata, "latest_initialization", lambda: date(2026, 10, 18))
+    monkeypatch.setattr(ecmwf_opendata, "latest_weekly_initialization", lambda: date(2026, 10, 18))
     monkeypatch.setattr(ecmwf_opendata, "is_published", lambda *args: True)
     monkeypatch.setattr(ForecastService, "fetch_ecmwf", fetch)
     monkeypatch.setattr(
@@ -131,9 +133,10 @@ def test_implicit_selection_falls_back_before_pinning_but_explicit_dates_do_not(
     record = service.start(
         OperationRequest(action="run_forecast", actor="Operator"), background=False
     )
+    # The weekly forecast steps back a week, to the Sunday before, not a day.
     assert record["status"] == "complete"
-    assert record["request"]["initialization"] == "2026-10-17"
-    assert fetched == [date(2026, 10, 18), date(2026, 10, 17)]
+    assert record["request"]["initialization"] == "2026-10-11"
+    assert fetched == [date(2026, 10, 18), date(2026, 10, 11)]
     fetched.clear()
     record = service.start(
         OperationRequest(
@@ -225,16 +228,17 @@ def test_catalogue_is_read_only_and_never_claims_missing_hybrid_is_available(pla
     assert "staff sign-in" in public["Reviewed dissemination"]["detail"]
 
 
-def test_overdue_schedule_stays_due_until_the_daily_outbox_exists(platform, monkeypatch):
+def test_overdue_schedule_stays_due_until_the_weekly_outbox_exists(platform, monkeypatch):
     monkeypatch.setenv("AUTOMATION_SCHEDULER_ENABLED", "true")
-    monkeypatch.setenv("AUTOMATION_DAILY_HOUR_UTC", "0")
     service = AutomationService(platform)
     stamp = datetime.now(timezone.utc)
-    assert datetime.fromisoformat(service.status()["schedule"]["next_due"]).date() == stamp.date()
+    due = datetime.fromisoformat(service.status()["schedule"]["next_due"])
+    # The latest Sunday's slot (Monday 00:00 EAT) has passed and stays due until queued.
+    assert due <= stamp and stamp - due < timedelta(weeks=1)
+    assert due.astimezone(timezone(timedelta(hours=3))).strftime("%a %H:%M") == "Mon 00:00"
     service.tick(stamp)
-    assert (
-        datetime.fromisoformat(service.status()["schedule"]["next_due"]).date()
-        == (stamp + timedelta(days=1)).date()
+    assert datetime.fromisoformat(service.status()["schedule"]["next_due"]) == due + timedelta(
+        weeks=1
     )
 
 
@@ -371,12 +375,17 @@ def test_the_archive_is_forecast_again_with_the_model_in_use(platform, monkeypat
     """Runs the model in use has not forecast are forecast again (with their upper-air
     inputs), newest first and only as many as asked; a run missing from the ECMWF archive
     is reported and the others go on; the weeks are then verified."""
+    from backend.app.services import operations
+
+    # Thursday 29 October: the last three weeks are the runs of Sundays 25, 18 and 11
+    # October; the daily run of 28 October is not one of them.
+    monkeypatch.setattr(operations, "_today", lambda: date(2026, 10, 29))
     service = OperationService(platform)
     held = [
-        {"initialization": "2026-10-28T00:00:00+00:00", "model_id": "refit"},
-        {"initialization": "2026-10-20T00:00:00+00:00", "model_id": "prerefit"},
-        {"initialization": "2026-10-19T00:00:00+00:00", "model_id": "mbc-only"},
-        {"initialization": "2026-10-06T00:00:00+00:00", "model_id": "prerefit"},
+        {"initialization": "2026-10-28T00:00:00+00:00", "model_id": "prerefit"},
+        {"initialization": "2026-10-25T00:00:00+00:00", "model_id": "refit"},
+        {"initialization": "2026-10-18T00:00:00+00:00", "model_id": "prerefit"},
+        {"initialization": "2026-10-11T00:00:00+00:00", "model_id": "mbc-only"},
     ]
     forecast: list[tuple[str, bool]] = []
 
@@ -386,7 +395,7 @@ def test_the_archive_is_forecast_again_with_the_model_in_use(platform, monkeypat
 
         def run(self, body, upper_air=False, progress=None):
             day = body.initialization.isoformat()
-            if day == "2026-10-19":
+            if day == "2026-10-11":
                 raise ECMWFDataUnavailable("not in the archive")
             forecast.append((day, upper_air))
             return {"forecast_id": f"w2-{day}-new"}
@@ -404,7 +413,7 @@ def test_the_archive_is_forecast_again_with_the_model_in_use(platform, monkeypat
     assert service.run_pending()
     done = service.get(task["id"])
     assert done["status"] == "complete", done
-    assert forecast == [("2026-10-20", True)]
-    assert done["result"]["issued"] == ["w2-2026-10-20-new"]
-    assert done["result"]["failed"][0].startswith("2026-10-19")
+    assert forecast == [("2026-10-18", True)]
+    assert done["result"]["issued"] == ["w2-2026-10-18-new"]
+    assert done["result"]["failed"][0].startswith("2026-10-11")
     assert verified == [True]

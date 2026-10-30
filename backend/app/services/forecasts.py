@@ -64,6 +64,9 @@ UPPER_AIR_KIND = "ecmwf_upper_air"
 CHIRPS_KIND = "chirps_week2"
 #: A verified forecast scored against a further reference (ARC 2.0, RFE 2.0, GPM IMERG).
 REFERENCE_KIND = "reference_comparison"
+#: The observed rainfall a verified week can be mapped from: CHIRPS, the reference of
+#: record, then the further references.
+OBSERVED = {"chirps": "CHIRPS", **daily_references.NAMES}
 #: Verified forecasts whose further comparisons are (re)tried in each pass.
 REFERENCE_RECENT = 8
 #: How long one pass may spend starting further comparisons: they never hold up the
@@ -138,6 +141,12 @@ def hybrid_status(model: dict[str, Any] | None = None) -> dict[str, Any]:
     if gated and "ecmwf_opendata" not in ((model or {}).get("realtime_reviews") or {}):
         return {"status": "in_progress", "reason": REALTIME_CONFIRMATION}
     return {"status": "available", "reason": None}
+
+
+def _newest_weekly(listed: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The newest weekly forecast of record in a newest-first listing, else the newest."""
+    held = [r for r in listed if r["of_record"]]
+    return next((r for r in held if r["weekly"]), held[0] if held else None)
 
 
 def current_record(platform) -> dict[str, Any] | None:
@@ -496,7 +505,8 @@ class ForecastService:
         """Every forecast, newest first, each marked ``of_record`` if it is its ECMWF run's
         forecast of record: the newest one made by the model in use, else the newest. The
         others (a run forecast again by an earlier model, or before a confirmation) are
-        earlier versions of the same week, kept for the record."""
+        earlier versions of the same week, kept for the record. ``weekly`` marks the weekly
+        forecasts (Sunday runs) and ``latest`` the one the website shows (``latest_id``)."""
         runs = self.runs()
         model_id = (current_record(self.platform) or {}).get("model_id")
         chosen: dict[str, dict[str, Any]] = {}
@@ -508,14 +518,24 @@ class ForecastService:
             ):
                 chosen[day] = record
         of_record = {id(r) for r in chosen.values()}
-        return [{**r, "of_record": id(r) in of_record} for r in runs]
+        listed = [
+            {
+                **r,
+                "of_record": id(r) in of_record,
+                "weekly": ecmwf_opendata.is_weekly(date.fromisoformat(r["initialization"][:10])),
+            }
+            for r in runs
+        ]
+        newest = _newest_weekly(listed)
+        return [{**r, "latest": r is newest} for r in listed]
 
     def latest_id(self) -> str:
-        """The newest ECMWF run's forecast of record."""
-        for record in self.listing():
-            if record["of_record"]:
-                return record["forecast_id"]
-        raise KeyError("no operational forecast run yet")
+        """The weekly forecast of the latest Sunday run (of record). A forecast of another
+        day's run is the latest only while no Sunday run has been forecast."""
+        newest = _newest_weekly(self.listing())
+        if newest is None:
+            raise KeyError("no operational forecast run yet")
+        return newest["forecast_id"]
 
     def latest(self) -> dict[str, Any]:
         return self.get(self.latest_id())
@@ -666,6 +686,61 @@ class ForecastService:
             partial.write_bytes(overlay.mercator_png(values, latitude, longitude))
             partial.replace(cache)
         return cache.read_bytes()
+
+    def observed_png(self, forecast_id: str, source: str) -> bytes:
+        """What fell in a verified forecast's week, from CHIRPS or a further reference (ARC
+        2.0, RFE 2.0, GPM IMERG), as a map in the forecast map's style and colour scale, to
+        be shown beside it."""
+        from climate_engine.cartography import weekly_maps
+
+        if source not in OBSERVED:
+            raise ValueError(f"Observed rainfall sources: {', '.join(OBSERVED)}")
+        record = self.repo.get(KIND, forecast_id)
+        if record.get("verification_status") != "available":
+            raise Unavailable("This week has not been verified against CHIRPS yet")
+        cache = package_root().parent / "map-previews" / forecast_id / f"observed-v1-{source}.png"
+        if not cache.exists():
+            grid = operational.authoritative_grid()
+            values = self._observed(forecast_id, record, source, grid)
+            period = weekly.period_label(record["valid_start"], record["valid_end"], "%b")
+            png = weekly_maps.render(
+                f"Observed Rainfall (mm) for {period} · {OBSERVED[source]}",
+                maps.Field(source, values, grid.latitude, grid.longitude),
+                note=f"Observed: {OBSERVED[source]}",
+            )
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            partial = cache.with_name(f".{cache.name}.partial")
+            partial.write_bytes(png)
+            partial.replace(cache)
+        return cache.read_bytes()
+
+    def _observed(
+        self, forecast_id: str, record: dict[str, Any], source: str, grid: Any
+    ) -> np.ndarray:
+        """The week's observed total (mm) on the forecast grid."""
+        start = datetime.fromisoformat(record["valid_start"]).date()
+        if source == "chirps":
+            name = chirps.file_name(start)
+            path = self.data_root() / "chirps" / name
+            if not path.exists():  # a restarted replica: the copy kept in the store
+                store = package_store()
+                held = store.get(f"inputs/chirps/{name}") if store is not None else None
+                if held is None:
+                    raise Unavailable("The CHIRPS week of this forecast is no longer held")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(held)
+            with xr.open_dataset(path) as data:
+                return np.array(data["precipitation_week2"].values, dtype=float)
+        try:
+            compared = self.repo.get(REFERENCE_KIND, f"{forecast_id}-{source}")
+        except KeyError:
+            compared = {}
+        if compared.get("status") != "available":
+            raise Unavailable(f"{OBSERVED[source]} has not been compared for this week yet")
+        total, _ = daily_references.days_total(
+            source, chirps.window_days(start), self.data_root() / source / "daily"
+        )
+        return np.asarray(daily_references.on_grid(total, grid), dtype=float)
 
     def bulletin(self, forecast_id: str) -> dict[str, Any]:
         self.repo.get(KIND, forecast_id)

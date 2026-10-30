@@ -207,8 +207,9 @@ Invoke-WebRequest "https://raw.githubusercontent.com/Joe254h/ICPAC_ML_AI_PRODUCT
 & $Ops -Reviewer Joe254h
 ```
 
-`-SkipCycle` leaves out the weekly cycle. Once the daily schedule is on (`-EnableAutomation`
-on the deployment script), the same work runs every day without it.
+`-SkipCycle` leaves out the weekly cycle. Once the weekly schedule is on (`-EnableAutomation`
+on the deployment script), the weekly forecast is made every Sunday at midnight (00:00 EAT
+on Monday) from that Sunday's ECMWF run without it.
 
 ## Further rainfall estimates
 

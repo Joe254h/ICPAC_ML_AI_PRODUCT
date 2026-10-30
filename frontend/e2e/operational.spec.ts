@@ -168,6 +168,34 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   // This week's forecast is still the current one.
   await page.goto("/forecasts");
   await expect(page.getByText("Not verified yet.")).toBeVisible();
+  // The archive lists the weekly forecasts (Sunday runs) with the latest marked, and a
+  // verified week shows its forecast beside what CHIRPS and the other estimates observed.
+  await page.goto("/forecasts/archive");
+  const weeks = page
+    .locator("section.card")
+    .filter({ has: page.getByRole("heading", { name: /Weekly forecasts/ }) });
+  await expect(weeks.locator("tbody tr").first()).toContainText("Latest");
+  await expect(weeks.locator("tbody tr").first()).toContainText("03:00 EAT");
+  await weeks
+    .locator("tbody tr")
+    .filter({ hasText: "Verified · CHIRPS" })
+    .first()
+    .getByRole("link", { name: "Open →" })
+    .click();
+  const observed = page
+    .locator("section.card")
+    .filter({ has: page.getByRole("heading", { name: "What fell that week" }) });
+  await expect(
+    observed.getByRole("img", { name: /Rainfall observed by CHIRPS/ }),
+  ).toBeVisible({ timeout: 60_000 });
+  await expect(observed.getByText(/RMSE [\d.]+ mm · MAE [\d.]+ mm/)).toBeVisible();
+  await observed.getByRole("button", { name: "ARC 2.0" }).click();
+  await expect(
+    observed.getByRole("img", { name: /Rainfall observed by ARC 2\.0/ }),
+  ).toBeVisible({ timeout: 60_000 });
+  await expect(
+    observed.locator("tbody tr").filter({ hasText: "GPM IMERG" }),
+  ).toContainText(/\d/);
 });
 
 test("the About page says what the service is for", async ({ page }) => {
@@ -280,7 +308,7 @@ test("data sources: every source is fetched and has its page", async ({
     .filter({ has: page.getByRole("heading", { name: "Downloaded runs" }) })
     .locator("tbody tr")
     .first();
-  await expect(downloaded).toContainText("00 UTC");
+  await expect(downloaded).toContainText("03:00 EAT");
   await expect(downloaded).toContainText("Local copy");
   await page.goto("/data/tamsat");
   await expect(

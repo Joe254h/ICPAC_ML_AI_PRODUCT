@@ -295,6 +295,32 @@ def test_a_refused_gemini_model_gives_way_to_a_current_one(env, fast_maps, monke
     assert status.startswith("Healthy · Gemini 3.8 Flash answered at")
 
 
+def test_a_thinking_models_reasoning_never_reaches_the_answer(env, fast_maps, monkeypatch):
+    """Qwen on Groq returned its draft, a lone closing tag and the answer: the chat showed
+    the answer twice with the tag between them."""
+    run(env)
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_TOOLS", "true")
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example/v1")
+    monkeypatch.setenv("LLM_FALLBACK_MODELS", "")
+    content = (
+        "Draft: the short rains are wetter in El Nino years.\n</think>\n"
+        "El Nino usually makes the October to December short rains wetter."
+    )
+
+    def post(url: str, headers: dict, timeout: float, json: dict) -> httpx.Response:
+        message = {"content": content}
+        return httpx.Response(
+            200, json={"choices": [{"message": message}]}, request=httpx.Request("POST", url)
+        )
+
+    monkeypatch.setattr(agent.httpx, "post", post)
+    answer = Copilot(env.platform).answer(ChatRequest(message="How does El Nino affect OND?"))
+    assert answer["fallback"] is None
+    assert answer["text"] == "El Nino usually makes the October to December short rains wetter."
+    assert agent.without_reasoning("<think>plan</think>Answer.") == "Answer."
+
+
 def test_a_failed_answer_says_why_in_words(env, fast_maps, monkeypatch):
     run(env)
     monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")

@@ -1,7 +1,7 @@
 # Connected ICPAC automation workspace
 
 `/automations` connects the 20 capabilities to recorded evidence, actionable missing
-dependencies, the daily schedule, operation progress and external integration status.
+dependencies, the weekly schedule, operation progress and external integration status.
 A green software test does not make a missing dataset or an untested model operational.
 
 ## Connected workflow
@@ -76,17 +76,22 @@ refit is in use as a candidate until a reviewer records its test and promotes it
 Models page, and `RELEASE_MODE=production` (which requires staff sign-in) turns on the
 production release gates.
 
-## Daily scheduling
+## Weekly scheduling
+
+The weekly forecast is made every Sunday at midnight (00:00 EAT on Monday) from that
+Sunday's 00 UTC ECMWF run (published by about 12:00 EAT), for days 8 to 14: Sunday to
+Saturday of the week after next. One task per week; a restart reuses it and missed weeks
+are not replayed. A forecaster can still run the cycle at any time on the Operations page:
+without a date it uses the latest Sunday's run, or a chosen date for another day.
 
 Keep the API operation worker enabled and one replica running. The default is disabled:
 
 ```text
 AUTOMATION_SCHEDULER_ENABLED=false
-AUTOMATION_DAILY_HOUR_UTC=10
 ```
 
 Enable only after reviewing the acquisition, release mode, storage and workload.
-The Azure script accepts `-EnableAutomation -AutomationHourUtc 10` or
+The Azure script accepts `-EnableAutomation` or
 `-DisableAutomation`. Omitting both preserves an existing schedule; new installations
 stay disabled. `-VerifyOnly` cannot enable or disable it. Health reports the applied
 setting and deployment verification checks an explicitly requested change.

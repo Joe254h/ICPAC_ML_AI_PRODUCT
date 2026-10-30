@@ -15,7 +15,15 @@ import {
   Tabs,
 } from "@/components/ui";
 import { countrySlug } from "@/features/routes";
-import { SERIES, dateTime, day, num, signed, validDays } from "@/lib/format";
+import {
+  SERIES,
+  dateTime,
+  day,
+  num,
+  runTime,
+  signed,
+  validDays,
+} from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type {
   CountryRow,
@@ -233,6 +241,28 @@ export function ofRecord(runs: ForecastRun[]): ForecastRun[] {
   return runs.filter((run) => run.of_record !== false);
 }
 
+/** A weekly forecast (a Sunday's ECMWF run); older services do not mark it. */
+export function isWeekly(run: Pick<ForecastRun, "weekly" | "initialization">) {
+  return run.weekly ?? new Date(run.initialization).getUTCDay() === 0;
+}
+
+/** The forecast the website shows: the latest weekly one, else the newest. */
+export function latestOf(runs: ForecastRun[]): ForecastRun | undefined {
+  const held = ofRecord(runs).filter((r) => !r.synthetic);
+  return held.find((r) => r.latest) ?? held.find(isWeekly) ?? held[0];
+}
+
+/** Whether today (in East Africa) falls in a forecast's week. */
+export function coversToday(
+  run: Pick<ForecastRun, "valid_start" | "valid_end">,
+  now = new Date(),
+): boolean {
+  return (
+    new Date(run.valid_start).getTime() <= now.getTime() &&
+    now.getTime() < new Date(run.valid_end).getTime()
+  );
+}
+
 export function methodName(run: Pick<ForecastRun, "primary_layer">): string {
   return primaryOf(run) === "mbc"
     ? "ECMWF ensemble + MBC"
@@ -267,7 +297,7 @@ export function modelState(status?: string | null): string {
 export function forecastFacts(detail: ForecastRun): string[] {
   return [
     `Valid ${validDays(detail.valid_start, detail.valid_end)}`,
-    `ECMWF run ${day(detail.initialization)}, 00 UTC`,
+    `ECMWF run ${runTime(detail.initialization)}`,
     methodName(detail),
   ];
 }
@@ -314,7 +344,7 @@ export function ForecastFacts({ detail }: { detail: ForecastDetail }) {
   return (
     <KeyValues
       items={[
-        ["ECMWF run", `${day(detail.initialization)}, 00 UTC`],
+        ["ECMWF run", runTime(detail.initialization)],
         [
           "Valid period",
           `${validDays(detail.valid_start, detail.valid_end)} (days 8–14)`,

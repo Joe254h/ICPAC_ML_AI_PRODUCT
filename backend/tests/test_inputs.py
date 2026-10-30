@@ -56,6 +56,15 @@ def test_open_data_download_keeps_perturbed_tp_members(mirror, tmp_path):
     assert ecmwf_opendata.is_published(date(2026, 10, 5), mirror)
     assert not ecmwf_opendata.is_published(date(2026, 10, 6), mirror)
     assert ecmwf_opendata.latest_initialization(date(2026, 10, 7)) == date(2026, 10, 5)
+    # The weekly forecast's run is a Sunday's; 4 October is not held, so neither is a
+    # weekly run of that week.
+    assert ecmwf_opendata.weekly_run(date(2026, 10, 7)) == date(2026, 10, 4)
+    assert ecmwf_opendata.weekly_run(date(2026, 10, 4)) == date(2026, 10, 4)
+    assert ecmwf_opendata.is_weekly(date(2026, 10, 25)) and not ecmwf_opendata.is_weekly(
+        date(2026, 10, 26)
+    )
+    with pytest.raises(ecmwf_opendata.ECMWFDataUnavailable):
+        ecmwf_opendata.latest_weekly_initialization(date(2026, 10, 7))
 
 
 def test_partial_ecmwf_publication_is_not_a_ready_week2_run(monkeypatch):
@@ -450,6 +459,14 @@ def test_finished_forecasts_are_verified_against_chirps(env, fast_maps, monkeypa
     assert verified["domain"]["hybrid"]["observed_mean"] == pytest.approx(21.0)
     windows = env.client.get("/data/chirps").json()
     assert windows[0]["valid_start"] == "2026-09-21" and windows[0]["products"] == ["final"]
+    # What CHIRPS observed that week, drawn like the forecast map to set beside it; a
+    # further reference not compared yet, and an unverified week, have no such map.
+    observed = env.client.get(f"/forecasts/{record['forecast_id']}/observed/map")
+    assert observed.status_code == 200 and observed.content.startswith(b"\x89PNG")
+    arc = env.client.get(f"/forecasts/{record['forecast_id']}/observed/map?source=arc2")
+    assert arc.status_code == 404 and "not been compared" in arc.json()["detail"]
+    waiting = env.client.get(f"/forecasts/{future['forecast_id']}/observed/map")
+    assert waiting.status_code == 404 and "not been verified" in waiting.json()["detail"]
     with pytest.raises(ValueError, match="already verified"):
         service.verify_with_chirps(record["forecast_id"], "Joe N")
     with pytest.raises(forecasts.Unavailable):
@@ -460,7 +477,7 @@ def test_the_weekly_cycle_runs_as_one_operation(env, fast_maps, mirror, monkeypa
     outbox = tmp_path / "outbox"
     monkeypatch.setenv("MAIL_OUTBOX_DIR", str(outbox))
     monkeypatch.setenv("BULLETIN_FORECASTERS", "forecaster@icpac.net")
-    monkeypatch.setattr(ecmwf_opendata, "latest_initialization", lambda: date(2026, 10, 5))
+    monkeypatch.setattr(ecmwf_opendata, "latest_weekly_initialization", lambda: date(2026, 10, 5))
     monkeypatch.setattr(chirps, "download", chc({}))  # CHIRPS lists nothing yet
     seen_from(monkeypatch, date(2026, 10, 15))
     client = env.client
@@ -548,10 +565,9 @@ def test_past_weeks_are_forecast_from_the_archive_and_verified(
         "Forecasting the week of 27 September 2026 from the ECMWF run of 20 September 2026" in texts
     )
     assert "1 past weeks verified, 1 waiting for CHIRPS, 3 failed" in texts
-    # The past weeks never replace the current forecast; a week already verified is reused,
-    # also when the newest forecast falls on another weekday (the run of 21 September would
-    # be next: the run of 20 September stands for it).
-    current = run(env, "2026-10-05")
+    # The past weeks never replace the latest weekly forecast (the newest Sunday run's), and
+    # a week already verified is reused.
+    current = run(env, "2026-10-04")
     assert client.get("/forecasts/latest").json()["forecast_id"] == current["forecast_id"]
     monkeypatch.setattr(chirps, "download", chc({}))
     again = wait(

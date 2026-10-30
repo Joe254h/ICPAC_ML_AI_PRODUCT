@@ -13,7 +13,7 @@ import {
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
 import { operationActive, operationLabel } from "@/services/operation-state";
-import { dateTime, eatHour } from "@/lib/format";
+import { dateTime } from "@/lib/format";
 import type { Operation } from "@/types/operational";
 
 type Workspace = {
@@ -24,7 +24,7 @@ type Workspace = {
     status: string;
     detail: string;
   }[];
-  schedule: { enabled: boolean; hour_utc: number; next_due: string | null };
+  schedule: { enabled: boolean; when: string; next_due: string | null };
   last_cycle: Operation | null;
   alerts: {
     code: string;
@@ -257,20 +257,21 @@ export default function Automations() {
           )}
         </Card>
         <Card
-          title="Daily schedule"
+          title="Weekly schedule"
           subtitle="Scheduling is enabled in the server deployment settings, rather than by public visitors."
         >
           <p>
             {data.schedule.enabled
-              ? `Enabled, daily at ${eatHour(data.schedule.hour_utc)}`
+              ? `Enabled: ${data.schedule.when}, from that Sunday's ECMWF run.`
               : "Disabled — enable the reviewed schedule in the backend deployment."}
           </p>
           {data.schedule.next_due && (
-            <p>Next daily slot: {dateTime(data.schedule.next_due)}</p>
+            <p>Next weekly run: {dateTime(data.schedule.next_due)}</p>
           )}
           <p>
-            One durable task per day. Restarts reuse its task record; missed
-            days are not replayed.
+            One durable task per week. Restarts reuse its task record; missed
+            weeks are not replayed. A forecaster can still run the cycle at any
+            time on the Operations page, for the latest Sunday or a chosen day.
           </p>
         </Card>
         {!!data.alerts.length && (

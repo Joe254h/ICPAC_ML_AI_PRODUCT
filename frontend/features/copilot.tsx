@@ -30,7 +30,12 @@ import {
 import { openStaffAccess } from "@/components/bulletin-access";
 import { Button, Notice, PageBanner } from "@/components/ui";
 import { cx } from "@/components/ui";
-import { LAYER_TEXT, layersOf, ofRecord } from "@/features/operational/shared";
+import {
+  LAYER_TEXT,
+  isWeekly,
+  layersOf,
+  ofRecord,
+} from "@/features/operational/shared";
 import { day, num, relativeDay, shortPeriod, signed } from "@/lib/format";
 import {
   mutate,
@@ -863,14 +868,20 @@ export default function Copilot() {
   // The weeks to choose from: each ECMWF run's forecast, and the conversation's own if it
   // is about an earlier version.
   const listed = Array.isArray(forecastList.data) ? forecastList.data : [];
-  const weeks = ofRecord(listed).filter((r) => !r.synthetic);
+  // The weekly forecasts first (the latest at the top), then other runs' forecasts.
+  const held = ofRecord(listed).filter((r) => !r.synthetic);
+  const weeks = [
+    ...held.filter((r) => isWeekly(r)),
+    ...held.filter((r) => !isWeekly(r)),
+  ];
+  const latestWeek = (held.find((r) => r.latest) ?? weeks[0])?.forecast_id;
   const own = listed.find((r) => r.forecast_id === pinned?.forecast_id);
   if (own && !weeks.includes(own)) weeks.push(own);
   const shownWeek =
     week ||
     pinned?.forecast_id ||
     forecast?.forecast_id ||
-    weeks[0]?.forecast_id ||
+    latestWeek ||
     "";
 
   const startNew = () => {
@@ -1051,7 +1062,7 @@ export default function Copilot() {
                     disabled={locked}
                     onChange={(e) => setWeek(e.target.value)}
                   >
-                    {weeks.map((run, i) => (
+                    {weeks.map((run) => (
                       <option key={run.forecast_id} value={run.forecast_id}>
                         {shortPeriod(
                           run.valid_start,
@@ -1059,8 +1070,8 @@ export default function Copilot() {
                             new Date(run.valid_end).getTime() - 86_400_000,
                           ).toISOString(),
                         )}
-                        {i === 0
-                          ? " · newest"
+                        {run.forecast_id === latestWeek
+                          ? " · latest"
                           : ` · run ${day(run.initialization)}`}
                       </option>
                     ))}

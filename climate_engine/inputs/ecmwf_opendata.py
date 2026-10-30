@@ -183,6 +183,33 @@ def upper_air_listed(initialization: date, mirror: str, steps: list[int]) -> boo
         session_client.session.close()
 
 
+#: The weekly forecast comes from each Sunday's 00 UTC run (Monday is 0): its days 8 to 14
+#: are Sunday to Saturday.
+WEEKLY_RUN_WEEKDAY = 6
+
+
+def weekly_run(day: date) -> date:
+    """The Sunday on or before ``day``."""
+    return day - timedelta(days=(day.weekday() - WEEKLY_RUN_WEEKDAY) % 7)
+
+
+def is_weekly(initialization: date) -> bool:
+    return initialization.weekday() == WEEKLY_RUN_WEEKDAY
+
+
+def latest_weekly_initialization(today: date | None = None) -> date:
+    """The newest Sunday run whose Week-2 rainfall is published: the weekly forecast's run.
+    Early on a Sunday, before that day's run is out, it is the Sunday before."""
+    today = today or datetime.now(timezone.utc).date()
+    sunday = weekly_run(today)
+    for candidate in (sunday, sunday - timedelta(days=7)):
+        if any(is_published(candidate, mirror) for mirror in mirrors()):
+            return candidate
+    raise ECMWFDataUnavailable(
+        f"The ECMWF runs of {sunday:%d %b %Y} and the Sunday before are not published"
+    )
+
+
 def latest_initialization(today: date | None = None, lookback_days: int = 5) -> date:
     """The newest 00 UTC run whose Week-2 rainfall is published (ECMWF disseminates the
     ensemble's day-15 fields about eight to nine hours after the run time)."""
@@ -675,7 +702,10 @@ __all__ = [
     "upper_air_listed",
     "file_name",
     "is_published",
+    "is_weekly",
     "latest_initialization",
+    "latest_weekly_initialization",
     "pressure_dataset",
     "to_dataset",
+    "weekly_run",
 ]

@@ -261,7 +261,7 @@ test("the ECMWF page reports recorded readiness", async ({ page }) => {
   await page.getByRole("button", { name: "Check ECMWF now" }).click();
   await expect(
     page.locator("tr").filter({ hasText: "Latest published run" }),
-  ).toContainText("00 UTC", { timeout: 60_000 });
+  ).toContainText("03:00 EAT", { timeout: 60_000 });
 });
 
 test("a draft is edited on the website as a new version", async ({ page }) => {

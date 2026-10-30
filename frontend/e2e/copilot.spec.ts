@@ -372,5 +372,5 @@ test("a file of any format goes with a question, and a question can be edited", 
   // The forecast weeks are offered in the conversation's menu.
   await expect(
     page.getByLabel("Forecast week").locator("option").first(),
-  ).toContainText("newest");
+  ).toContainText("latest");
 });

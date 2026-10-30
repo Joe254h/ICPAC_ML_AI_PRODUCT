@@ -77,8 +77,8 @@ $health = Invoke-Api 'Get' '/health'
 if ($health.access_mode -ne 'public') {
     throw 'The service is in staff access mode; use the website with your staff key instead.'
 }
-$schedule = if ($health.automation_scheduler_enabled) { 'on, daily at ' + $health.automation_daily_hour_utc + ':00 UTC' } else { 'off' }
-Write-Host ('Service ' + $api + ' | source ' + $health.version + ' | daily schedule ' + $schedule)
+$schedule = if ($health.automation_scheduler_enabled) { 'on, ' + $health.automation_schedule } else { 'off' }
+Write-Host ('Service ' + $api + ' | source ' + $health.version + ' | weekly schedule ' + $schedule)
 
 $null = Invoke-Operation 'update_chirps'
 $null = Invoke-Operation 'verify_due'

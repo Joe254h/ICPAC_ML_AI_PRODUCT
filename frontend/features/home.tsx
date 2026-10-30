@@ -32,7 +32,7 @@ import {
 import CountryCards from "@/components/country-cards";
 import { useApp } from "@/components/shell";
 import { LinkButton, Skeleton } from "@/components/ui";
-import { day, num, period, weekPeriod } from "@/lib/format";
+import { day, num, period, runTime, weekPeriod } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type { Loaded } from "@/services/hooks";
 import type {
@@ -162,7 +162,7 @@ function OutlookHero({
             </p>
             <h1>{weekPeriod(detail.valid_start, detail.valid_end)}</h1>
             <p className="outlook-meta">
-              ECMWF ensemble of {day(detail.initialization)}, 00 UTC · issued{" "}
+              ECMWF ensemble of {runTime(detail.initialization)} · issued{" "}
               {day(detail.generation_time)}
             </p>
             {now && (

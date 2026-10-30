@@ -325,6 +325,20 @@ def install(app: FastAPI, dependency) -> None:
             headers=IMMUTABLE,
         )
 
+    @app.get("/forecasts/{forecast_id}/observed/map")
+    def observed_map(
+        forecast_id: str = ForecastId,
+        source: str = Query("chirps", pattern=r"^(chirps|arc2|rfe2|imerg)$"),
+        platform=Depends(dependency),
+    ):
+        """What a verified week observed (CHIRPS, ARC 2.0, RFE 2.0 or GPM IMERG), drawn like
+        the forecast map, to set beside it."""
+        return Response(
+            ForecastService(platform).observed_png(forecast_id, source),
+            media_type="image/png",
+            headers=IMMUTABLE,
+        )
+
     @app.get("/forecasts/{forecast_id}/countries")
     def forecast_countries(
         forecast_id: str = ForecastId,

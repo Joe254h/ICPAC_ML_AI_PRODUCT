@@ -24,7 +24,6 @@ param(
     [ValidateSet('staff', 'public')][string]$AccessMode,
     [switch]$EnableAutomation,
     [switch]$DisableAutomation,
-    [ValidateRange(0, 23)][int]$AutomationHourUtc = 10,
     [ValidateSet('openai_compatible', 'anthropic')][string]$LlmProvider,
     [ValidatePattern('^https://')][string]$LlmBaseUrl,
     [ValidatePattern('^[A-Za-z0-9._:/-]{2,100}$')][string]$LlmModel,
@@ -239,7 +238,6 @@ if ($AccessMode -eq 'staff') {
 Set-Value 'ACCESS_MODE' $AccessMode
 if ($EnableAutomation) { Set-Value 'AUTOMATION_SCHEDULER_ENABLED' 'true' }
 elseif ($DisableAutomation -or -not (Get-Setting 'AUTOMATION_SCHEDULER_ENABLED')) { Set-Value 'AUTOMATION_SCHEDULER_ENABLED' 'false' }
-if ($PSBoundParameters.ContainsKey('AutomationHourUtc') -or -not (Get-Setting 'AUTOMATION_DAILY_HOUR_UTC')) { Set-Value 'AUTOMATION_DAILY_HOUR_UTC' ([string]$AutomationHourUtc) }
 Set-Value 'RELEASE_MODE' $ReleaseMode
 Set-Value 'CLOUD_DEPLOYMENT' 'true'
 Set-Value 'OPERATION_WORKER_ENABLED' 'true'

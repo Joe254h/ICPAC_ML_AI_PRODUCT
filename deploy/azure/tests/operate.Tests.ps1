@@ -20,7 +20,7 @@ function Invoke-RestMethod {
     if ($path -eq '/health') {
         return [pscustomobject]@{
             access_mode = $global:OperateTestMode; version = 'test'
-            automation_scheduler_enabled = $true; automation_daily_hour_utc = 10
+            automation_scheduler_enabled = $true; automation_schedule = 'Every Sunday at midnight (00:00 EAT on Monday)'
             components = [pscustomobject]@{ 'Copilot language model' = 'Healthy · answers questions' }
         }
     }

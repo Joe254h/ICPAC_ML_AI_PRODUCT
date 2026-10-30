@@ -1,6 +1,6 @@
 # Weekly operations
 
-For the connected 20-capability workspace, daily scheduler, provider adapters, HPC bridge
+For the connected 20-capability workspace, weekly scheduler, provider adapters, HPC bridge
 and supplementary products, see [Automation workspace](automation-workspace.md).
 Public evaluation access is supported; the staff credential instructions below apply
 when `ACCESS_MODE=staff`.
@@ -23,9 +23,18 @@ request available for another worker after lease expiry.
 
 ## The weekly cycle
 
+The weekly forecast is made from each Sunday's ECMWF run (00 UTC, 03:00 EAT) for days 8
+to 14: Sunday to Saturday of the week after next. With the schedule on, it runs every
+Sunday at midnight (00:00 EAT on Monday); a forecaster can run the cycle at any time, for
+the latest Sunday (no date) or for a chosen day. The website, the bulletin and the Copilot
+show the latest weekly forecast; forecasts of other days' runs are kept in the archive
+under "Forecasts of other runs". **Fill the last 12 weeks** (Forecast archive) forecasts
+the last twelve Sunday runs the model in use has not forecast and verifies the weeks
+CHIRPS covers. Times on the website are in EAT.
+
 | Step | What happens | Recorded as |
 |---|---|---|
-| 1. Download ECMWF | The newest published 00 UTC ensemble run (or a chosen date) is fetched from ECMWF Open Data. | an ECMWF input record, with its mirror and SHA-256 |
+| 1. Download ECMWF | The latest Sunday's ensemble run (or a chosen date) is fetched from ECMWF Open Data. | an ECMWF input record, with its mirror and SHA-256 |
 | 2. Run the forecast | Raw ECMWF and MBC are computed on the 0.05° ICPAC grid and the product package is written (NetCDF, maps, country statistics, bulletin inputs, provenance). | a forecast record and its package |
 | 3. Verify | Every earlier forecast whose week CHIRPS now covers is scored against CHIRPS. | a CHIRPS week record and the forecast's verification |
 | 4. Update monitoring | The newest CHIRPS dekad, if one is published that the service does not have yet, is downloaded for the Rainfall Monitoring page. A failure here is recorded with the cycle and never stops the forecast. | a CHIRPS dekad record |
@@ -33,9 +42,11 @@ request available for another worker after lease expiry.
 Each step can also be started on its own. A task runs in the background, one at a time;
 its progress, the person who started it and the outcome stay in the task history.
 
-ECMWF publishes the 00 UTC run about 8–9 hours after 00 UTC, so the cycle is best run from
-about 09:00 UTC. A forecast's week can be verified about two days after it ends, when the
-CHIRPS preliminary product covers all seven days.
+ECMWF publishes the 00 UTC run about 8–9 hours later (by about 12:00 EAT). A forecast's
+week can be verified about two days after it ends, when the CHIRPS preliminary product
+covers all seven days. A verified week's forecast page then shows the forecast map beside
+what CHIRPS observed (and ARC 2.0, RFE 2.0 and GPM IMERG once compared), on the same colour
+scale, with the forecast's RMSE and MAE against each.
 
 ### Verifying past weeks
 
@@ -45,9 +56,8 @@ scores and the per-cell maps (correlation needs three weeks) would stay empty fo
 pages; `past_weeks`, four weeks by default) closes that gap with real forecasts: for each of
 the last weeks CHIRPS has observed, it runs the same model on the ECMWF run a forecaster had
 then (ECMWF Open Data keeps them on its AWS mirror, from 2023) and verifies the forecast
-against CHIRPS. The weeks keep the weekday of the newest forecast; a forecast already issued
-within three days of a week is reused, and the newest week waits if CHIRPS does not cover it
-yet. Past forecasts never become the current forecast. Four weeks take a few minutes.
+against CHIRPS. The weeks are the weekly forecast's (Sunday runs); a Sunday's forecast
+already issued is reused, and the newest week waits if CHIRPS does not cover it yet. Past forecasts never become the current forecast. Four weeks take a few minutes.
 
 ### Unattended runs
 

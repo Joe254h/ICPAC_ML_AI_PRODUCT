@@ -74,8 +74,12 @@ when the tools say so.
 means, farming or preparedness advice), answer from your own knowledge, clearly and \
 briefly. The region's seasons: equatorial East Africa (most of Kenya, Uganda, Rwanda, \
 Burundi, northern Tanzania, southern Somalia and southern Ethiopia) has the long rains in \
-March to May and the short rains in October to December; El Nino and a positive Indian \
-Ocean Dipole usually make the short rains wetter, La Nina drier. The northern sector \
+March to May (masika in Kiswahili) and the short rains in October to December (vuli); \
+never call the short rains masika. El Nino and a positive Indian Ocean Dipole usually make \
+the short rains wetter, La Nina and a negative Dipole drier; a positive Dipole means the \
+western Indian Ocean is warmer than the eastern Indian Ocean (near Indonesia), which \
+favours rising air and rain over East Africa, and the two often occur together because El \
+Nino weakens the Walker circulation. The northern sector \
 (Sudan, South Sudan, Eritrea, Djibouti and Ethiopia's highlands, where they are the Kiremt \
 rains) gets its main rains in June to September. Central and southern Tanzania have one \
 season, from about November to April. Do not present general knowledge as this week's ICPAC forecast, and do not give \
@@ -92,8 +96,9 @@ only what was asked, keep the other paragraphs word for word, and say what chang
 version still goes through forecaster review and approval on the Bulletin page. Never add a \
 figure, place or date that is not in the tools' results or the forecaster's own words; if \
 the request needs one you do not have, ask for it.
-- Forecast weeks: a forecast is issued from each day's ECMWF run, so several weeks are \
-held. The week chosen on the page is the one the conversation is about. When the person \
+- Forecast weeks: the weekly forecast is issued from each Sunday's ECMWF run and covers \
+days 8 to 14 (Sunday to Saturday), so one forecast is held for each week; a forecaster can \
+also run one for another day. The week chosen on the page is the one the conversation is about. When the person \
 asks for a bulletin, a translation or figures and names a date or a week that may not be \
 the chosen one, or says nothing and more than one week could fit, call \
 list_forecast_weeks and ask which week (by its dates) before writing anything. Use the \
@@ -325,8 +330,9 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "list_forecast_weeks",
-        "description": "The forecast weeks held, newest first: each week's dates, its ECMWF "
-        "run, whether it has been verified against CHIRPS and whether a bulletin draft "
+        "description": "The forecast weeks held: the weekly forecasts (Sunday runs) newest "
+        "first, then forecasts of other days' runs; each week's dates, its ECMWF run, which "
+        "is the latest, whether it has been verified against CHIRPS and whether a bulletin draft "
         "exists, and which one the conversation is about. Use it when the person has not "
         "said which week they mean and more than one fits, then ask them which week.",
         "parameters": _schema(),
@@ -1014,13 +1020,16 @@ class ToolBox:
         return {"shown": alt}
 
     def _list_forecast_weeks(self) -> dict[str, Any]:
-        runs = [r for r in self.forecasts.listing() if r["of_record"]][:12]
+        listed = [r for r in self.forecasts.listing() if r["of_record"]]
+        # The weekly forecasts (Sunday runs), then any forecast of another day's run.
+        runs = ([r for r in listed if r["weekly"]] + [r for r in listed if not r["weekly"]])[:12]
         drafted = {
             b.get("forecast_id")
             for b in self.platform.repo.list("bulletin")
             if b.get("kind") == "icpac-weekly"
         }
-        chosen = self.context.get("forecast_id") or (runs[0]["forecast_id"] if runs else None)
+        latest = next((r["forecast_id"] for r in listed if r["latest"]), None)
+        chosen = self.context.get("forecast_id") or latest
         return {
             "weeks": [
                 {
@@ -1030,12 +1039,14 @@ class ToolBox:
                     "verified": r.get("verification_status") == "available",
                     "bulletin_draft": r["forecast_id"] in drafted,
                     "in_this_conversation": r["forecast_id"] == chosen,
-                    "newest": index == 0,
+                    "latest": r["forecast_id"] == latest,
+                    "weekly": r["weekly"],
                 }
-                for index, r in enumerate(runs)
+                for r in runs
             ],
-            "note": "A forecast is issued from each day's ECMWF run, so neighbouring weeks "
-            "overlap; the weekly bulletin is normally made from the newest.",
+            "note": "The weekly forecast comes from each Sunday's ECMWF run and covers days 8 "
+            "to 14, Sunday to Saturday; the weekly bulletin is made from the latest. Forecasts "
+            "marked weekly: false were run for another day on request.",
         }
 
     def _search_references(self, query: str) -> dict[str, Any]:
@@ -1584,6 +1595,14 @@ def _fit_files(transcript: list[dict[str, Any]], response: httpx.Response) -> bo
     return False
 
 
+def without_reasoning(text: str) -> str:
+    """The answer without a thinking model's reasoning. Qwen on Groq can return its
+    reasoning before the answer with only the closing tag (the opening one is in its
+    prompt), so everything up to the last closing tag is dropped as well."""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
+    return text.rsplit("</think>", 1)[-1]
+
+
 class OpenAIToolsModel:
     """Any OpenAI-compatible chat completions API with tool calling (Gemini, Groq, Azure
     OpenAI, OpenAI, Ollama, vLLM, ...).
@@ -1685,7 +1704,7 @@ class OpenAIToolsModel:
                     json.loads(arguments) if isinstance(arguments, str) else arguments,
                 )
             )
-        text = re.sub(r"<think>.*?</think>", "", message.get("content") or "", flags=re.S)
+        text = without_reasoning(message.get("content") or "")
         if not calls and choice.get("finish_reason") == "length":
             raise ValueError("The language model's answer was cut off")
         return Reply(text.strip(), calls, raw_calls)

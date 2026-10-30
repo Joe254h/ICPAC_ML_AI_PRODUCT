@@ -24,6 +24,7 @@ import {
   num,
   period,
   personName,
+  runTime,
   sentence,
   validDays,
   versionLabel,
@@ -229,7 +230,7 @@ function Readiness({
                   {availability ? (
                     <Yes ok={availability.status === "published"}>
                       {availability.initialization
-                        ? `${day(availability.initialization)}, 00 UTC`
+                        ? runTime(availability.initialization)
                         : "None found"}
                     </Yes>
                   ) : (
@@ -433,7 +434,7 @@ function Ecmwf({ source }: { source?: DataSource }) {
           { label: "Data sources", href: "/data" },
           { label: "ECMWF ensemble" },
         ]}
-        subtitle="The forecast input: the real-time ECMWF ensemble from ECMWF Open Data, 00 UTC run, 0.25°, 15-day range. Only the fields the model reads are downloaded."
+        subtitle="The forecast input: the real-time ECMWF ensemble from ECMWF Open Data, the run of 03:00 EAT, 0.25°, 15-day range. Only the fields the model reads are downloaded."
         facts={[
           "10 perturbed members, as in training",
           "Days 8–14",
@@ -446,7 +447,7 @@ function Ecmwf({ source }: { source?: DataSource }) {
       <div className="grid-2">
         <Card
           title="Download a run"
-          subtitle="Leave the date empty for the newest published 00 UTC run (published about 8–9 hours after 00 UTC)."
+          subtitle="Leave the date empty for the newest published run (ECMWF's run of 03:00 EAT, published by about 12:00 EAT)."
         >
           <div
             style={{
@@ -534,7 +535,7 @@ function Ecmwf({ source }: { source?: DataSource }) {
                 {inputs.data.map((row) => (
                   <tr key={row.id}>
                     <td className="strong">
-                      {day(row.initialization)}, 00 UTC
+                      {runTime(row.initialization)}
                     </td>
                     <td className="num">{row.members}</td>
                     <td>{mirrorName(row.mirror)}</td>

@@ -221,6 +221,7 @@ def test_submitting_a_job_does_not_contact_ecmwf(client, monkeypatch):
         raise AssertionError("Queue submission must not contact the forecast source")
 
     monkeypatch.setattr(ecmwf_opendata, "latest_initialization", unavailable)
+    monkeypatch.setattr(ecmwf_opendata, "latest_weekly_initialization", unavailable)
     response = client.post(
         "/operations",
         json={"action": "cycle", "actor": "Joe254h"},

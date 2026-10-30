@@ -21,6 +21,7 @@ import {
   Stat,
   Tabs,
 } from "@/components/ui";
+import ObservedComparison from "@/features/operational/observed";
 import type { PageProps } from "@/features/view";
 import { SERIES, num, validDays, weekPeriod } from "@/lib/format";
 import { mutate, request } from "@/services/api";
@@ -367,6 +368,7 @@ function Body({
       >
         <ProductStatusList detail={detail} />
       </Card>
+      <ObservedComparison detail={detail} />
       <div className="grid-2">
         <Card title="Verification">
           <VerificationSummary detail={detail} />

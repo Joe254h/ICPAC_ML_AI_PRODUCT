@@ -69,7 +69,7 @@ ACTIONS = {
     "past_weeks": "Forecast and verify past weeks (ECMWF archive and CHIRPS)",
     "check_ecmwf": "Check which ECMWF ensemble run is published",
     "observations": "Update the rainfall monitoring and compare forecasts with ARC 2.0, RFE 2.0 and GPM IMERG",
-    "refresh_archive": "Forecast earlier weeks again with the model in use, then verify them",
+    "refresh_archive": "Forecast the last weeks (Sunday runs) with the model in use, then verify them",
 }
 #: Weeks tried beyond those asked for, when CHIRPS does not cover the newest ones yet.
 SPARE_WEEKS = 3
@@ -302,14 +302,17 @@ class OperationService:
                 "end_to_end",
                 "past_weeks",
             }:
-                from climate_engine.inputs.ecmwf_opendata import latest_initialization
+                from climate_engine.inputs.ecmwf_opendata import latest_weekly_initialization
 
                 # Resolve on the worker, not the HTTP request. Persist before any work
-                # so a resumed request retries the same scientific date.
+                # so a resumed request retries the same scientific date. Without a date,
+                # the forecast is the weekly one: from the latest Sunday run.
                 initialization = (
                     date.fromisoformat(self.get(operation_id)["created_at"][:10])
                     if body.action == "past_weeks"
-                    else self._latest_retrievable(operation_id, body, latest_initialization())
+                    else self._latest_retrievable(
+                        operation_id, body, latest_weekly_initialization(), step=7
+                    )
                 )
                 body = body.model_copy(update={"initialization": initialization})
                 self._log(
@@ -388,16 +391,19 @@ class OperationService:
             )
         ]
 
-    def _latest_retrievable(self, operation_id: str, body: OperationRequest, newest: date) -> date:
+    def _latest_retrievable(
+        self, operation_id: str, body: OperationRequest, newest: date, step: int = 1
+    ) -> date:
         """Pin an implicit date only after its complete rainfall has been acquired.
 
         Explicit dates never enter this path. A provider can lose availability between
-        selection and transfer; a newer missing run must not prevent a usable older run.
+        selection and transfer; a newer missing run must not prevent a usable older run
+        (``step`` days earlier: a week, so the weekly forecast stays on Sundays).
         """
         from climate_engine.inputs.ecmwf_opendata import ECMWFDataUnavailable, is_published, mirrors
 
         for offset in range(6):
-            candidate = newest - timedelta(days=offset)
+            candidate = newest - timedelta(days=offset * step)
             if offset and not any(is_published(candidate, mirror) for mirror in mirrors()):
                 continue
             try:
@@ -424,7 +430,7 @@ class OperationService:
     def _fetch_ecmwf(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
         from climate_engine.inputs import ecmwf_opendata
 
-        initialization = body.initialization or ecmwf_opendata.latest_initialization()
+        initialization = body.initialization or ecmwf_opendata.latest_weekly_initialization()
         self._log(operation_id, f"Downloading the ECMWF ensemble of {_day(initialization)}, 00 UTC")
         record = self._forecasts().fetch_ecmwf(initialization, body.actor)
         self._log(
@@ -437,7 +443,7 @@ class OperationService:
     def _run_forecast(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
         from climate_engine.inputs import ecmwf_opendata
 
-        initialization: date = body.initialization or ecmwf_opendata.latest_initialization()
+        initialization: date = body.initialization or ecmwf_opendata.latest_weekly_initialization()
         existing = self._issued(initialization, body.model_id)
         if existing:
             return {"forecast_id": existing[0]["forecast_id"], "method": existing[0]["method"]}
@@ -597,14 +603,15 @@ class OperationService:
         Open Data keeps them), then verify each against CHIRPS, so verification scores and
         maps exist without waiting weeks for new forecasts to end.
 
-        The weeks keep the weekday of the newest forecast and go back a week at a time from
-        the newest week CHIRPS can cover; a forecast already issued within three days of a
-        week by the model in use is that week's forecast and is reused.
+        The weeks are those of the weekly forecast (Sunday runs), going back a week at a time
+        from the newest week CHIRPS can cover; a Sunday's forecast already issued by the model
+        in use is that week's forecast and is reused.
         These are real forecasts, made with the model in use (with its upper-air inputs, so
         the MBC + AI/ML layer is included) and the inputs a forecaster had then; they never
         become the latest forecast.
         """
         from climate_engine.inputs import chirps
+        from climate_engine.inputs.ecmwf_opendata import weekly_run
         from climate_engine.operational.settings import settings, valid_window
 
         forecasts = self._forecasts()
@@ -612,17 +619,11 @@ class OperationService:
         today = _today()
         model_id = body.model_id or self._model_id()
         held: dict[str, dict[str, Any]] = {}
-        issued_days: set[str] = set()
         for issued in forecasts.runs():  # newest first: the newest forecast of each run
-            issued_days.add(issued["initialization"][:10])
             if model_id is None or issued.get("model_id") == model_id:
                 held.setdefault(issued["initialization"][:10], issued)
-        newest = max(
-            (date.fromisoformat(day) for day in issued_days),
-            default=body.initialization or today,
-        )
         weeks: list[date] = []
-        initialization = newest
+        initialization = weekly_run(body.initialization or today)
         while len(weeks) < body.weeks + SPARE_WEEKS:
             if chirps.window_complete(valid_window(cfg, initialization)[0].date(), today):
                 weeks.append(initialization)
@@ -636,19 +637,9 @@ class OperationService:
                 break
             start = valid_window(cfg, initialization)[0].date()
             week = f"the week of {_day(start)}"
-            # A forecast already issued for (about) this week is the week's forecast.
-            near = [
-                day for day in held if abs((date.fromisoformat(day) - initialization).days) <= 3
-            ]
-            record = (
-                held[min(near, key=lambda d: abs((date.fromisoformat(d) - initialization).days))]
-                if near
-                else None
-            )
-            if record is not None:
-                start = date.fromisoformat(record["valid_start"][:10])
-                week = f"the week of {_day(start)}"
-            else:
+            # The Sunday's forecast already issued is the week's forecast.
+            record = held.get(initialization.isoformat())
+            if record is None:
                 self._log(
                     operation_id,
                     f"Forecasting {week} from the ECMWF run of {_day(initialization)}",
@@ -710,10 +701,12 @@ class OperationService:
             return None
 
     def _refresh_archive(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
-        """Forecast the archive's ECMWF runs again with the model in use, newest first (up
-        to ``weeks`` runs), where that model has not forecast them yet; then verify the weeks
-        CHIRPS covers and compare them with ARC 2.0, RFE 2.0 and GPM IMERG. The earlier
-        forecasts stay in the archive as earlier versions of their week."""
+        """Give each of the last ``weeks`` weeks its weekly forecast: the Sunday runs, newest
+        first, that the model in use has not forecast yet are forecast, then the weeks CHIRPS
+        covers are verified and compared with ARC 2.0, RFE 2.0 and GPM IMERG. Forecasts of
+        other runs stay in the archive."""
+        from climate_engine.inputs.ecmwf_opendata import weekly_run
+
         forecasts = self._forecasts()
         model_id = body.model_id or self._model_id()
         if model_id is None:
@@ -721,12 +714,14 @@ class OperationService:
         named = self._model_name(model_id) if body.model_id else "the model in use"
         runs = forecasts.runs()
         done = {r["initialization"][:10] for r in runs if r.get("model_id") == model_id}
-        days = sorted({r["initialization"][:10] for r in runs}, reverse=True)[: body.weeks]
+        # Today's Sunday run is left to the scheduled run at the end of the day.
+        newest = weekly_run(_today() - timedelta(days=1))
+        days = [(newest - timedelta(weeks=n)).isoformat() for n in range(body.weeks)]
         todo = [day for day in days if day not in done]
         self._log(
             operation_id,
-            f"{len(days) - len(todo)} of the {len(days)} newest runs already have a forecast "
-            f"from {named}; forecasting {len(todo)}",
+            f"{len(days) - len(todo)} of the last {len(days)} Sunday runs already have a "
+            f"forecast from {named}; forecasting {len(todo)}",
         )
         issued: list[str] = []
         failed: list[str] = []
@@ -783,7 +778,7 @@ class OperationService:
     def _cycle(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
         from climate_engine.inputs import ecmwf_opendata
 
-        initialization = body.initialization or ecmwf_opendata.latest_initialization()
+        initialization = body.initialization or ecmwf_opendata.latest_weekly_initialization()
         existing = self._issued(initialization, body.model_id)
         result: dict[str, Any] = {"initialization": initialization.isoformat()}
         if existing:
