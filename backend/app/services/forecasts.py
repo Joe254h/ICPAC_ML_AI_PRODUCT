@@ -494,12 +494,32 @@ class ForecastService:
 
     def runs(self) -> list[dict[str, Any]]:
         """Forecasts from real ECMWF input, newest first. Runs on synthetic test input (the
-        retired demonstration) are kept in the database but never listed."""
+        retired demonstration) and forecasts set aside when the archive was started again
+        are kept in the database but never listed."""
         return sorted(
-            (r for r in self.repo.list(KIND) if not r.get("synthetic")),
+            (
+                r
+                for r in self.repo.list(KIND)
+                if not r.get("synthetic") and not r.get("set_aside_at")
+            ),
             key=lambda r: (r["initialization"], r["generation_time"]),
             reverse=True,
         )
+
+    def set_aside(self, actor: str) -> int:
+        """Take every forecast out of the archive, to start it again. Each stays in the
+        database with its package, so a bulletin that cites one still opens, but it is no
+        longer listed, verified, scored or offered as the latest. Returns how many."""
+        held = self.runs()
+        for record in held:
+            self.repo.save(
+                KIND,
+                {**record, "set_aside_at": now(), "set_aside_by": actor},
+                record["forecast_id"],
+            )
+        if held:
+            self.repo.audit("forecasts_set_aside", actor, "archive", {"count": len(held)})
+        return len(held)
 
     def listing(self) -> list[dict[str, Any]]:
         """Every forecast, newest first, each marked ``of_record`` if it is its ECMWF run's

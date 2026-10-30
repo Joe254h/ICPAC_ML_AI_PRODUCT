@@ -2,8 +2,8 @@
 /** The weekly forecasts (Sunday runs), newest first, with this week's and the latest marked;
  * forecasts of other days' runs and earlier versions on request. */
 import Link from "next/link";
-import { Fragment, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { RefreshCw, RotateCcw } from "lucide-react";
 import {
   Button,
   Card,
@@ -18,6 +18,7 @@ import { dateTime, runTime, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
 import type { OperationalModel, ForecastRun } from "@/types/operational";
+import { OBSERVED_ANCHOR } from "@/features/operational/observed";
 import {
   NoForecast,
   coversToday,
@@ -61,9 +62,6 @@ function Row({
   return (
     <tr className={earlier ? "earlier-version" : undefined}>
       <td>{runTime(run.initialization)}</td>
-      <td style={{ color: "var(--muted)" }}>
-        {earlier ? "" : validDays(run.initialization, run.valid_start)}
-      </td>
       <td className="strong">
         {earlier ? "Other version" : validDays(run.valid_start, run.valid_end)}
         {!earlier && latest && (
@@ -87,7 +85,16 @@ function Row({
       </td>
       <td>
         {run.verification_status === "available" ? (
-          <Status tone="ok">Verified · CHIRPS</Status>
+          <>
+            <Status tone="ok">Verified · CHIRPS</Status>
+            <Link
+              className="link-amber"
+              style={{ display: "block", marginTop: 6 }}
+              href={`/forecasts?id=${run.forecast_id}#${OBSERVED_ANCHOR}`}
+            >
+              Forecast vs observed →
+            </Link>
+          </>
         ) : (
           <Status tone="progress">Awaiting CHIRPS</Status>
         )}
@@ -120,7 +127,6 @@ function Weeks({
         <thead>
           <tr>
             <th>ECMWF run</th>
-            <th>Days 1–7 after the run</th>
             <th>Forecast week (days 8–14)</th>
             <th>Issued from</th>
             <th>Verification</th>
@@ -141,7 +147,7 @@ function Weeks({
                 />
                 {earlier.length > 0 && (
                   <tr className="earlier-toggle">
-                    <td colSpan={7}>
+                    <td colSpan={6}>
                       <button
                         type="button"
                         className="link-amber"
@@ -188,14 +194,28 @@ export default function Archive() {
   const [all, setAll] = useState(false);
   const [others, setOthers] = useState(false);
   const task = useOperation(() => runs.reload());
+  // While the archive is filled or started again, the weeks appear as they are made.
+  const reload = useRef(runs.reload);
+  reload.current = runs.reload;
+  useEffect(() => {
+    if (!task.running) return;
+    const timer = setInterval(() => reload.current(), 30_000);
+    return () => clearInterval(timer);
+  }, [task.running]);
+  const restarting = task.operation?.action === "restart_archive";
+  const startAgain = () => {
+    if (
+      window.confirm(
+        "Start the archive again?\n\nEvery forecast now in the archive is taken out of it (a bulletin that cites one still opens). Then the last 12 Sunday runs are forecast again with the model in use, and each week that has ended is verified against CHIRPS and compared with ARC 2.0, RFE 2.0 and GPM IMERG. This takes a few minutes a week.",
+      )
+    )
+      task.start("restart_archive", actor || "Forecaster", { weeks: WEEKS });
+  };
   const groups = byRun(runs.data ?? []);
   const weekly = groups.filter((g) => isWeekly(g.main));
   const other = groups.filter((g) => !isWeekly(g.main));
-  const latest = (
-    groups.find((g) => g.main.latest) ??
-    weekly[0] ??
-    groups[0]
-  )?.main.forecast_id;
+  const latest = (groups.find((g) => g.main.latest) ?? weekly[0] ?? groups[0])
+    ?.main.forecast_id;
   const shown = all ? weekly : weekly.slice(0, WEEKS);
   return (
     <div className="page">
@@ -208,21 +228,38 @@ export default function Archive() {
           ]}
           subtitle="The weekly forecast is made every Sunday at midnight (EAT) from that Sunday's ECMWF run, for days 8 to 14: Sunday to Saturday of the week after next."
           actions={
-            <Button
-              variant="amber"
-              disabled={task.running}
-              onClick={() =>
-                task.start("refresh_archive", actor || "Forecaster", {
-                  weeks: WEEKS,
-                })
-              }
-              title="Forecast each of the last twelve Sunday runs the model in use has not forecast yet, then verify the weeks CHIRPS covers"
-            >
-              <RefreshCw size={17} className={task.running ? "spin" : ""} />
-              {task.running
-                ? "Filling the last 12 weeks…"
-                : "Fill the last 12 weeks"}
-            </Button>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <Button
+                variant="amber"
+                disabled={task.running}
+                onClick={() =>
+                  task.start("refresh_archive", actor || "Forecaster", {
+                    weeks: WEEKS,
+                  })
+                }
+                title="Forecast each of the last twelve Sunday runs the model in use has not forecast yet, verifying each week that has ended"
+              >
+                <RefreshCw
+                  size={17}
+                  className={task.running && !restarting ? "spin" : ""}
+                />
+                {task.running && !restarting
+                  ? "Filling the last 12 weeks…"
+                  : "Fill the last 12 weeks"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={task.running}
+                onClick={startAgain}
+                title="Take every forecast out of the archive, then forecast and verify the last twelve Sunday runs again"
+              >
+                <RotateCcw
+                  size={17}
+                  className={task.running && restarting ? "spin" : ""}
+                />
+                {task.running && restarting ? "Starting again…" : "Start again"}
+              </Button>
+            </div>
           }
         />
         {task.operation && (
@@ -240,14 +277,14 @@ export default function Archive() {
         {runs.data && !runs.data.length && <NoForecast />}
         {runs.data && runs.data.length > 0 && !weekly.length && (
           <Notice tone="amber" title="No weekly forecast yet">
-            No forecast has been made from a Sunday&apos;s ECMWF run yet. Fill the
-            last 12 weeks, or wait for Sunday&apos;s run.
+            No forecast has been made from a Sunday&apos;s ECMWF run yet. Fill
+            the last 12 weeks, or wait for Sunday&apos;s run.
           </Notice>
         )}
         {weekly.length > 0 && (
           <Card
             title={`Weekly forecasts · ${shown.length} of ${weekly.length} week${weekly.length === 1 ? "" : "s"}`}
-            subtitle="Each Sunday's run forecasts the week after next: days 1–7 after the run pass first, then the forecast week (days 8–14). Latest: the newest weekly forecast, which the website shows. This week: the forecast for the days we are in. A week is verified about two days after it ends, when CHIRPS covers it."
+            subtitle="Each Sunday's run forecasts days 8 to 14 after it, Sunday to Saturday. Latest: the newest weekly forecast, which the website shows. This week: the forecast for the days we are in. A week is verified about two days after it ends, when CHIRPS covers it; Forecast vs observed then shows its forecast map beside the observed rainfall, with RMSE and MAE."
           >
             <Weeks groups={shown} names={names} latest={latest} weekly />
             {weekly.length > WEEKS && (

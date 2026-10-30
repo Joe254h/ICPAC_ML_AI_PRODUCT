@@ -1628,9 +1628,11 @@ class OpenAIToolsModel:
 
     Within one answer, the model's tool calls go back exactly as it returned them, so
     provider additions such as Gemini's thought signatures are kept. A rate-limited or busy
-    provider is asked once more after a short wait. When the provider refuses the model
+    provider is asked again after the wait it asks for. When the provider refuses the model
     (unknown, retired or not open to this key), the next of LLM_FALLBACK_MODELS is tried
-    (for Gemini, by default the current Flash models) and remembered.
+    (for Gemini, by default the current Flash models) and remembered. When the model is at
+    its usage limit, the next one answers this request without a long wait (Groq counts
+    each model's limit apart), and the model is asked first again next time.
     """
 
     def __init__(self) -> None:
@@ -1729,27 +1731,39 @@ class OpenAIToolsModel:
         return Reply(text.strip(), calls, raw_calls)
 
     def _post_to_a_model(self, body: dict[str, Any]) -> httpx.Response:
-        """The first model that the provider accepts answers; it is kept for later turns."""
+        """The first model that the provider accepts answers; a model that replaces a
+        refused one is kept for later turns, one that stands in for a model at its usage
+        limit only for this request."""
         models = self.candidates()
+        limited = False
         for index, model in enumerate(models):
             body["model"] = model
             body.pop("temperature", None)
             if (temperature := self.temperature(model)) is not None:
                 body["temperature"] = temperature
+            last = index + 1 == len(models)
             try:
-                response = self._post(body)
+                # With another model to turn to, a limit is not waited out for long.
+                response = self._post(body, longest_wait=45 if last else 5)
             except httpx.HTTPStatusError as exc:
-                if _model_refused(exc.response) and index + 1 < len(models):
+                if not last and exc.response.status_code == 429:
+                    limited = True
+                    continue
+                if not last and _model_refused(exc.response):
                     continue
                 raise
-            if model != self.model:
+            if model != self.model and limited:
+                log.warning(
+                    "Copilot model %s is at its usage limit; %s answered", self.model, model
+                )
+            elif model != self.model:
                 log.warning("Copilot model %s refused; %s answered", self.model, model)
                 self.model = model
                 WORKING_MODEL[(self.base, self.configured)] = model
             return response
         raise AssertionError("unreachable")
 
-    def _post(self, body: dict[str, Any]) -> httpx.Response:
+    def _post(self, body: dict[str, Any], longest_wait: float = 45) -> httpx.Response:
         from chatbot.budget import remaining
 
         headers = {"Authorization": f"Bearer {self.key}"} if self.key else {}
@@ -1763,7 +1777,7 @@ class OpenAIToolsModel:
                 # limit asks for longer and is not waited for.
                 wait = retry_wait(response)
                 left = remaining()
-                if wait <= 45 and (left is None or wait + 10 < left):
+                if wait <= longest_wait and (left is None or wait + 10 < left):
                     time.sleep(wait)
                     continue
             if response.is_error:

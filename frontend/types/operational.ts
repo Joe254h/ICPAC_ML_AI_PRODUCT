@@ -434,7 +434,8 @@ export type OperationAction =
   | "past_weeks"
   | "check_ecmwf"
   | "observations"
-  | "refresh_archive";
+  | "refresh_archive"
+  | "restart_archive";
 
 export type Operation = {
   id: string;

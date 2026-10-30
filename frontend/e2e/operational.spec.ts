@@ -168,6 +168,19 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   // This week's forecast is still the current one.
   await page.goto("/forecasts");
   await expect(page.getByText("Not verified yet.")).toBeVisible();
+  // It says when its comparison with the observed rainfall comes, and links to the
+  // newest verified week's.
+  const pending = page
+    .locator("section.card")
+    .filter({
+      has: page.getByRole("heading", { name: "What fell that week" }),
+    });
+  await expect(pending).toContainText(
+    "appears here once CHIRPS covers the week",
+  );
+  await expect(
+    pending.getByRole("link", { name: /See the newest verified week/ }),
+  ).toBeVisible();
   // The archive lists the weekly forecasts (Sunday runs) with the latest marked, and a
   // verified week shows its forecast beside what CHIRPS and the other estimates observed.
   await page.goto("/forecasts/archive");
@@ -180,15 +193,20 @@ test("past weeks are forecast and verified, and the correlation map appears", as
     .locator("tbody tr")
     .filter({ hasText: "Verified · CHIRPS" })
     .first()
-    .getByRole("link", { name: "Open →" })
+    .getByRole("link", { name: "Forecast vs observed →" })
     .click();
+  await expect(page).toHaveURL(/#observed$/);
   const observed = page
     .locator("section.card")
-    .filter({ has: page.getByRole("heading", { name: "What fell that week" }) });
+    .filter({
+      has: page.getByRole("heading", { name: "What fell that week" }),
+    });
   await expect(
     observed.getByRole("img", { name: /Rainfall observed by CHIRPS/ }),
   ).toBeVisible({ timeout: 60_000 });
-  await expect(observed.getByText(/RMSE [\d.]+ mm · MAE [\d.]+ mm/)).toBeVisible();
+  await expect(
+    observed.getByText(/RMSE [\d.]+ mm · MAE [\d.]+ mm/),
+  ).toBeVisible();
   await observed.getByRole("button", { name: "ARC 2.0" }).click();
   await expect(
     observed.getByRole("img", { name: /Rainfall observed by ARC 2\.0/ }),

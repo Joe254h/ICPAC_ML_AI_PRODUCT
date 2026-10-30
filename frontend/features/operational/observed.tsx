@@ -1,17 +1,33 @@
 "use client";
 /** A verified week: the forecast map beside what CHIRPS and the further references
- * observed, with the forecast's RMSE and MAE against each. */
-import { useState } from "react";
+ * observed, with the forecast's RMSE and MAE against each. A week not observed yet says
+ * when it will be, and links to the newest week that is. */
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import { Card, MapFigure, Notice, Tabs } from "@/components/ui";
-import { SERIES, num, validDays } from "@/lib/format";
+import { SERIES, day, num, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type {
   ForecastDetail,
+  ForecastRun,
   Metrics,
   ReferenceComparison,
   Variant,
 } from "@/types/operational";
-import { layersOf, mapUrl, primaryOf } from "@/features/operational/shared";
+import {
+  coversToday,
+  isWeekly,
+  layersOf,
+  mapUrl,
+  ofRecord,
+  primaryOf,
+} from "@/features/operational/shared";
+
+/** The page anchor the archive links to. */
+export const OBSERVED_ANCHOR = "observed";
+
+/** CHIRPS covers a week about two days after it ends. */
+const CHIRPS_DAYS = 2;
 
 type Source = "chirps" | ReferenceComparison["source"];
 type Observation = {
@@ -30,6 +46,49 @@ function Scores({ metrics }: { metrics?: Metrics }) {
   );
 }
 
+/** The newest verified forecast, a weekly one first. */
+function newestVerified(runs: ForecastRun[]): ForecastRun | undefined {
+  const verified = ofRecord(runs).filter(
+    (r) => !r.synthetic && r.verification_status === "available",
+  );
+  return verified.find(isWeekly) ?? verified[0];
+}
+
+function NotObservedYet({ detail }: { detail: ForecastDetail }) {
+  const runs = useApi<ForecastRun[]>("/forecasts");
+  const newest = newestVerified(runs.data ?? []);
+  const ended = new Date(detail.valid_end).getTime() <= Date.now();
+  const from = day(
+    new Date(
+      new Date(detail.valid_end).getTime() + CHIRPS_DAYS * 86_400_000,
+    ).toISOString(),
+  );
+  return (
+    <Card
+      id={OBSERVED_ANCHOR}
+      eyebrow="Forecast and observed"
+      title="What fell that week"
+      subtitle={`${validDays(detail.valid_start, detail.valid_end)} ${
+        ended
+          ? "has ended"
+          : coversToday(detail)
+            ? "is under way"
+            : "has not started yet"
+      }. The forecast map beside what CHIRPS and the other observations showed, with the forecast's RMSE and MAE against each, appears here once CHIRPS covers the week, about two days after it ends (from about ${from}).`}
+    >
+      {newest && newest.forecast_id !== detail.forecast_id && (
+        <Link
+          className="link-amber"
+          href={`/forecasts?id=${newest.forecast_id}#${OBSERVED_ANCHOR}`}
+        >
+          See the newest verified week,{" "}
+          {validDays(newest.valid_start, newest.valid_end)} →
+        </Link>
+      )}
+    </Card>
+  );
+}
+
 export default function ObservedComparison({
   detail,
 }: {
@@ -43,7 +102,13 @@ export default function ObservedComparison({
   const layers = layersOf(detail);
   const [layer, setLayer] = useState<Variant>(primaryOf(detail));
   const [source, setSource] = useState<Source>("chirps");
-  if (!verified) return null;
+  // The card renders after the forecast loads, so the browser's own jump to the anchor
+  // has already happened: jump once it is there.
+  useEffect(() => {
+    if (window.location.hash === `#${OBSERVED_ANCHOR}`)
+      document.getElementById(OBSERVED_ANCHOR)?.scrollIntoView();
+  }, [detail.forecast_id]);
+  if (!verified) return <NotObservedYet detail={detail} />;
   const observations: Observation[] = [
     {
       source: "chirps",
@@ -54,10 +119,12 @@ export default function ObservedComparison({
       .filter((c) => c.status === "available" && c.domain)
       .map((c) => ({ source: c.source, name: c.name, scores: c.domain ?? {} })),
   ];
-  const shown = observations.find((o) => o.source === source) ?? observations[0];
+  const shown =
+    observations.find((o) => o.source === source) ?? observations[0];
   const week = validDays(detail.valid_start, detail.valid_end);
   return (
     <Card
+      id={OBSERVED_ANCHOR}
       eyebrow="Forecast and observed"
       title="What fell that week"
       subtitle={`${week}: the forecast beside the observed rainfall, on the same colour scale. RMSE and MAE are the forecast's errors against each observation, over the member states.`}
@@ -119,15 +186,14 @@ export default function ObservedComparison({
           </tbody>
         </table>
       </div>
-      {compared.data &&
-        compared.data.some((c) => c.status !== "available") && (
-          <Notice title="Not every observation is in yet.">
-            {compared.data
-              .filter((c) => c.status !== "available")
-              .map((c) => `${c.name}: ${c.reason ?? "not compared yet"}`)
-              .join(" · ")}
-          </Notice>
-        )}
+      {compared.data && compared.data.some((c) => c.status !== "available") && (
+        <Notice title="Not every observation is in yet.">
+          {compared.data
+            .filter((c) => c.status !== "available")
+            .map((c) => `${c.name}: ${c.reason ?? "not compared yet"}`)
+            .join(" · ")}
+        </Notice>
+      )}
     </Card>
   );
 }

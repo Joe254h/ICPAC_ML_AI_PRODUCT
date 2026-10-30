@@ -29,9 +29,14 @@ Sunday at midnight (00:00 EAT on Monday); a forecaster can run the cycle at any 
 the latest Sunday (no date) or for a chosen day. The website, the bulletin and the Copilot
 show the latest weekly forecast; forecasts of other days' runs are kept in the archive
 under "Forecasts of other runs". **Fill the last 12 weeks** (Forecast archive) forecasts
-the last twelve Sunday runs the model in use has not forecast and verifies the weeks
-CHIRPS covers; the scheduled weekly run does the same as a follow-up task, so a missed week
-is filled in. Every day from 12:00 EAT the schedule also verifies the weeks that have
+the last twelve Sunday runs the model in use has not forecast, verifying each week CHIRPS
+covers as soon as it is made; the scheduled weekly run does the same as a follow-up task,
+so a missed week is filled in. **Start again** (Forecast archive, after a confirmation) takes
+every forecast out of the archive and then forecasts and verifies the last twelve Sunday
+runs afresh, and drafts the latest one's bulletin. The forecasts taken out stay in the
+database with their packages, so a bulletin that cites one still opens; they are no longer
+listed, verified or scored. A verified week's forecast page shows its forecast map beside
+what CHIRPS, ARC 2.0, RFE 2.0 and GPM IMERG observed, with RMSE and MAE against each. Every day from 12:00 EAT the schedule also verifies the weeks that have
 ended: CHIRPS covers a week about two days after it ends, so this week's forecast (Sunday
 to Saturday) is verified on about the Tuesday after. Times on the website are in EAT.
 

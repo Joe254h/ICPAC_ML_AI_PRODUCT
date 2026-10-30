@@ -242,5 +242,12 @@ Reset-DeploymentFixture
 & $deployment -ExpectedCommit $global:DeployTestcommit -LlmReasoningEffort none
 $effort = @($global:DeployTestapp.properties.template.containers[0].env | Where-Object name -EQ LLM_REASONING_EFFORT)
 if ($effort.Count -ne 1 -or $effort[0].value -ne 'none') { throw 'The reasoning effort was not set' }
+# Backup models for a model at its usage limit can be set and removed.
+Reset-DeploymentFixture
+& $deployment -ExpectedCommit $global:DeployTestcommit -LlmFallbackModels 'llama-3.3-70b-versatile,openai/gpt-oss-20b'
+$fallback = @($global:DeployTestapp.properties.template.containers[0].env | Where-Object name -EQ LLM_FALLBACK_MODELS)
+if ($fallback.Count -ne 1 -or $fallback[0].value -ne 'llama-3.3-70b-versatile,openai/gpt-oss-20b') { throw 'The backup models were not set' }
+& $deployment -ExpectedCommit $global:DeployTestcommit -LlmFallbackModels off
+if (@($global:DeployTestapp.properties.template.containers[0].env | Where-Object name -EQ LLM_FALLBACK_MODELS).Count -ne 0) { throw 'The backup models were not removed' }
 Write-Host 'Copilot service switch tests passed (offline).'
 

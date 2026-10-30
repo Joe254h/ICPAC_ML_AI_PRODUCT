@@ -14,6 +14,13 @@ allowance is refused as "request too large"; the Copilot then cuts the attached 
 and asks again. For long documents and multi-step answers, Groq's paid Developer plan has
 higher limits.
 
+One answer usually takes two to four requests (the Copilot reads the forecast through its
+tools), so 200,000 tokens a day is roughly 10 to 20 answers on the free plan. Groq counts
+each model's allowance apart: backup models (`LLM_FALLBACK_MODELS`, or the deploy script's
+`-LlmFallbackModels 'model-a,model-b'`) answer while Qwen is at its limit, and Qwen is asked
+first again on the next question. Pick models with tool use from the console's model list;
+`-LlmFallbackModels off` removes them.
+
 ## Azure Container Apps
 
 1. Open the Azure portal, then **Container Apps > icpac-api** in resource group

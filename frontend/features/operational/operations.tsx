@@ -45,6 +45,7 @@ const FORECASTING: OperationAction[] = [
   "run_forecast",
   "past_weeks",
   "refresh_archive",
+  "restart_archive",
 ];
 
 const TONE: Record<Operation["status"], Tone> = {
@@ -89,7 +90,7 @@ const STEPS: {
   {
     action: "refresh_archive",
     title: "Update the archive to the model in use",
-    text: "Forecast the newest twelve ECMWF runs again with the model in use where it has not forecast them yet, then verify them.",
+    text: "Forecast the last twelve Sunday runs with the model in use where it has not forecast them yet, verifying each finished week.",
     icon: RefreshCw,
   },
   {

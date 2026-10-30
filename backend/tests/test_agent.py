@@ -618,6 +618,40 @@ def test_a_rate_limited_provider_is_waited_for_as_long_as_it_asks():
     assert agent.retry_wait(refused("busy")) == 3.0
 
 
+def test_a_model_at_its_usage_limit_hands_the_request_to_a_backup(monkeypatch):
+    """Groq counts each model's limit apart: when Qwen is at its limit, a backup model of
+    LLM_FALLBACK_MODELS answers at once, and the next request goes to Qwen first again."""
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example/v1")
+    monkeypatch.setenv("LLM_MODEL", "qwen/qwen3.8-27b")
+    monkeypatch.setenv("LLM_FALLBACK_MODELS", "backup-model")
+    monkeypatch.setattr(agent, "WORKING_MODEL", {})
+    slept: list[float] = []
+    monkeypatch.setattr(agent.time, "sleep", slept.append)
+    asked: list[str] = []
+
+    def post(url: str, headers: dict, timeout: float, json: dict) -> httpx.Response:
+        request = httpx.Request("POST", url)
+        asked.append(json["model"])
+        if json["model"] == "qwen/qwen3.8-27b":
+            text = "Rate limit reached for model on tokens per minute. Please try again in 20s."
+            return httpx.Response(429, text=text, request=request)
+        message = {"content": "Mvula ya wiki eno ya bulijjo."}
+        return httpx.Response(200, json={"choices": [{"message": message}]}, request=request)
+
+    monkeypatch.setattr(agent.httpx, "post", post)
+    model = agent.OpenAIToolsModel()
+    reply = model.respond("system", [{"role": "user", "text": "Forecast?"}], [])
+    assert reply.text == "Mvula ya wiki eno ya bulijjo."
+    assert asked == ["qwen/qwen3.8-27b", "backup-model"] and slept == []
+    model.respond("system", [{"role": "user", "text": "And Kenya?"}], [])
+    assert asked[2] == "qwen/qwen3.8-27b"
+    # With no backup left, the limit is waited out as before.
+    monkeypatch.setenv("LLM_FALLBACK_MODELS", "")
+    with pytest.raises(httpx.HTTPStatusError):
+        agent.OpenAIToolsModel().respond("system", [{"role": "user", "text": "Hi"}], [])
+    assert slept == [20.0, 20.0]
+
+
 def test_the_chosen_language_is_used_also_for_english_questions():
     text = agent.instructions("lg")
     assert "write your whole answer in Luganda, also when the question is asked in" in text

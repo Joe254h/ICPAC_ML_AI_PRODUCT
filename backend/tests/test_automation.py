@@ -415,7 +415,8 @@ def test_the_archive_is_forecast_again_with_the_model_in_use(platform, monkeypat
             if day == "2026-10-11":
                 raise ECMWFDataUnavailable("not in the archive")
             forecast.append((day, upper_air))
-            return {"forecast_id": f"w2-{day}-new"}
+            start = body.initialization + timedelta(days=7)
+            return {"forecast_id": f"w2-{day}-new", "valid_start": start.isoformat()}
 
     verified: list[bool] = []
 
@@ -434,3 +435,112 @@ def test_the_archive_is_forecast_again_with_the_model_in_use(platform, monkeypat
     assert done["result"]["issued"] == ["w2-2026-10-18-new"]
     assert done["result"]["failed"][0].startswith("2026-10-11")
     assert verified == [True]
+
+
+def test_a_new_week_is_verified_as_soon_as_it_is_forecast(platform, monkeypatch):
+    """The fill verifies each week CHIRPS covers right after forecasting it, and compares it
+    with the further references, instead of leaving every week for the end."""
+    from backend.app.services import operations
+
+    monkeypatch.setattr(operations, "_today", lambda: date(2026, 10, 29))
+    done: list[str] = []
+
+    class Forecasts:
+        def runs(self):
+            return []
+
+        def run(self, body, upper_air=False, progress=None):
+            day = body.initialization.isoformat()
+            done.append(f"forecast {day}")
+            start = body.initialization + timedelta(days=7)
+            return {"forecast_id": f"w2-{day}", "valid_start": start.isoformat()}
+
+        def verify_with_chirps(self, forecast_id, actor, server=None):
+            done.append(f"verify {forecast_id}")
+
+        def compare_references(self, forecast_id, actor):
+            done.append(f"compare {forecast_id}")
+            return [{"status": "available"}]
+
+    monkeypatch.setattr(OperationService, "_forecasts", lambda self: Forecasts())
+    monkeypatch.setattr(OperationService, "_model_id", lambda self: "refit")
+    monkeypatch.setattr(OperationService, "_verify_due", lambda self, op, body, compare: {})
+    service = OperationService(platform)
+    service.start(OperationRequest(action="refresh_archive", actor="Operator", weeks=3))
+    assert service.run_pending()
+    # CHIRPS does not cover the weeks of 1 November and 25 October yet; the week of
+    # 18 October (the run of 11 October) is verified and compared as soon as it is made.
+    assert done == [
+        "forecast 2026-10-25",
+        "forecast 2026-10-18",
+        "forecast 2026-10-11",
+        "verify w2-2026-10-11",
+        "compare w2-2026-10-11",
+    ]
+
+
+def test_the_archive_is_started_again_once(platform, monkeypatch):
+    """Start again sets every forecast aside (still readable by id, no longer listed),
+    forecasts the last weeks afresh and drafts the latest one's bulletin; a task resumed
+    after a restart does not set aside the forecasts it has made."""
+    from backend.app.services import operations
+    from backend.app.services.forecasts import KIND, ForecastService
+
+    monkeypatch.setattr(operations, "_today", lambda: date(2026, 10, 29))
+    old = {
+        "forecast_id": "w2-old",
+        "initialization": "2026-10-28T00:00:00+00:00",
+        "generation_time": "2026-10-28T08:00:00+00:00",
+        "valid_start": "2026-11-04T00:00:00+00:00",
+        "model_id": "refit",
+    }
+    platform.repo.save(KIND, old, "w2-old")
+    real = ForecastService(platform)
+    made: list[str] = []
+
+    class Forecasts:
+        def runs(self):
+            return real.runs()
+
+        def set_aside(self, actor):
+            return real.set_aside(actor)
+
+        def run(self, body, upper_air=False, progress=None):
+            day = body.initialization.isoformat()
+            made.append(day)
+            record = {
+                "forecast_id": f"w2-{day}",
+                "initialization": f"{day}T00:00:00+00:00",
+                "generation_time": "2026-10-29T10:00:00+00:00",
+                "valid_start": (body.initialization + timedelta(days=7)).isoformat(),
+                "model_id": "refit",
+            }
+            platform.repo.save(KIND, record, record["forecast_id"])
+            return record
+
+        def latest_id(self):
+            return real.runs()[0]["forecast_id"]
+
+    drafted: list[str] = []
+    monkeypatch.setattr(OperationService, "_forecasts", lambda self: Forecasts())
+    monkeypatch.setattr(OperationService, "_model_id", lambda self: "refit")
+    monkeypatch.setattr(OperationService, "_verify_due", lambda self, op, body, compare: {})
+    monkeypatch.setattr(
+        OperationService,
+        "_prepare_draft",
+        lambda self, op, body, forecast_id: drafted.append(forecast_id) or {"bulletin_id": "b"},
+    )
+    service = OperationService(platform)
+    task = service.start(OperationRequest(action="restart_archive", actor="Operator", weeks=2))
+    assert service.run_pending()
+    result = service.get(task["id"])["result"]
+    assert result["set_aside"] == 1
+    assert made == ["2026-10-25", "2026-10-18"]
+    assert [r["forecast_id"] for r in real.runs()] == ["w2-2026-10-25", "w2-2026-10-18"]
+    assert platform.repo.get(KIND, "w2-old")["set_aside_by"] == "Operator"
+    assert drafted == ["w2-2026-10-25"]
+    # Resumed: the forecasts made before the restart stay in the archive.
+    service._restart_archive(
+        task["id"], OperationRequest(action="restart_archive", actor="Operator", weeks=2)
+    )
+    assert [r["forecast_id"] for r in real.runs()] == ["w2-2026-10-25", "w2-2026-10-18"]

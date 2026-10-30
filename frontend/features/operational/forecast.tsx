@@ -353,6 +353,7 @@ function Body({
           />
         </Card>
       </div>
+      <ObservedComparison detail={detail} />
       <Card
         title="Country outlook"
         subtitle="Area means and ranges of Week-2 rainfall (mm) per member state."
@@ -368,7 +369,6 @@ function Body({
       >
         <ProductStatusList detail={detail} />
       </Card>
-      <ObservedComparison detail={detail} />
       <div className="grid-2">
         <Card title="Verification">
           <VerificationSummary detail={detail} />

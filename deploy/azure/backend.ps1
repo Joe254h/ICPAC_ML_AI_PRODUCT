@@ -29,6 +29,9 @@ param(
     [ValidatePattern('^[A-Za-z0-9._:/-]{2,100}$')][string]$LlmModel,
     [switch]$SetLlmKey,
     [ValidateSet('off', 'none', 'default', 'minimal', 'low', 'medium', 'high')][string]$LlmReasoningEffort,
+    # Models of the same AI service tried when the Copilot's model is at its usage limit or
+    # refused (comma-separated, at most five); 'off' removes them.
+    [ValidatePattern('^(off|[A-Za-z0-9._:/-]{2,100}(,[A-Za-z0-9._:/-]{2,100}){0,4})$')][string]$LlmFallbackModels,
     [switch]$SetEarthdataToken,
     [switch]$PlanOnly,
     [switch]$VerifyOnly
@@ -39,7 +42,7 @@ if ($PlanOnly -and $VerifyOnly) { throw 'Choose either -PlanOnly or -VerifyOnly.
 if ($EnableAutomation -and $DisableAutomation) { throw 'Choose either -EnableAutomation or -DisableAutomation.' }
 if ($VerifyOnly -and ($EnableAutomation -or $DisableAutomation)) { throw 'Verification cannot change the automation schedule.' }
 if ($AccessMode -eq 'public' -and $ReleaseMode -ne 'evaluation') { throw 'Public access requires an evaluation release.' }
-if ($VerifyOnly -and ($LlmProvider -or $LlmBaseUrl -or $LlmModel -or $SetLlmKey -or $LlmReasoningEffort -or $SetEarthdataToken)) { throw 'Verification cannot change settings.' }
+if ($VerifyOnly -and ($LlmProvider -or $LlmBaseUrl -or $LlmModel -or $SetLlmKey -or $LlmReasoningEffort -or $LlmFallbackModels -or $SetEarthdataToken)) { throw 'Verification cannot change settings.' }
 
 function Invoke-Azure([string[]]$Arguments) {
     $result = & az @Arguments --only-show-errors --output json
@@ -261,6 +264,8 @@ if ($LlmBaseUrl) {
 }
 if ($LlmReasoningEffort -eq 'off') { $variables.Remove('LLM_REASONING_EFFORT') }
 elseif ($LlmReasoningEffort) { Set-Value 'LLM_REASONING_EFFORT' $LlmReasoningEffort }
+if ($LlmFallbackModels -eq 'off') { $variables.Remove('LLM_FALLBACK_MODELS') }
+elseif ($LlmFallbackModels) { Set-Value 'LLM_FALLBACK_MODELS' $LlmFallbackModels }
 if ($LlmModel) { Set-Value 'LLM_MODEL' $LlmModel }
 if ($SetLlmKey) {
     if ($PlanOnly) { throw '-SetLlmKey asks for the key; run it without -PlanOnly.' }

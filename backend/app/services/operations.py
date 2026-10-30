@@ -70,6 +70,8 @@ ACTIONS = {
     "check_ecmwf": "Check which ECMWF ensemble run is published",
     "observations": "Update the rainfall monitoring and compare forecasts with ARC 2.0, RFE 2.0 and GPM IMERG",
     "refresh_archive": "Forecast the last weeks (Sunday runs) with the model in use, then verify them",
+    "restart_archive": "Start the archive again: set aside every forecast, then forecast and "
+    "verify the last weeks (Sunday runs)",
 }
 #: Weeks tried beyond those asked for, when CHIRPS does not cover the newest ones yet.
 SPARE_WEEKS = 3
@@ -702,9 +704,10 @@ class OperationService:
 
     def _refresh_archive(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
         """Give each of the last ``weeks`` weeks its weekly forecast: the Sunday runs, newest
-        first, that the model in use has not forecast yet are forecast, then the weeks CHIRPS
-        covers are verified and compared with ARC 2.0, RFE 2.0 and GPM IMERG. Forecasts of
-        other runs stay in the archive."""
+        first, that the model in use has not forecast yet are forecast, each verified and
+        compared with ARC 2.0, RFE 2.0 and GPM IMERG as soon as CHIRPS covers its week; then
+        any other finished week is verified. Forecasts of other runs stay in the archive."""
+        from climate_engine.inputs import chirps
         from climate_engine.inputs.ecmwf_opendata import weekly_run
 
         forecasts = self._forecasts()
@@ -725,6 +728,7 @@ class OperationService:
         )
         issued: list[str] = []
         failed: list[str] = []
+        server = chirps.Server()  # one set of directory listings for the whole task
         for position, day in enumerate(todo, start=1):
             self._log(
                 operation_id,
@@ -749,8 +753,54 @@ class OperationService:
                 failed.append(f"{day}: {_plain(exc)}")
                 continue
             issued.append(record["forecast_id"])
+            self._verify_week(operation_id, record, body.actor, server)
         verification = self._verify_due(operation_id, body, compare=True)
         return {"issued": issued, "failed": failed, "verification": verification}
+
+    def _verify_week(
+        self, operation_id: str, record: dict[str, Any], actor: str, server: Any
+    ) -> None:
+        """Verify a new forecast at once when CHIRPS covers its week, and compare it with
+        ARC 2.0, RFE 2.0 and GPM IMERG, so the archive fills verified week by week. One
+        that cannot be verified yet is tried again by the verification at the end."""
+        from climate_engine.inputs import chirps
+
+        start = date.fromisoformat(str(record["valid_start"])[:10])
+        if not chirps.window_complete(start, _today()):
+            return
+        week = f"the week of {_day(start)}"
+        try:
+            self._forecasts().verify_with_chirps(record["forecast_id"], actor, server)
+        except Exception as exc:
+            self._log(operation_id, f"The forecast for {week} is not verified yet: {_plain(exc)}")
+            return
+        self._log(operation_id, f"The forecast for {week} is verified against CHIRPS")
+        self._compare_references(operation_id, [record["forecast_id"]], actor)
+
+    def _restart_archive(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:
+        """Start the archive again: every forecast is set aside (kept for the bulletins that
+        cite it, but no longer listed or scored), the last ``weeks`` Sunday runs are
+        forecast with the model in use and verified week by week, and the latest forecast
+        gets its bulletin draft."""
+        if (body.model_id or self._model_id()) is None:
+            raise ValueError("No model is in use, so there is nothing to forecast with")
+        forecasts = self._forecasts()
+        # Once per task: a task resumed after a restart keeps the forecasts it has made.
+        count = self.get(operation_id).get("set_aside")
+        if count is None:
+            count = forecasts.set_aside(body.actor)
+            self._log(
+                operation_id,
+                f"{count} forecasts taken out of the archive; forecasting the last "
+                f"{body.weeks} weeks again",
+                set_aside=count,
+            )
+        result: dict[str, Any] = {"set_aside": count, **self._refresh_archive(operation_id, body)}
+        try:
+            latest = forecasts.latest_id()
+        except KeyError:
+            return result
+        return {**result, **self._prepare_draft(operation_id, body, latest)}
 
     def _compare_references(
         self, operation_id: str, forecast_ids: Sequence[str], actor: str
