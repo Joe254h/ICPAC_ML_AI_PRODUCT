@@ -82,7 +82,11 @@ def add_language_codes(tokenizer, model, keys: list[str]) -> list[str]:
 
 class TimeLimit(TrainerCallback):
     """Save and stop before a session limit (Kaggle stops a session after 12 hours), and
-    print the projected time once the speed is known."""
+    print the projected time once the speed is known.
+
+    With one process per GPU, every process must stop at the same step: one that stops
+    alone leaves the others waiting for it. Every 20 steps the processes share whether
+    any of them has reached the limit, and all stop together."""
 
     def __init__(self, hours: float | None):
         self.limit = hours * 3600 if hours else None
@@ -94,9 +98,13 @@ class TimeLimit(TrainerCallback):
             per_step = elapsed / 200
             total = per_step * state.max_steps / 3600
             print(f"{per_step:.2f} s a step: about {total:.1f} hours for {state.max_steps} steps")
-        if self.limit and elapsed > self.limit:
-            control.should_save = True
-            control.should_training_stop = True
+        if self.limit and state.global_step % 20 == 0:
+            over = torch.tensor([int(elapsed > self.limit)], device=args.device)
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                torch.distributed.all_reduce(over, op=torch.distributed.ReduceOp.MAX)
+            if over.item():
+                control.should_save = True
+                control.should_training_stop = True
         return control
 
 

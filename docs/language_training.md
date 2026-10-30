@@ -167,7 +167,11 @@ preparing data, training) stops the run there instead of letting later cells fai
 * Kaggle stops a GPU session after 9 or 12 hours (check your account) and gives about 30
   GPU hours a week. Training saves and stops after `HOURS` (8.5 by default); attach the
   version's output to the next session and run it again to continue from the newest
-  checkpoint with the same prepared data.
+  checkpoint with the same prepared data. Both GPUs' processes agree on the step to stop
+  at (one stopping alone would leave the other waiting), and the notebook also stops
+  training 45 minutes after `HOURS` whatever happens, so a hang cannot use up the quota.
+* The notebook starts with one epoch and 50,000 mined pairs a language, which fits one
+  session for phase 1; raise `EPOCHS` and `MINED_ROWS` once that run's scores look right.
 * After 200 steps the log prints how long the run will take on your data, which is the
   figure to plan sessions with.
 * The 1.3B model trains as LoRA adapters with gradient checkpointing (`LORA = True`). The
