@@ -81,8 +81,10 @@ production release gates.
 The weekly forecast is made every Sunday at midnight (00:00 EAT on Monday) from that
 Sunday's 00 UTC ECMWF run (published by about 12:00 EAT), for days 8 to 14: Sunday to
 Saturday of the week after next. One task per week; a restart reuses it and missed weeks
-are not replayed. A forecaster can still run the cycle at any time on the Operations page:
-without a date it uses the latest Sunday's run, or a chosen date for another day.
+are not replayed; as a follow-up task it forecasts any of the last twelve Sunday runs not
+forecast yet. Every day from 12:00 EAT the weeks that have ended are verified against
+CHIRPS. A forecaster can still run the cycle at any time on the Operations page: without a
+date it uses the latest Sunday's run, or a chosen date for another day.
 
 Keep the API operation worker enabled and one replica running. The default is disabled:
 

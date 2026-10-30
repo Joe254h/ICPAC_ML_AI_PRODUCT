@@ -594,3 +594,31 @@ def test_status_asks_the_ai_service_to_answer_not_only_to_be_reached(env, monkey
     assert "free tier is not available" in status
     # The check is asked the way questions are, reasoning effort included.
     assert sent[0]["reasoning_effort"] == "low" and sent[0]["max_tokens"] == 1
+
+
+def test_only_matching_references_are_cited():
+    from chatbot.retrieval import ReferenceIndex
+
+    index = ReferenceIndex()
+    # A forecast question shares only common words with the guides: nothing is cited.
+    assert index.search("Explain the forecast for Uganda.") == []
+    assert [s["id"] for s in index.search("What do RMSE and MAE mean?")] == ["verification-guide"]
+
+
+def test_a_rate_limited_provider_is_waited_for_as_long_as_it_asks():
+    def refused(text: str, headers: dict | None = None) -> httpx.Response:
+        return httpx.Response(
+            429, text=text, headers=headers or {}, request=httpx.Request("POST", "http://x")
+        )
+
+    assert agent.retry_wait(refused("Please try again in 7.5s. Need more tokens?")) == 7.5
+    assert agent.retry_wait(refused("Please try again in 1m12.5s.")) == 72.5
+    assert agent.retry_wait(refused("Please try again in 520ms.")) == pytest.approx(0.52)
+    assert agent.retry_wait(refused("{}", {"retry-after": "12"})) == 12.0
+    assert agent.retry_wait(refused("busy")) == 3.0
+
+
+def test_the_chosen_language_is_used_also_for_english_questions():
+    text = agent.instructions("lg")
+    assert "write your whole answer in Luganda, also when the question is asked in" in text
+    assert "answer in English" not in text

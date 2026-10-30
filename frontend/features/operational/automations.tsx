@@ -24,7 +24,12 @@ type Workspace = {
     status: string;
     detail: string;
   }[];
-  schedule: { enabled: boolean; when: string; next_due: string | null };
+  schedule: {
+    enabled: boolean;
+    when: string;
+    verification?: string;
+    next_due: string | null;
+  };
   last_cycle: Operation | null;
   alerts: {
     code: string;
@@ -267,6 +272,13 @@ export default function Automations() {
           </p>
           {data.schedule.next_due && (
             <p>Next weekly run: {dateTime(data.schedule.next_due)}</p>
+          )}
+          {data.schedule.enabled && data.schedule.verification && (
+            <p>
+              Verification: {data.schedule.verification.toLowerCase()}, the
+              weeks that have ended are verified against CHIRPS (about two days
+              after a week ends).
+            </p>
           )}
           <p>
             One durable task per week. Restarts reuse its task record; missed

@@ -30,7 +30,10 @@ the latest Sunday (no date) or for a chosen day. The website, the bulletin and t
 show the latest weekly forecast; forecasts of other days' runs are kept in the archive
 under "Forecasts of other runs". **Fill the last 12 weeks** (Forecast archive) forecasts
 the last twelve Sunday runs the model in use has not forecast and verifies the weeks
-CHIRPS covers. Times on the website are in EAT.
+CHIRPS covers; the scheduled weekly run does the same as a follow-up task, so a missed week
+is filled in. Every day from 12:00 EAT the schedule also verifies the weeks that have
+ended: CHIRPS covers a week about two days after it ends, so this week's forecast (Sunday
+to Saturday) is verified on about the Tuesday after. Times on the website are in EAT.
 
 | Step | What happens | Recorded as |
 |---|---|---|

@@ -40,11 +40,19 @@ def test_weekly_outbox_is_explicit_bounded_and_survives_restarts(platform, monke
         for later in (stamp + timedelta(days=3), datetime(2026, 10, 25, 23, 59, tzinfo=eat)):
             again = AutomationService(second_platform).tick(later)
             assert again is not None and again["id"] == first["id"]
-        assert len(platform.repo.list("operation")) == 1
+
+        def actions():
+            return sorted(r["action"] for r in platform.repo.list("operation"))
+
+        # From noon EAT each day the weeks that have ended are verified, once a day (the
+        # ticks above at 00:30 EAT were before noon).
+        assert actions() == ["end_to_end", "verify_due"]
+        service.tick(datetime(2026, 10, 25, 13, 0, tzinfo=eat))
+        assert actions() == ["end_to_end", "verify_due"]
         next_week = service.tick(datetime(2026, 10, 26, 0, 0, tzinfo=eat))
         assert next_week is not None and next_week["initialization"] == "2026-10-25"
         assert next_week["id"] != first["id"]
-        assert len(platform.repo.list("operation")) == 2
+        assert actions() == ["end_to_end", "end_to_end", "verify_due"]
     finally:
         second_platform.repo.engine.dispose()
     with pytest.raises(ValueError, match="timezone"):
@@ -282,6 +290,11 @@ def test_connected_workflow_prepares_one_draft_and_never_takes_review_actions(
         action="end_to_end", initialization=date(2026, 10, 17), actor="Operator"
     )
     first = service.start(body, background=False)
+    # The last twelve weeks are filled as a task of their own, after the workflow.
+    fill = service.get(first["result"]["weeks_task"])
+    assert fill["action"] == "refresh_archive" and fill["request"]["weeks"] == 12
+    while service.run_pending():
+        pass
     second = service.start(body, background=False)
     assert first["status"] == second["status"] == "complete"
     assert first["result"]["review_required"] is True

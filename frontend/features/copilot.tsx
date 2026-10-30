@@ -231,9 +231,12 @@ function Sources({ sources }: { sources: Source[] }) {
       <ul>
         {sources.map((source) => (
           <li key={source.id}>
-            <a href={source.url} target="_blank" rel="noreferrer">
+            <Link
+              href={`/references?id=${encodeURIComponent(source.id)}`}
+              className="link-amber"
+            >
               {source.title}
-            </a>
+            </Link>
             <p>{source.excerpt}</p>
           </li>
         ))}
@@ -270,8 +273,11 @@ function Message({
   onEdit,
   onRetry,
   editable = true,
+  language,
 }: {
   message: ChatMessage;
+  /** The chosen answer language's name, when it is not English. */
+  language?: string;
   /** Ask again with changed words (your own questions only). */
   onEdit?: (text: string) => void;
   /** Ask the question before this answer again, for a new answer. */
@@ -430,6 +436,8 @@ function Message({
               message.fallback_reason ?? "it could not respond just now"
             ).replace(/\.$/, "")}
             .
+            {language &&
+              ` It is in English: answers in ${language} come from the AI assistant.`}
           </p>
         )}
         {!user && <AnswerBasis message={message} />}
@@ -1256,6 +1264,11 @@ export default function Copilot() {
                         : undefined
                     }
                     editable={!locked}
+                    language={
+                      language === "en"
+                        ? undefined
+                        : LANGUAGES[language].replace(/ \(.*\)$/, "")
+                    }
                   />
                 ))
               )}

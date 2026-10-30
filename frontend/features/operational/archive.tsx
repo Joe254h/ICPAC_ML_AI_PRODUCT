@@ -47,16 +47,23 @@ function Row({
   run,
   latest,
   earlier,
+  weekly,
   model,
 }: {
   run: ForecastRun;
   latest?: boolean;
   earlier?: boolean;
+  /** A weekly forecast: "This week" is marked on these only. */
+  weekly?: boolean;
   /** The model's name, shown for another version of the week. */
   model?: string;
 }) {
   return (
     <tr className={earlier ? "earlier-version" : undefined}>
+      <td>{runTime(run.initialization)}</td>
+      <td style={{ color: "var(--muted)" }}>
+        {earlier ? "" : validDays(run.initialization, run.valid_start)}
+      </td>
       <td className="strong">
         {earlier ? "Other version" : validDays(run.valid_start, run.valid_end)}
         {!earlier && latest && (
@@ -64,13 +71,12 @@ function Row({
             <Status tone="info">Latest</Status>
           </span>
         )}
-        {!earlier && coversToday(run) && (
+        {!earlier && weekly && coversToday(run) && (
           <span style={{ marginLeft: 10 }}>
             <Status tone="ok">This week</Status>
           </span>
         )}
       </td>
-      <td>{runTime(run.initialization)}</td>
       <td>
         {methodName(run)}
         {model && (
@@ -100,10 +106,12 @@ function Weeks({
   groups,
   names,
   latest,
+  weekly,
 }: {
   groups: Group[];
   names: Map<string, string>;
   latest?: string;
+  weekly?: boolean;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   return (
@@ -111,8 +119,9 @@ function Weeks({
       <table className="data">
         <thead>
           <tr>
-            <th>Week (days 8–14)</th>
             <th>ECMWF run</th>
+            <th>Days 1–7 after the run</th>
+            <th>Forecast week (days 8–14)</th>
             <th>Issued from</th>
             <th>Verification</th>
             <th>Generated</th>
@@ -125,10 +134,14 @@ function Weeks({
             const shown = open.has(key);
             return (
               <Fragment key={main.forecast_id}>
-                <Row run={main} latest={main.forecast_id === latest} />
+                <Row
+                  run={main}
+                  latest={main.forecast_id === latest}
+                  weekly={weekly}
+                />
                 {earlier.length > 0 && (
                   <tr className="earlier-toggle">
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       <button
                         type="button"
                         className="link-amber"
@@ -234,9 +247,9 @@ export default function Archive() {
         {weekly.length > 0 && (
           <Card
             title={`Weekly forecasts · ${shown.length} of ${weekly.length} week${weekly.length === 1 ? "" : "s"}`}
-            subtitle="Latest: the newest weekly forecast, which the website shows. This week: the forecast for the days we are in."
+            subtitle="Each Sunday's run forecasts the week after next: days 1–7 after the run pass first, then the forecast week (days 8–14). Latest: the newest weekly forecast, which the website shows. This week: the forecast for the days we are in. A week is verified about two days after it ends, when CHIRPS covers it."
           >
-            <Weeks groups={shown} names={names} latest={latest} />
+            <Weeks groups={shown} names={names} latest={latest} weekly />
             {weekly.length > WEEKS && (
               <Button
                 variant="outline"

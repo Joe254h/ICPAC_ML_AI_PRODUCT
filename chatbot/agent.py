@@ -142,14 +142,16 @@ def instructions(language: str = "en") -> str:
         text
         + f"""
 
-Answer language: write your whole answer in {name}. Keep every number, unit (mm), date \
+Answer language: write your whole answer in {name}, also when the question is asked in \
+English or another language. Keep every number, unit (mm), date \
 and forecast figure exactly as the tools give them, and keep the names of countries and \
 places recognisable (the usual {name} spelling, with the English name in brackets the \
 first time if it differs). Keep ICPAC, CHIRPS, ECMWF, MBC and AI/ML as they are. If the \
 forecaster asks for the weekly bulletin, get_weekly_bulletin shows its {name} version when \
 there is one; when there is none, make it with translate_bulletin (every figure is checked) \
-and say that a {name} speaker must review it before approval. If you cannot write good \
-{name}, answer in English and say so."""
+and say that a {name} speaker must review it before approval. If your {name} may not be \
+perfect, still answer in {name}, and end with one short sentence in {name} saying that a \
+{name} speaker should check it."""
     )
 
 
@@ -1603,6 +1605,23 @@ def without_reasoning(text: str) -> str:
     return text.rsplit("</think>", 1)[-1]
 
 
+def retry_wait(response: httpx.Response) -> float:
+    """Seconds a rate-limited or busy provider asks to wait: its Retry-After header, else
+    the "try again in 1m2.5s" of Groq's message, else three."""
+    header = response.headers.get("retry-after", "")
+    if header.replace(".", "", 1).isdigit():
+        return float(header)
+    found = re.search(
+        r"try again in ((?:\d+h)?(?:\d+m(?!s))?(?:[\d.]+s)?(?:[\d.]+ms)?)", response.text
+    )
+    if not found or not found[1]:
+        return 3.0
+    seconds = 0.0
+    for amount, unit in re.findall(r"([\d.]+)(h|ms|m|s)", found[1]):
+        seconds += float(amount) * {"h": 3600, "m": 60, "s": 1, "ms": 0.001}[unit]
+    return seconds
+
+
 class OpenAIToolsModel:
     """Any OpenAI-compatible chat completions API with tool calling (Gemini, Groq, Azure
     OpenAI, OpenAI, Ollama, vLLM, ...).
@@ -1731,15 +1750,22 @@ class OpenAIToolsModel:
         raise AssertionError("unreachable")
 
     def _post(self, body: dict[str, Any]) -> httpx.Response:
+        from chatbot.budget import remaining
+
         headers = {"Authorization": f"Bearer {self.key}"} if self.key else {}
-        for attempt in (1, 2):
+        for attempt in (1, 2, 3):
             response = httpx.post(
                 self.base + "/chat/completions", headers=headers, timeout=_timeout(), json=body
             )
-            if response.status_code in (429, 500, 502, 503) and attempt == 1:
-                wait = response.headers.get("retry-after", "")
-                time.sleep(min(float(wait) if wait.replace(".", "", 1).isdigit() else 3.0, 8.0))
-                continue
+            if response.status_code in (429, 500, 502, 503) and attempt < 3:
+                # Wait as long as the provider asks (Groq's per-minute token limit asks for
+                # seconds to about a minute) while the answer's time budget allows; a daily
+                # limit asks for longer and is not waited for.
+                wait = retry_wait(response)
+                left = remaining()
+                if wait <= 45 and (left is None or wait + 10 < left):
+                    time.sleep(wait)
+                    continue
             if response.is_error:
                 # The provider's own reason (bad request, quota, key) goes to the server log.
                 log.warning(

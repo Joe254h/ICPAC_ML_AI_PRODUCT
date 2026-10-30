@@ -348,3 +348,13 @@ test("system status reports the downloaded input and the issued forecast", async
   await expect(row("GPM IMERG monitoring")).toContainText("Healthy");
   await expect(row("Bulletin email")).toContainText("Healthy");
 });
+
+test("a reference the Copilot cites opens as a readable page", async ({
+  page,
+}) => {
+  await page.goto("/references?id=verification-guide");
+  await expect(
+    page.getByRole("heading", { name: "Verification guide", level: 1 }),
+  ).toBeVisible();
+  await expect(page.getByText(/RMSE and MAE summarize/)).toBeVisible();
+});

@@ -39,12 +39,19 @@ CAPABILITIES = (
 )
 
 
+#: Finished weeks are verified every day from this hour (EAT): CHIRPS covers a week about
+#: two days after it ends, so a week is verified as soon as it can be.
+VERIFY_HOUR_EAT = 12
+
+
 def scheduler_settings() -> dict:
     """The weekly forecast is made at the end of each Sunday (00:00 EAT on Monday) from that
-    Sunday's 00 UTC ECMWF run, which is published by about 11:00 EAT."""
+    Sunday's 00 UTC ECMWF run, which is published by about 11:00 EAT; every day at noon EAT
+    the weeks that have ended are verified against CHIRPS."""
     return {
         "enabled": os.getenv("AUTOMATION_SCHEDULER_ENABLED", "false") == "true",
         "when": "Every Sunday at midnight (00:00 EAT on Monday)",
+        "verification": f"Every day from {VERIFY_HOUR_EAT}:00 EAT",
         "action": "end_to_end",
     }
 
@@ -79,12 +86,25 @@ class AutomationService:
         if not cfg["enabled"]:
             return None
         sunday, _ = due_run(stamp)
-        return OperationService(self.platform).start(
+        service = OperationService(self.platform)
+        weekly = service.start(
             OperationRequest(
                 action="end_to_end", actor="scheduled automation", initialization=sunday
             ),
             identifier=outbox_id(sunday),
         )
+        local = stamp.astimezone(EAT)
+        if local.hour >= VERIFY_HOUR_EAT:
+            from backend.app.services.operations import RunInProgress
+
+            try:
+                service.start(
+                    OperationRequest(action="verify_due", actor="scheduled automation"),
+                    identifier=str(uuid5(NAMESPACE_URL, f"icpac/verify/{local.date()}")),
+                )
+            except RunInProgress:  # a full queue: the next tick tries again
+                pass
+        return weekly
 
     def status(self) -> dict:
         forecasts = ForecastService(self.platform)
@@ -248,7 +268,8 @@ class AutomationService:
             "schedule": (
                 "enabled" if cfg["enabled"] else "disabled",
                 "The weekly forecast is made every Sunday at midnight (00:00 EAT on Monday) "
-                "from that Sunday's ECMWF run; missed weeks are not replayed."
+                "from that Sunday's ECMWF run; missed weeks are not replayed. Every day from "
+                f"{VERIFY_HOUR_EAT}:00 EAT the weeks that have ended are verified against CHIRPS."
                 if cfg["enabled"]
                 else "The weekly schedule is switched off in the server configuration.",
             ),

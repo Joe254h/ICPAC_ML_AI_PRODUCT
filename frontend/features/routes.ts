@@ -23,7 +23,8 @@ export type PageKey =
   | "decision"
   | "copilot"
   | "system"
-  | "about";
+  | "about"
+  | "reference";
 
 export type Route = {
   path: string;
@@ -94,6 +95,13 @@ export const DAILY_SOURCES = [
 export const ROUTES: Route[] = [
   { path: "", title: "Home", menu: "Home", page: "home" },
   { path: "about", title: "About this service", menu: "Home", page: "about" },
+  {
+    path: "references",
+    title: "Copilot reference",
+    menu: "Copilot",
+    page: "reference",
+    nav: false,
+  },
   // Forecasts: this week's outlook, its maps and earlier weeks.
   {
     path: "forecasts",

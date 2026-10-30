@@ -20,6 +20,12 @@ def timeout(default: float = 60) -> float:
     return min(default, remaining)
 
 
+def remaining() -> float | None:
+    """Seconds left of the answer's budget, or None outside one."""
+    deadline = DEADLINE.get()
+    return None if deadline is None else deadline - time.monotonic()
+
+
 def request_budget(function):
     @wraps(function)
     def bounded(*args, **kwargs):

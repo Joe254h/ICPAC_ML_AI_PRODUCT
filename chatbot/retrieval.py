@@ -10,6 +10,12 @@ from climate_engine.core import ROOT
 from climate_engine.provenance import file_checksum
 
 CATEGORIES = {"scientific_reference", "historical_bulletin", "operational_documentation"}
+#: Words too common in questions to tie one to a reference.
+COMMON_WORDS = set(
+    "a an and are as at be by can do does for from give how i in is it me my of on or our "
+    "please show tell that the this to was we what when where which who why will with you "
+    "your explain forecast forecasts rainfall rain week weekly region country icpac".split()
+)
 
 
 class DocumentIngestor(ABC):
@@ -62,15 +68,17 @@ class ReferenceIndex:
         )
 
     def search(self, query: str, limit: int = 3) -> list[dict]:
-        terms = set(re.findall(r"[a-z]+", query.lower()))
-        ranked = sorted(
-            [d for d in self.documents if d.get("searchable", True)],
-            key=lambda d: len(
-                terms & set(re.findall(r"[a-z]+", (d["title"] + " " + d["content"]).lower()))
-            ),
-            reverse=True,
-        )
-        return [source(d) for d in ranked[:limit]]
+        """The references that share a meaningful word with the question, best first; a
+        question about this week's forecast ("Explain the forecast for Uganda") matches none
+        of them, so no unrelated source is cited."""
+        terms = set(re.findall(r"[a-z]+", query.lower())) - COMMON_WORDS
+        scored = [
+            (len(terms & set(re.findall(r"[a-z]+", (d["title"] + " " + d["content"]).lower()))), d)
+            for d in self.documents
+            if d.get("searchable", True)
+        ]
+        ranked = sorted((pair for pair in scored if pair[0]), key=lambda p: p[0], reverse=True)
+        return [source(d) for _, d in ranked[:limit]]
 
     def glossary(self) -> dict[str, dict]:
         """Approved definitions by lower-case alias, from the glossary reference."""
