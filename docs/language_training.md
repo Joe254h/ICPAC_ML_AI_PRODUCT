@@ -32,13 +32,14 @@ text. Those four start from forecaster-translated templates.
 | 1 | Kiswahili, Amharic, Somali, Afaan Oromo | Together they reach most people in the region. Kiswahili is the common language of Kenya, Tanzania, Uganda, Rwanda and Burundi. Amharic is Ethiopia's working language, and Afaan Oromo its largest mother tongue. Somali covers Somalia, Djibouti, Ethiopia's Somali Region and north-eastern Kenya, where drought and flood warnings matter most. General AI models are weakest in Amharic and Oromo, so fine-tuning gains most there. |
 | 2 | Tigrinya, Kinyarwanda, Kirundi | National languages of Eritrea, Rwanda and Burundi; less training data, so the forecasters' templates carry more weight. |
 | 3 | Luganda, Dholuo, Kikuyu, Kamba | Uganda's and Kenya's largest further languages. NLLB-200 already knows all four; SALT (Luganda), SMOL (Dholuo, Kikuyu) and mined pairs (Kikuyu, Kamba) supply the data. |
-| 4 | Afar, Tigre, Sudanese Arabic, Acholi, Alur, Rukiga, Lugbara, Runyankole, Ateso, Dinka, Nuer | Public data exists but is small (SMOL sentences and documents, GATITOS word lists, SALT). NLLB-200 lacks the first nine: each gets a new language code started from a related language (Afar from Somali, Tigre from Tigrinya, Sudanese Arabic from Arabic, the Luo-group languages from Dholuo, the Bantu ones from Luganda). Expect rough output: a speaker reviews everything, and the forecasters' translated templates matter most. Dinka and Nuer mined pairs are mostly religious text and are left out unless `--mined-anyway` is given. |
+| 4 | Afar, Tigre, Sudanese Arabic, Acholi, Alur, Rukiga, Lugbara, Runyankole, Ateso, Lusoga, Rutooro, Dinka, Nuer | Public data exists but is small (SMOL sentences and documents, GATITOS word lists, SALT). NLLB-200 lacks the first eleven: each gets a new language code started from a related language (Afar from Somali, Tigre from Tigrinya, Sudanese Arabic from Arabic, the Luo-group languages from Dholuo, the Bantu ones from Luganda). Expect rough output: a speaker reviews everything, and the forecasters' translated templates matter most. Dinka and Nuer mined pairs are mostly religious text and are left out unless `--mined-anyway` is given. |
 | No fine-tune | Arabic, French | General AI models already write them well; a reviewed glossary of ICPAC terms is enough. |
 
 Data checked on Hugging Face on 29 October 2026: `google/smol` (CC-BY-4.0) has sentence and
 document translations for Afar, Tigre, Sudanese Arabic, Acholi, Alur, Rukiga, Dinka, Dholuo
 and Kikuyu, and GATITOS word lists for those and Nuer; `Sunbird/salt` (CC-BY-SA-4.0, gated)
-has Luganda, Acholi, Lugbara, Runyankole, Ateso and Kiswahili; NLLB-v1 mined pairs are
+has Luganda, Acholi, Lugbara, Runyankole, Ateso, Lusoga, Rutooro and Kiswahili (text-all;
+its English column is `eng_source_text`); NLLB-v1 mined pairs are
 mirrored for Kikuyu, Kamba and Nuer. MAFAND-MT has Dholuo news sentences but is
 CC-BY-NC-4.0, so it is not used.
 

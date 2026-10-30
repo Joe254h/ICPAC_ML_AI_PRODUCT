@@ -263,6 +263,13 @@ LANGUAGES = {
     "teo": Language(
         "Ateso", "teo_Latn", None, None, None, ("Uganda", "Kenya"), salt="teo", init_from="luo_Latn"
     ),
+    # SALT has text, not speech, for these two (Great Lakes Bantu, close to Luganda).
+    "xog": Language(
+        "Lusoga", "xog_Latn", None, None, None, ("Uganda",), salt="xog", init_from="lug_Latn"
+    ),
+    "ttj": Language(
+        "Rutooro", "ttj_Latn", None, None, None, ("Uganda",), salt="ttj", init_from="lug_Latn"
+    ),
 }
 
 #: The languages each phase trains (docs/language_training.md).
@@ -270,5 +277,5 @@ PHASES = {
     "1": ["sw", "am", "so", "om"],
     "2": ["ti", "rw", "rn"],
     "3": ["lg", "luo", "ki", "kam"],
-    "4": ["aa", "tig", "apd", "ach", "alz", "cgg", "lgg", "nyn", "teo", "din", "nus"],
+    "4": ["aa", "tig", "apd", "ach", "alz", "cgg", "lgg", "nyn", "teo", "xog", "ttj", "din", "nus"],
 }

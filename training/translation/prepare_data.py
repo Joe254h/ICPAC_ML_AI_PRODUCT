@@ -93,15 +93,19 @@ def salt(language: Language) -> dict[str, list[dict]]:
             print(f"  SALT {split}: not loaded ({type(exc).__name__}); request access first")
             return out
         columns = rows.column_names
-        english = next((c for c in ("eng_text", "eng") if c in columns), None)
+        # text-all names the English sentence translators worked from "eng_source_text".
+        english = next((c for c in ("eng_source_text", "eng_text", "eng") if c in columns), None)
         target = next((c for c in (f"{language.salt}_text", language.salt) if c in columns), None)
         if not english or not target:
             print(f"  SALT: no English/{language.salt} columns in {columns}; skipped")
             return out
         pairs = (
-            {"src": clean(r[english]), "tgt": clean(r[target]), "source": "salt"} for r in rows
+            {"src": clean(r[english]), "tgt": clean(r[target]), "source": "salt"}
+            for r in rows
+            if r[english] and r[target]  # a sentence not translated into this language
         )
         out[split] = [p for p in pairs if usable(p["src"], p["tgt"])]
+        print(f"  SALT {split}: {len(out[split])} pairs")
     return out
 
 
