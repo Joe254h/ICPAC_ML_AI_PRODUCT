@@ -522,14 +522,15 @@ def test_the_archive_is_started_again_once(platform, monkeypatch):
             return real.runs()[0]["forecast_id"]
 
     drafted: list[str] = []
+
+    def draft(self, op, body, forecast_id):
+        drafted.append(forecast_id)
+        return {"bulletin_id": "b"}
+
     monkeypatch.setattr(OperationService, "_forecasts", lambda self: Forecasts())
     monkeypatch.setattr(OperationService, "_model_id", lambda self: "refit")
     monkeypatch.setattr(OperationService, "_verify_due", lambda self, op, body, compare: {})
-    monkeypatch.setattr(
-        OperationService,
-        "_prepare_draft",
-        lambda self, op, body, forecast_id: drafted.append(forecast_id) or {"bulletin_id": "b"},
-    )
+    monkeypatch.setattr(OperationService, "_prepare_draft", draft)
     service = OperationService(platform)
     task = service.start(OperationRequest(action="restart_archive", actor="Operator", weeks=2))
     assert service.run_pending()
