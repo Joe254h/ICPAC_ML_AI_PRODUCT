@@ -262,8 +262,13 @@ def install(app: FastAPI, dependency) -> None:
 
     @app.get("/forecasts/latest")
     def latest(platform=Depends(dependency)) -> dict:
-        """The newest forecast from real input (synthetic runs only if nothing else exists)."""
+        """This week's forecast from real input (synthetic runs only if nothing else exists)."""
         return ForecastService(platform).latest()
+
+    @app.get("/forecasts/upcoming")
+    def upcoming(platform=Depends(dependency)) -> list[dict]:
+        """Weekly forecasts made for a week that has not begun; listed from its Sunday."""
+        return ForecastService(platform).upcoming()
 
     @app.post("/forecasts/run", status_code=201)
     def run(

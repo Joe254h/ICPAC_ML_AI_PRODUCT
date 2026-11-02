@@ -36,9 +36,13 @@ every forecast out of the archive and then forecasts and verifies the last twelv
 runs afresh, and drafts the latest one's bulletin. The forecasts taken out stay in the
 database with their packages, so a bulletin that cites one still opens; they are no longer
 listed, verified or scored. A verified week's forecast page shows its forecast map beside
-what CHIRPS, ARC 2.0, RFE 2.0 and GPM IMERG observed, with RMSE and MAE against each. Every day from 12:00 EAT the schedule also verifies the weeks that have
-ended: CHIRPS covers a week about two days after it ends, so this week's forecast (Sunday
-to Saturday) is verified on about the Tuesday after. Times on the website are in EAT.
+what CHIRPS, ARC 2.0, RFE 2.0 and GPM IMERG observed, with RMSE and MAE against each. The website shows the forecast of the week we are in: the forecast made at the end of a
+Sunday is for the next week and is listed from that week's Sunday (the archive says it is
+ready). Every three hours the schedule also verifies the weeks that have ended: CHIRPS
+covers a week about two days after it ends, so last week's forecast (Sunday to Saturday)
+is verified on about the Tuesday after; a week CHIRPS should cover but that could not be
+verified says why (for example, the CHIRPS server could not be reached) and when it was
+last tried. Times on the website are in EAT.
 
 | Step | What happens | Recorded as |
 |---|---|---|
@@ -230,8 +234,20 @@ in any mix. Every step is recorded with who took it and when.
 * Without a mail server, everything works on the website as before; the bulletin page and
   the System page say that email is not set up.
 
-Settings (environment; on Azure pass them to `deploy/azure/backend.sh`, which keeps them
-on later runs):
+Settings (environment). On Azure set them once in Cloud Shell; `deploy/azure/backend.ps1`
+keeps them (and the password secret) on later runs:
+
+```powershell
+$p = Read-Host 'Mail password (for Gmail, the app password)' -MaskInput
+az containerapp secret set --name icpac-api --resource-group icpac --secrets "smtp-password=$p"
+az containerapp update --name icpac-api --resource-group icpac --set-env-vars `
+  SMTP_HOST=smtp.gmail.com SMTP_PORT=587 SMTP_SECURITY=starttls `
+  SMTP_USER=forecast.desk@example.org MAIL_FROM=forecast.desk@example.org `
+  SMTP_PASSWORD=secretref:smtp-password `
+  BULLETIN_FORECASTERS=a@example.org BULLETIN_REVIEWERS=b@example.org `
+  BULLETIN_PUBLISHERS=c@example.org BULLETIN_DISTRIBUTION=list@example.org `
+  PUBLIC_SITE_URL=https://icpac-ml-ai-product-three.vercel.app
+```
 
 | Variable | Meaning |
 |---|---|

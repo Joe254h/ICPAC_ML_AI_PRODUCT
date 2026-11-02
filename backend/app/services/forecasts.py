@@ -15,10 +15,11 @@ in progress.
 
 import json
 import os
+import re
 import threading
 import time
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -143,10 +144,32 @@ def hybrid_status(model: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"status": "available", "reason": None}
 
 
-def _newest_weekly(listed: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """The newest weekly forecast of record in a newest-first listing, else the newest."""
+def _moment(value: str) -> datetime:
+    """A stored instant; one stored without a zone is UTC."""
+    moment = datetime.fromisoformat(value)
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def _begun(record: dict[str, Any], now: datetime) -> bool:
+    return _moment(record["valid_start"]) <= now
+
+
+def _newest_weekly(
+    listed: list[dict[str, Any]], now: datetime | None = None
+) -> dict[str, Any] | None:
+    """The forecast the website shows, in a newest-first listing: the weekly forecast of
+    record for the week we are in, else the newest weekly one, else the newest."""
+    now = now or datetime.now(timezone.utc)
     held = [r for r in listed if r["of_record"]]
-    return next((r for r in held if r["weekly"]), held[0] if held else None)
+    weekly = [r for r in held if r["weekly"]]
+    current = next((r for r in weekly if _begun(r, now) and now < _moment(r["valid_end"])), None)
+    return current or next(iter(weekly), held[0] if held else None)
+
+
+def _note(text: str) -> str:
+    """Why a week is not verified yet, for the archive (no links or internals)."""
+    text = " ".join(re.sub(r"https?://\S+", "", text).split()).strip(" :;")
+    return text[:200] or "the verification could not finish"
 
 
 def current_record(platform) -> dict[str, Any] | None:
@@ -527,7 +550,11 @@ class ForecastService:
         others (a run forecast again by an earlier model, or before a confirmation) are
         earlier versions of the same week, kept for the record. ``weekly`` marks the weekly
         forecasts (Sunday runs) and ``latest`` the one the website shows (``latest_id``)."""
+        now = datetime.now(timezone.utc)
         runs = self.runs()
+        # A week that has not begun is held back while one that has begun is there: the
+        # website shows this week's forecast (made from the Sunday run a week before).
+        runs = [r for r in runs if _begun(r, now)] or runs
         model_id = (current_record(self.platform) or {}).get("model_id")
         chosen: dict[str, dict[str, Any]] = {}
         for record in runs:
@@ -546,12 +573,34 @@ class ForecastService:
             }
             for r in runs
         ]
-        newest = _newest_weekly(listed)
+        newest = _newest_weekly(listed, now)
         return [{**r, "latest": r is newest} for r in listed]
 
+    def upcoming(self) -> list[dict[str, Any]]:
+        """The weekly forecasts made for a week that has not begun (held back from the
+        listing), soonest first: what the website shows from that week's Sunday."""
+        now = datetime.now(timezone.utc)
+        runs = self.runs()
+        if not any(_begun(r, now) for r in runs):
+            return []
+        weeks: dict[str, dict[str, Any]] = {}
+        for record in runs:  # newest first: each week's newest forecast
+            if not _begun(record, now) and ecmwf_opendata.is_weekly(
+                date.fromisoformat(record["initialization"][:10])
+            ):
+                weeks.setdefault(record["valid_start"][:10], record)
+        return [
+            {
+                key: record[key]
+                for key in ("forecast_id", "initialization", "valid_start", "valid_end")
+            }
+            for record in sorted(weeks.values(), key=lambda r: r["valid_start"])
+        ]
+
     def latest_id(self) -> str:
-        """The weekly forecast of the latest Sunday run (of record). A forecast of another
-        day's run is the latest only while no Sunday run has been forecast."""
+        """This week's forecast: the weekly forecast (of record) whose week we are in, else
+        the newest weekly one. A forecast of another day's run is the latest only while no
+        Sunday run has been forecast."""
         newest = _newest_weekly(self.listing())
         if newest is None:
             raise KeyError("no operational forecast run yet")
@@ -846,6 +895,7 @@ class ForecastService:
             verified_at=result.get("verified_at", now()),
             verified_by=result.get("verified_by", body.actor),
         )
+        record.pop("verification_note", None)
         self.repo.save_with_audit(
             KIND,
             record,
@@ -867,6 +917,28 @@ class ForecastService:
         record = self.repo.get(KIND, forecast_id)
         if record.get("verification_status") == "available":
             raise ValueError(f"Forecast {forecast_id} is already verified")
+        directory = self.directory(forecast_id)
+        committed = packages.load_run(directory).verification
+        if committed is not None:
+            # An earlier pass recorded it in the package and stopped before the database
+            # (a restart): that verification is the record, whatever CHIRPS holds now.
+            self._publish(directory)
+            record.update(
+                verification_status="available",
+                season=committed["season"],
+                verified_at=committed.get("verified_at", now()),
+                verified_by=committed.get("verified_by", actor),
+            )
+            record.pop("verification_note", None)
+            self.repo.save_with_audit(
+                KIND,
+                record,
+                forecast_id,
+                "forecast_verified",
+                record["verified_by"],
+                {"observation": committed.get("observation", {}).get("file", "")},
+            )
+            return committed
         start = datetime.fromisoformat(record["valid_start"]).date()
         if not chirps.window_complete(start):
             raise Unavailable(
@@ -917,10 +989,19 @@ class ForecastService:
             try:
                 self.verify_with_chirps(record["forecast_id"], actor, server)
                 verified.append(record["forecast_id"])
+                continue
             except (chirps.CHIRPSUnavailable, Unavailable) as exc:
                 waiting.append(f"{record['forecast_id']}: {exc}")
+                reason = str(exc)
             except Exception as exc:  # recorded for the forecaster, then the next one
                 failed.append(f"{record['forecast_id']}: {type(exc).__name__}: {exc}")
+                reason = f"{type(exc).__name__}: {exc}"
+            # The week shows why it is not verified yet, and when it was last tried.
+            self.repo.save(
+                KIND,
+                {**record, "verification_note": _note(reason), "verification_tried_at": now()},
+                record["forecast_id"],
+            )
         compared = self.compare_due(actor, progress) if compare else 0
         from backend.app.services.external import ExternalForecasts
 

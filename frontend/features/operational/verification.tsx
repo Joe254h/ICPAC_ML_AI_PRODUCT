@@ -40,6 +40,8 @@ import type {
 import {
   MetricsTable,
   ModelScope,
+  VerificationState,
+  chirpsFrom,
   ofRecord,
   primaryOf,
 } from "@/features/operational/shared";
@@ -585,14 +587,18 @@ export default function Verification() {
   // Each ECMWF run's forecast of record: a week is listed once.
   const issued = ofRecord(runs.data ?? []);
   const verified = issued.filter((r) => r.verification_status === "available");
-  const waiting = issued.filter((r) => r.verification_status !== "available");
+  const unverified = issued.filter(
+    (r) => r.verification_status !== "available",
+  );
+  // A week CHIRPS should cover already is overdue (it shows why); the others wait for it.
+  const overdue = unverified.filter(
+    (r) => chirpsFrom(r).getTime() <= Date.now(),
+  );
+  const waiting = unverified.filter(
+    (r) => chirpsFrom(r).getTime() > Date.now(),
+  );
   const evidence = useApi<ExperimentalEvidence>("/verification/experimental");
-  // CHIRPS covers a week about two days after it ends.
-  const nextScores = waiting
-    .map((r) =>
-      new Date(Date.parse(r.valid_end) + 2 * 86_400_000).toISOString(),
-    )
-    .sort()[0];
+  const nextScores = waiting.map((r) => chirpsFrom(r).toISOString()).sort()[0];
   return (
     <div className="page">
       <div className="wrap">
@@ -631,7 +637,11 @@ export default function Verification() {
           <div className="stat amber">
             <div className="label">Awaiting CHIRPS</div>
             <div className="value">{runs.data ? waiting.length : "…"}</div>
-            <div className="hint">CHIRPS lags about two days</div>
+            <div className="hint">
+              {overdue.length
+                ? `${overdue.length} more not verified yet: see below`
+                : "CHIRPS lags about two days"}
+            </div>
           </div>
           <div className="stat">
             <div className="label">Next scores</div>
@@ -701,8 +711,15 @@ export default function Verification() {
             <Skeleton height={140} />
           )}
         </Card>
-        {waiting.length > 0 && (
-          <Card title="Awaiting observations">
+        {unverified.length > 0 && (
+          <Card
+            title="Awaiting observations"
+            subtitle={
+              overdue.length
+                ? `${overdue.length} week${overdue.length === 1 ? "" : "s"} that CHIRPS should cover ${overdue.length === 1 ? "is" : "are"} not verified yet; each says why. Verification is tried every 3 hours.`
+                : "Each week is verified about two days after it ends, when CHIRPS covers it."
+            }
+          >
             <div className="table-wrap">
               <table className="data">
                 <thead>
@@ -714,7 +731,7 @@ export default function Verification() {
                   </tr>
                 </thead>
                 <tbody>
-                  {waiting.map((run) => (
+                  {[...overdue, ...waiting].map((run) => (
                     <tr key={run.forecast_id}>
                       <td className="strong">
                         <Link href={`/forecasts?id=${run.forecast_id}`}>
@@ -724,7 +741,7 @@ export default function Verification() {
                       <td>{day(run.initialization)}</td>
                       <td>{readyOn(run)}</td>
                       <td>
-                        <Status tone="progress">Awaiting CHIRPS</Status>
+                        <VerificationState run={run} />
                       </td>
                     </tr>
                   ))}

@@ -97,8 +97,9 @@ version still goes through forecaster review and approval on the Bulletin page. 
 figure, place or date that is not in the tools' results or the forecaster's own words; if \
 the request needs one you do not have, ask for it.
 - Forecast weeks: the weekly forecast is issued from each Sunday's ECMWF run and covers \
-days 8 to 14 (Sunday to Saturday), so one forecast is held for each week; a forecaster can \
-also run one for another day. The week chosen on the page is the one the conversation is about. When the person \
+days 8 to 14 (Sunday to Saturday), so one forecast is held for each week; the latest is the \
+forecast of the week we are in (made from the Sunday run a week before), and next week's is \
+shown from its Sunday. A forecaster can also run one for another day. The week chosen on the page is the one the conversation is about. When the person \
 asks for a bulletin, a translation or figures and names a date or a week that may not be \
 the chosen one, or says nothing and more than one week could fit, call \
 list_forecast_weeks and ask which week (by its dates) before writing anything. Use the \
@@ -1047,8 +1048,9 @@ class ToolBox:
                 for r in runs
             ],
             "note": "The weekly forecast comes from each Sunday's ECMWF run and covers days 8 "
-            "to 14, Sunday to Saturday; the weekly bulletin is made from the latest. Forecasts "
-            "marked weekly: false were run for another day on request.",
+            "to 14, Sunday to Saturday; the latest is this week's, from which the weekly "
+            "bulletin is made. Forecasts marked weekly: false were run for another day on "
+            "request.",
         }
 
     def _search_references(self, query: str) -> dict[str, Any]:

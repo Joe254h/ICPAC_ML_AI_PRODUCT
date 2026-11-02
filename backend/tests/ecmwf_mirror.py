@@ -391,8 +391,10 @@ PAST_WEEKS = 4
 
 
 def main() -> None:
-    """Build and serve a mirror holding the latest Sunday's run (up to yesterday), from which
-    a forecaster makes the weekly forecast, the newest ended dekads of CHIRPS, TAMSAT, ARC
+    """Build and serve a mirror holding the Sunday run a week before the latest (up to
+    yesterday), whose days 8 to 14 are this week: a forecaster's cycle falls back to it, as
+    when the newest run is not out yet, and makes this week's forecast. Also the newest ended
+    dekads of CHIRPS, TAMSAT, ARC
     2.0, RFE 2.0 and GPM IMERG, and, for past
     weeks, the archived runs and the daily observations that verify them (browser tests
     point ECMWF_OPENDATA_MIRRORS at the mirror, CHIRPS_BASE_URL at its /chc folder,
@@ -415,10 +417,11 @@ def main() -> None:
 
     # The ECMWF runs follow the weekly forecast's Sundays; the dekads end before today.
     observed = args.date or datetime.now(timezone.utc).date() - timedelta(days=1)
-    day = args.date or weekly_run(observed)
+    newest = weekly_run(observed)
+    day = args.date or newest - timedelta(days=7)
     shutil.rmtree(args.root, ignore_errors=True)
     build(args.root, day, args.members, pressure_steps=tuple(args.pressure_steps))
-    past = [day - timedelta(days=14 + 7 * week) for week in range(PAST_WEEKS)]
+    past = [newest - timedelta(days=14 + 7 * week) for week in range(PAST_WEEKS)]
     for run in past:
         build(args.root, run, args.members, wetness=wetness(run))
     # Each run's Week-2 window: days 7 to 13 after it.

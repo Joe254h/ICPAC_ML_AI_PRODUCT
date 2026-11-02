@@ -14,13 +14,18 @@ import {
   Status,
 } from "@/components/ui";
 import { useActor } from "@/lib/actor";
-import { dateTime, runTime, validDays } from "@/lib/format";
+import { dateTime, day, runTime, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import { useOperation } from "@/services/operations";
-import type { OperationalModel, ForecastRun } from "@/types/operational";
+import type {
+  ForecastRun,
+  OperationalModel,
+  UpcomingForecast,
+} from "@/types/operational";
 import { OBSERVED_ANCHOR } from "@/features/operational/observed";
 import {
   NoForecast,
+  VerificationState,
   coversToday,
   isWeekly,
   methodName,
@@ -84,19 +89,15 @@ function Row({
         )}
       </td>
       <td>
-        {run.verification_status === "available" ? (
-          <>
-            <Status tone="ok">Verified · CHIRPS</Status>
-            <Link
-              className="link-amber"
-              style={{ display: "block", marginTop: 6 }}
-              href={`/forecasts?id=${run.forecast_id}#${OBSERVED_ANCHOR}`}
-            >
-              Forecast vs observed →
-            </Link>
-          </>
-        ) : (
-          <Status tone="progress">Awaiting CHIRPS</Status>
+        <VerificationState run={run} />
+        {run.verification_status === "available" && (
+          <Link
+            className="link-amber"
+            style={{ display: "block", marginTop: 6 }}
+            href={`/forecasts?id=${run.forecast_id}#${OBSERVED_ANCHOR}`}
+          >
+            Forecast vs observed →
+          </Link>
         )}
       </td>
       <td style={{ color: "var(--muted)" }}>{dateTime(run.generation_time)}</td>
@@ -193,6 +194,7 @@ export default function Archive() {
   const [actor] = useActor();
   const [all, setAll] = useState(false);
   const [others, setOthers] = useState(false);
+  const upcoming = useApi<UpcomingForecast[]>("/forecasts/upcoming");
   const task = useOperation(() => runs.reload());
   // While the archive is filled or started again, the weeks appear as they are made.
   const reload = useRef(runs.reload);
@@ -226,7 +228,7 @@ export default function Archive() {
             { label: "Forecasts", href: "/forecasts" },
             { label: "Archive" },
           ]}
-          subtitle="The weekly forecast is made every Sunday at midnight (EAT) from that Sunday's ECMWF run, for days 8 to 14: Sunday to Saturday of the week after next."
+          subtitle="Every Sunday at midnight (EAT) the forecast for days 8 to 14 of that Sunday's ECMWF run is made: Sunday to Saturday of the next week. It is shown from that week's Sunday, and verified against CHIRPS about two days after the week ends."
           actions={
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <Button
@@ -284,9 +286,21 @@ export default function Archive() {
         {weekly.length > 0 && (
           <Card
             title={`Weekly forecasts · ${shown.length} of ${weekly.length} week${weekly.length === 1 ? "" : "s"}`}
-            subtitle="Each Sunday's run forecasts days 8 to 14 after it, Sunday to Saturday. Latest: the newest weekly forecast, which the website shows. This week: the forecast for the days we are in. A week is verified about two days after it ends, when CHIRPS covers it; Forecast vs observed then shows its forecast map beside the observed rainfall, with RMSE and MAE."
+            subtitle="Each Sunday's run forecasts days 8 to 14 after it, Sunday to Saturday. Latest · This week: the forecast for the week we are in, which the website shows. A week is verified about two days after it ends, when CHIRPS covers it; Forecast vs observed then shows its forecast map beside the observed rainfall, with RMSE and MAE."
           >
             <Weeks groups={shown} names={names} latest={latest} weekly />
+            {(upcoming.data ?? []).map((next) => (
+              <p
+                key={next.forecast_id}
+                className="muted-line"
+                style={{ maxWidth: "none" }}
+              >
+                Next: the forecast for{" "}
+                {validDays(next.valid_start, next.valid_end)} (ECMWF run of{" "}
+                {day(next.initialization)}) is ready and is shown here from{" "}
+                {day(next.valid_start)}.
+              </p>
+            ))}
             {weekly.length > WEEKS && (
               <Button
                 variant="outline"

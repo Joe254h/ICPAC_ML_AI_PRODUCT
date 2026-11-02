@@ -164,3 +164,33 @@ def test_blob_reader_keeps_its_manifest_snapshot_during_verification_publish(
     assert packages.check_package(root / fid) == []
     assert packages.load_run(root / fid).verification is None
     assert published
+
+
+def test_a_verification_left_in_the_package_is_recorded_by_the_automatic_pass(
+    env, fast_maps, monkeypatch
+):
+    """A restart between the package and the database left a week "awaiting CHIRPS" for
+    good: the automatic pass rebuilt the CHIRPS week, which no longer matched. It now
+    records the verification the package holds."""
+    record = run(env)
+    fid = record["forecast_id"]
+    body = VerificationRequest(observation=write_observation(env, record, "obs.nc"), actor="Joe")
+    service = forecasts.ForecastService(env.platform)
+    original = env.platform.repo.save_with_audit
+
+    def fail(*args, **kwargs):
+        raise OSError("restarted")
+
+    monkeypatch.setattr(env.platform.repo, "save_with_audit", fail)
+    with pytest.raises(OSError, match="restarted"):
+        service.verify(fid, body)
+    monkeypatch.setattr(env.platform.repo, "save_with_audit", original)
+    env.platform.repo.save(
+        forecasts.KIND,
+        {**env.platform.repo.get(forecasts.KIND, fid), "verification_note": "CHIRPS was late"},
+        fid,
+    )
+    result = service.verify_with_chirps(fid, "scheduled automation")
+    assert result["verified_by"] == "Joe"
+    held = env.platform.repo.get(forecasts.KIND, fid)
+    assert held["verification_status"] == "available" and "verification_note" not in held

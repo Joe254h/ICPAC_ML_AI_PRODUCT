@@ -252,6 +252,52 @@ export function latestOf(runs: ForecastRun[]): ForecastRun | undefined {
   return held.find((r) => r.latest) ?? held.find(isWeekly) ?? held[0];
 }
 
+/** CHIRPS covers a week about two days after it ends. */
+export const CHIRPS_LAG_DAYS = 2;
+
+/** When CHIRPS should cover a forecast's week. */
+export function chirpsFrom(run: Pick<ForecastRun, "valid_end">): Date {
+  return new Date(Date.parse(run.valid_end) + CHIRPS_LAG_DAYS * 86_400_000);
+}
+
+/** A forecast's verification: verified, waiting for CHIRPS, or (once CHIRPS should cover
+ * its week) not verified yet, with the reason and when it was last tried. */
+export function VerificationState({
+  run,
+}: {
+  run: Pick<
+    ForecastRun,
+    | "verification_status"
+    | "valid_end"
+    | "verification_note"
+    | "verification_tried_at"
+  >;
+}) {
+  if (run.verification_status === "available")
+    return <Status tone="ok">Verified · CHIRPS</Status>;
+  const due = chirpsFrom(run);
+  if (due.getTime() > Date.now())
+    return (
+      <>
+        <Status tone="progress">Awaiting CHIRPS</Status>
+        <span className="muted-line">from {day(due.toISOString())}</span>
+      </>
+    );
+  return (
+    <>
+      <Status tone="bad">Not verified yet</Status>
+      <span className="muted-line">
+        {run.verification_note
+          ? `${run.verification_note}. `
+          : "Not tried yet since CHIRPS covered it. "}
+        {run.verification_tried_at
+          ? `Tried ${dateTime(run.verification_tried_at)}; tried again every 3 hours.`
+          : "Tried every 3 hours."}
+      </span>
+    </>
+  );
+}
+
 /** Whether today (in East Africa) falls in a forecast's week. */
 export function coversToday(
   run: Pick<ForecastRun, "valid_start" | "valid_end">,

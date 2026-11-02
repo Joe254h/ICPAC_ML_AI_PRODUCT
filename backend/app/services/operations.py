@@ -483,6 +483,12 @@ class OperationService:
             f"{len(result['verified'])} verified, {len(result['waiting'])} waiting for CHIRPS, "
             f"{len(result['failed'])} failed",
         )
+        # Why the weeks that have ended are not verified yet (each once).
+        reasons = [
+            entry.split(": ", 1)[1] for entry in result["waiting"] + result["failed"] if ": " in entry
+        ]
+        for reason in list(dict.fromkeys(reasons))[:3]:
+            self._log(operation_id, f"Not verified yet: {_plain(Exception(reason))}")
         return result
 
     def _end_to_end(self, operation_id: str, body: OperationRequest) -> dict[str, Any]:

@@ -44,24 +44,19 @@ def test_weekly_outbox_is_explicit_bounded_and_survives_restarts(platform, monke
         def actions():
             return sorted(r["action"] for r in platform.repo.list("operation"))
 
-        # Each week's run is followed by filling the last twelve weeks, once a week; from
-        # noon EAT each day the weeks that have ended are verified, once a day (the ticks
-        # above at 00:30 EAT were before noon).
-        assert actions() == ["end_to_end", "refresh_archive", "verify_due"]
+        # Each week's run is followed by filling the last twelve weeks, once a week; the
+        # weeks that have ended are verified once in every three hours (EAT): the three
+        # ticks above fell in three such periods.
+        assert actions() == ["end_to_end", "refresh_archive"] + ["verify_due"] * 3
         fill = next(r for r in platform.repo.list("operation") if r["action"] == "refresh_archive")
         assert fill["request"]["weeks"] == 12
         service.tick(datetime(2026, 10, 25, 13, 0, tzinfo=eat))
-        assert actions() == ["end_to_end", "refresh_archive", "verify_due"]
+        service.tick(datetime(2026, 10, 25, 14, 59, tzinfo=eat))  # the same three hours
+        assert actions() == ["end_to_end", "refresh_archive"] + ["verify_due"] * 4
         next_week = service.tick(datetime(2026, 10, 26, 0, 0, tzinfo=eat))
         assert next_week is not None and next_week["initialization"] == "2026-10-25"
         assert next_week["id"] != first["id"]
-        assert actions() == [
-            "end_to_end",
-            "end_to_end",
-            "refresh_archive",
-            "refresh_archive",
-            "verify_due",
-        ]
+        assert actions() == ["end_to_end"] * 2 + ["refresh_archive"] * 2 + ["verify_due"] * 5
     finally:
         second_platform.repo.engine.dispose()
     with pytest.raises(ValueError, match="timezone"):
@@ -545,3 +540,66 @@ def test_the_archive_is_started_again_once(platform, monkeypatch):
         task["id"], OperationRequest(action="restart_archive", actor="Operator", weeks=2)
     )
     assert [r["forecast_id"] for r in real.runs()] == ["w2-2026-10-25", "w2-2026-10-18"]
+
+
+def test_the_website_shows_this_weeks_forecast_and_holds_back_the_next(platform):
+    """The weekly forecast made at the end of a Sunday is for the week after; the website
+    shows the forecast of the week we are in, and the next one from its Sunday."""
+    from backend.app.services.forecasts import KIND, ForecastService
+    from climate_engine.inputs.ecmwf_opendata import weekly_run
+
+    this_sunday = weekly_run(datetime.now(timezone.utc).date())
+
+    def week(run: date) -> dict:
+        start = run + timedelta(days=7)
+        return {
+            "forecast_id": f"w2-{run.isoformat()}",
+            "initialization": f"{run.isoformat()}T00:00:00+00:00",
+            "generation_time": f"{run.isoformat()}T21:00:00+00:00",
+            "valid_start": f"{start.isoformat()}T00:00:00+00:00",
+            "valid_end": f"{(start + timedelta(days=7)).isoformat()}T00:00:00+00:00",
+            "model_id": "refit",
+        }
+
+    for run in (this_sunday, this_sunday - timedelta(days=7), this_sunday - timedelta(days=14)):
+        platform.repo.save(KIND, week(run), f"w2-{run.isoformat()}")
+    service = ForecastService(platform)
+    listed = service.listing()
+    current = f"w2-{(this_sunday - timedelta(days=7)).isoformat()}"
+    assert [r["forecast_id"] for r in listed] == [
+        current,
+        f"w2-{(this_sunday - timedelta(days=14)).isoformat()}",
+    ]
+    assert service.latest_id() == current and listed[0]["latest"]
+    assert [r["forecast_id"] for r in service.upcoming()] == [f"w2-{this_sunday.isoformat()}"]
+
+
+def test_a_week_that_cannot_be_verified_says_why(platform, monkeypatch):
+    """A week CHIRPS should cover but that could not be verified shows the reason and when it
+    was tried, instead of waiting silently."""
+    from backend.app.services.forecasts import KIND, ForecastService
+    from climate_engine.inputs import chirps
+
+    record = {
+        "forecast_id": "w2-2026-09-06",
+        "initialization": "2026-09-06T00:00:00+00:00",
+        "generation_time": "2026-09-06T21:00:00+00:00",
+        "valid_start": "2026-09-13T00:00:00+00:00",
+        "valid_end": "2026-09-20T00:00:00+00:00",
+        "model_id": "refit",
+        "verification_status": "unavailable",
+    }
+    platform.repo.save(KIND, record, record["forecast_id"])
+
+    def unreachable(self, forecast_id, actor, server=None):
+        raise chirps.CHIRPSUnavailable(
+            "The CHIRPS server could not be reached after 3 attempts: https://data.chc.ucsb.edu "
+            "timed out"
+        )
+
+    monkeypatch.setattr(ForecastService, "verify_with_chirps", unreachable)
+    result = ForecastService(platform).verify_due("scheduled automation", compare=False)
+    assert result["verified"] == [] and len(result["waiting"]) == 1
+    held = platform.repo.get(KIND, record["forecast_id"])
+    assert held["verification_note"].startswith("The CHIRPS server could not be reached")
+    assert "https://" not in held["verification_note"] and held["verification_tried_at"]

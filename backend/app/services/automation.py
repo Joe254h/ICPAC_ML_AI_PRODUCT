@@ -39,19 +39,21 @@ CAPABILITIES = (
 )
 
 
-#: Finished weeks are verified every day from this hour (EAT): CHIRPS covers a week about
-#: two days after it ends, so a week is verified as soon as it can be.
-VERIFY_HOUR_EAT = 12
+#: Finished weeks are verified every this many hours (EAT): CHIRPS covers a week about two
+#: days after it ends, so a week is verified as soon as it can be, and a pass that could not
+#: reach CHIRPS is tried again within hours, not the next day.
+VERIFY_EVERY_HOURS = 3
 
 
 def scheduler_settings() -> dict:
     """The weekly forecast is made at the end of each Sunday (00:00 EAT on Monday) from that
-    Sunday's 00 UTC ECMWF run, which is published by about 11:00 EAT; every day at noon EAT
-    the weeks that have ended are verified against CHIRPS."""
+    Sunday's 00 UTC ECMWF run, which is published by about 11:00 EAT. It is shown from the
+    Sunday its week begins. Every three hours the weeks that have ended are verified against
+    CHIRPS."""
     return {
         "enabled": os.getenv("AUTOMATION_SCHEDULER_ENABLED", "false") == "true",
         "when": "Every Sunday at midnight (00:00 EAT on Monday)",
-        "verification": f"Every day from {VERIFY_HOUR_EAT}:00 EAT",
+        "verification": f"Every {VERIFY_EVERY_HOURS} hours, as soon as CHIRPS covers a week",
         "action": "end_to_end",
     }
 
@@ -105,13 +107,12 @@ class AutomationService:
             )
         ]
         local = stamp.astimezone(EAT)
-        if local.hour >= VERIFY_HOUR_EAT:
-            later.append(
-                (
-                    OperationRequest(action="verify_due", actor="scheduled automation"),
-                    f"icpac/verify/{local.date()}",
-                )
+        later.append(
+            (
+                OperationRequest(action="verify_due", actor="scheduled automation"),
+                f"icpac/verify/{local.date()}/{local.hour // VERIFY_EVERY_HOURS}",
             )
+        )
         for request, name in later:
             try:
                 service.start(request, identifier=str(uuid5(NAMESPACE_URL, name)))
@@ -281,8 +282,9 @@ class AutomationService:
             "schedule": (
                 "enabled" if cfg["enabled"] else "disabled",
                 "The weekly forecast is made every Sunday at midnight (00:00 EAT on Monday) "
-                "from that Sunday's ECMWF run; missed weeks are not replayed. Every day from "
-                f"{VERIFY_HOUR_EAT}:00 EAT the weeks that have ended are verified against CHIRPS."
+                "from that Sunday's ECMWF run and shown from the Sunday its week begins; missed "
+                f"weeks are not replayed. Every {VERIFY_EVERY_HOURS} hours the weeks that have "
+                "ended are verified against CHIRPS."
                 if cfg["enabled"]
                 else "The weekly schedule is switched off in the server configuration.",
             ),

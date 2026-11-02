@@ -131,6 +131,9 @@ export type ForecastRun = {
   synthetic: boolean;
   protected_test_period: boolean;
   verification_status: "available" | "unavailable";
+  /** Why a week CHIRPS should cover is not verified yet, and when it was last tried. */
+  verification_note?: string;
+  verification_tried_at?: string;
   season?: string;
   created_at: string;
   created_by: string;
@@ -422,6 +425,12 @@ export type ReferenceComparison = {
   licence?: string;
   checked_at: string;
 };
+
+/** A weekly forecast made for a week that has not begun; listed from its Sunday. */
+export type UpcomingForecast = Pick<
+  ForecastRun,
+  "forecast_id" | "initialization" | "valid_start" | "valid_end"
+>;
 
 export type OperationAction =
   | "fetch_ecmwf"
