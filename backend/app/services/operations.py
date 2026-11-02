@@ -485,7 +485,9 @@ class OperationService:
         )
         # Why the weeks that have ended are not verified yet (each once).
         reasons = [
-            entry.split(": ", 1)[1] for entry in result["waiting"] + result["failed"] if ": " in entry
+            entry.split(": ", 1)[1]
+            for entry in result["waiting"] + result["failed"]
+            if ": " in entry
         ]
         for reason in list(dict.fromkeys(reasons))[:3]:
             self._log(operation_id, f"Not verified yet: {_plain(Exception(reason))}")

@@ -417,11 +417,11 @@ def main() -> None:
 
     # The ECMWF runs follow the weekly forecast's Sundays; the dekads end before today.
     observed = args.date or datetime.now(timezone.utc).date() - timedelta(days=1)
-    newest = weekly_run(observed)
-    day = args.date or newest - timedelta(days=7)
+    latest = weekly_run(observed)
+    day = args.date or latest - timedelta(days=7)
     shutil.rmtree(args.root, ignore_errors=True)
     build(args.root, day, args.members, pressure_steps=tuple(args.pressure_steps))
-    past = [newest - timedelta(days=14 + 7 * week) for week in range(PAST_WEEKS)]
+    past = [latest - timedelta(days=14 + 7 * week) for week in range(PAST_WEEKS)]
     for run in past:
         build(args.root, run, args.members, wetness=wetness(run))
     # Each run's Week-2 window: days 7 to 13 after it.
