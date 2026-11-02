@@ -29,7 +29,8 @@ def check_availability(platform, actor: str, initialization: date | None = None)
     checked = now()
     record: dict[str, Any] = {"checked_at": checked, "checked_by": actor, "mirrors": []}
     try:
-        latest = initialization or ecmwf_opendata.latest_initialization()
+        # Two weeks back: this week's forecast comes from the Sunday run a week before.
+        latest = initialization or ecmwf_opendata.latest_initialization(lookback_days=14)
     except ecmwf_opendata.ECMWFDataUnavailable as exc:
         record.update(status="unavailable", initialization=None, error=str(exc))
         record["summary"] = "No ECMWF run with complete Week-2 rainfall was found in the indexes"
