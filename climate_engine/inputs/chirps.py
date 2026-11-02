@@ -103,6 +103,9 @@ def settings() -> dict[str, Any]:
 
 
 PRODUCTS = ("final", "prelim")
+#: The first bytes of a GeoTIFF (little or big endian); compressed files start with gzip's.
+TIFF_MAGIC = (b"II*\x00", b"MM\x00*")
+GZIP_MAGIC = b"\x1f\x8b"
 DAILY_FILE = re.compile(r"chirps-v2\.0\.\d{4}\.\d{2}\.\d{2}\.tif(?:\.gz)?")
 
 
@@ -276,6 +279,9 @@ class Server:
         self.sleep = sleep
         self.name = name
         self.listings: dict[str, set[str]] = {}
+        #: What each directory page held: "listed", "missing" (no page) or "empty" (a page
+        #: naming no file), with the page's title.
+        self.folders: dict[str, tuple[str, str]] = {}
 
     def fetch(self, url: str) -> bytes | None:
         cfg = settings()
@@ -310,7 +316,27 @@ class Server:
             page = self.fetch(url)
             text = page.decode("utf-8", "replace") if page else ""
             self.listings[key] = set(pattern.findall(text))
+            title = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+            state = "listed" if self.listings[key] else ("missing" if page is None else "empty")
+            self.folders[url] = (state, " ".join(title[1].split())[:80] if title else "")
         return self.listings[key]
+
+    def unlisted(self, day: date) -> str:
+        """Why a day held by no product's listing could not be read, in words."""
+        held = [self.folders.get(directory(product, day.year)) for product in PRODUCTS]
+        if any(state and state[0] == "listed" for state in held):
+            return f"CHIRPS for {day.isoformat()} is not published yet"
+        pages = [title for state in held if state for title in [state[1]] if title]
+        said = f" (the page says: {pages[0]})" if pages else ""
+        found = (
+            "could not be found"
+            if all(state and state[0] == "missing" for state in held)
+            else "name no daily files" + said
+        )
+        return (
+            f"CHIRPS for {day.isoformat()} was not found: the CHIRPS server's {day.year} "
+            f"folders of daily files {found}, and the file is not at its usual address either"
+        )
 
     def daily_url(self, product: str, day: date) -> str | None:
         """The URL of a day's file in a product, if the server lists it."""
@@ -391,17 +417,7 @@ def fetch_day(
         missing = int(np.count_nonzero(~np.isfinite(grid.to_cells(field_))))
         return field_, Day(day, attrs["product"], attrs["url"], attrs["sha256"], missing)
 
-    if held and held[1].get("product") == "final":
-        return from_held()
-    for product in PRODUCTS:
-        url = server.daily_url(product, day)
-        if url is None:
-            continue
-        if held and held[1].get("product") == product:
-            return from_held()
-        data = server.fetch(url)
-        if data is None:
-            continue
+    def keep(product: str, url: str, data: bytes) -> tuple[np.ndarray, Day]:
         values, latitude, longitude, nodata = read_geotiff(data)
         nodata = nodata if nodata is not None else float(settings()["nodata"])
         field_ = on_model_grid(values, latitude, longitude, grid, nodata)
@@ -410,8 +426,33 @@ def fetch_day(
         if store is not None:
             _save_day(store, info, *crop(values, latitude, longitude), nodata)
         return field_, info
+
+    if held and held[1].get("product") == "final":
+        return from_held()
+    listed = False
+    for product in PRODUCTS:
+        url = server.daily_url(product, day)
+        if url is None:
+            continue
+        listed = True
+        if held and held[1].get("product") == product:
+            return from_held()
+        data = server.fetch(url)
+        if data is None:
+            continue
+        return keep(product, url, data)
     if held:
         return from_held()
+    if not listed:
+        # No listing names the day (index pages that changed or cannot be read): the file
+        # is tried at the address CHC publishes it under, and kept only if it is a raster.
+        for product in PRODUCTS:
+            for name in day_names(day):
+                url = directory(product, day.year) + name
+                data = server.fetch(url)
+                if data and (data[:2] == GZIP_MAGIC or data[:4] in TIFF_MAGIC):
+                    return keep(product, url, data)
+        raise CHIRPSUnavailable(server.unlisted(day))
     raise CHIRPSUnavailable(f"CHIRPS for {day.isoformat()} is not published yet")
 
 

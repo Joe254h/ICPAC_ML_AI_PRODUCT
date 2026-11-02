@@ -319,6 +319,35 @@ def test_chirps_week_total_reads_final_else_preliminary(env, tmp_path):
         chirps.week_total(start, env.grid, chirps.Server(chc({})))
 
 
+def test_chirps_days_are_found_at_their_address_when_the_listing_names_none(env, tmp_path):
+    """The CHIRPS server's folder pages stopped naming the daily files (every week waited
+    with "not published yet", even August's): each day is then read at the address CHC
+    publishes it under, and only a raster is kept."""
+    start = date(2026, 8, 16)
+    files = week(start, "final", 2.0)
+
+    def blocked_index(url: str) -> bytes | None:
+        if url.endswith("/"):
+            return b"<html><head><title>Access denied</title></head><body></body></html>"
+        return files.get(url)
+
+    result = chirps.week_total(start, env.grid, chirps.Server(blocked_index), tmp_path)
+    assert result.products == ["final"]
+    cells = env.grid.to_cells(result.values)
+    assert np.allclose(cells[np.isfinite(cells)], 7 * 2.0)
+
+    def nothing(url: str) -> bytes | None:
+        return blocked_index(url) if url.endswith("/") else b"<html>Access denied</html>"
+
+    with pytest.raises(chirps.CHIRPSUnavailable) as raised:
+        chirps.week_total(start, env.grid, chirps.Server(nothing))
+    assert "folders of daily files name no daily files (the page says: Access denied)" in str(
+        raised.value
+    )
+    with pytest.raises(chirps.CHIRPSUnavailable, match="could not be found"):
+        chirps.week_total(start, env.grid, chirps.Server(chc({})))
+
+
 def test_chirps_days_held_are_reused_until_the_final_product_appears(env, tmp_path):
     start = date(2026, 9, 21)
     store = tmp_path / "chirps"
