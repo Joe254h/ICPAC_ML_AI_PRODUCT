@@ -755,4 +755,12 @@ export type VerifiedWeek = {
     status: string;
     domain: Partial<Record<Variant, Metrics>>;
   }[];
+  /** The observations that scored the week, CHIRPS first (newer services). */
+  sources?: string[];
+  /** The week's observation of record: CHIRPS, else ARC 2.0, else RFE 2.0. */
+  best?: {
+    source: string;
+    name: string;
+    domain: Partial<Record<Variant, Metrics>>;
+  };
 };

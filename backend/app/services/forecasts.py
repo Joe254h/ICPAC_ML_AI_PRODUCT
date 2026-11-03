@@ -57,6 +57,7 @@ from climate_engine.verification import (
     CellStatistics,
     critical_correlation,
     pooled_metrics,
+    season_of,
 )
 
 KIND = "forecast_run"
@@ -68,8 +69,6 @@ REFERENCE_KIND = "reference_comparison"
 #: The observed rainfall a verified week can be mapped from: CHIRPS, the reference of
 #: record, then the further references.
 OBSERVED = {"chirps": "CHIRPS", **daily_references.NAMES}
-#: Forecasts whose week has ended whose further comparisons are (re)tried in each pass.
-REFERENCE_RECENT = 16
 #: How long one pass may spend starting further comparisons: they never hold up the
 #: forecast or its CHIRPS verification, and the rest continue in the next pass.
 REFERENCE_BUDGET_SECONDS = 600
@@ -1034,19 +1033,28 @@ class ForecastService:
         }
 
     def compare_due(self, actor: str, progress: Callable[[str], None] | None = None) -> int:
-        """Compare the recent forecasts whose week has ended (verified, or waiting for
-        CHIRPS) with ARC 2.0, RFE 2.0 and GPM IMERG, for at most REFERENCE_BUDGET_SECONDS;
-        the rest continue in the next pass. Returns the number of comparisons held."""
+        """Compare every forecast of record whose week has ended (verified, or waiting for
+        CHIRPS) with ARC 2.0, RFE 2.0 and GPM IMERG, weeks no observation has scored first,
+        for at most REFERENCE_BUDGET_SECONDS; the rest continue in the next pass. Returns the
+        number of comparisons held."""
         say = progress or (lambda _text: None)
         compared = 0
-        recent = [
+        ended = [
             r
-            for r in self.runs()
-            if r.get("verification_status") == "available"
-            or chirps.window_complete(datetime.fromisoformat(r["valid_start"]).date())
+            for r in self.listing()
+            if r["of_record"]
+            and (
+                r.get("verification_status") == "available"
+                or chirps.window_complete(datetime.fromisoformat(r["valid_start"]).date())
+            )
         ]
+        # A week no observation has scored yet goes first (CHIRPS could not be read for it);
+        # newest first within each group.
+        ended.sort(
+            key=lambda r: bool(r["checked_against"]) or r.get("verification_status") == "available"
+        )
         began = time.monotonic()
-        for record in recent[:REFERENCE_RECENT]:
+        for record in ended:
             held = self.references(record["forecast_id"])
             if len(held) == len(daily_references.REFERENCES) and all(
                 c["status"] == "available" for c in held
@@ -1070,15 +1078,37 @@ class ForecastService:
     def verified_weeks(self, limit: int = 52) -> list[dict[str, Any]]:
         """Every verified week, newest first (each ECMWF run's forecast of record): the
         scores of each layer against CHIRPS (MAE, RMSE, bias, Pearson r, over the domain's
-        cells), and against ARC 2.0, RFE 2.0 and GPM IMERG where they were compared."""
+        cells), and against ARC 2.0, RFE 2.0 and GPM IMERG where they were compared. A week
+        CHIRPS could not be read for is verified by the others; ``best`` is the observation
+        of record for the week: CHIRPS, else ARC 2.0, else RFE 2.0, else GPM IMERG."""
         weeks: list[dict[str, Any]] = []
         for record in self.listing():
-            if not record["of_record"] or record.get("verification_status") != "available":
+            if not record["of_record"] or (
+                record.get("verification_status") != "available" and not record["checked_against"]
+            ):
                 continue
-            try:
-                verification = self.verification(record["forecast_id"])
-            except (KeyError, ValueError, FileNotFoundError, Unavailable):
-                continue  # a package that fails its checks is not scored
+            verification: dict[str, Any] = {}
+            if record.get("verification_status") == "available":
+                try:
+                    verification = self.verification(record["forecast_id"])
+                except (KeyError, ValueError, FileNotFoundError, Unavailable):
+                    continue  # a package that fails its checks is not scored
+            references = [
+                {
+                    "source": c["source"],
+                    "name": c["name"],
+                    "status": c["status"],
+                    "domain": c.get("domain") or {},
+                }
+                for c in self.references(record["forecast_id"])
+            ]
+            observed = [
+                {"source": "chirps", "name": "CHIRPS", "domain": verification.get("domain")},
+                *references,
+            ]
+            best = next((o for o in observed if o["domain"]), None)
+            if best is None:
+                continue
             weeks.append(
                 {
                     "forecast_id": record["forecast_id"],
@@ -1088,17 +1118,12 @@ class ForecastService:
                     "model_id": record.get("model_id"),
                     "method": record.get("method"),
                     "primary_layer": record.get("primary_layer"),
-                    "season": verification.get("season"),
+                    "season": verification.get("season")
+                    or season_of(datetime.fromisoformat(record["valid_start"]).date()),
                     "chirps": verification.get("domain") or {},
-                    "references": [
-                        {
-                            "source": c["source"],
-                            "name": c["name"],
-                            "status": c["status"],
-                            "domain": c.get("domain") or {},
-                        }
-                        for c in self.references(record["forecast_id"])
-                    ],
+                    "references": references,
+                    "sources": [o["name"] for o in observed if o["domain"]],
+                    "best": {k: best[k] for k in ("source", "name", "domain")},
                 }
             )
             if len(weeks) == limit:

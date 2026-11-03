@@ -42,6 +42,7 @@ import {
   ModelScope,
   VerificationState,
   chirpsFrom,
+  observedBy,
   ofRecord,
   primaryOf,
 } from "@/features/operational/shared";
@@ -69,17 +70,32 @@ function mean(values: (number | null | undefined)[]): number | null {
 function WeeklyScores() {
   const weeks = useApi<VerifiedWeek[]>("/verification/weeks");
   const [layer, setLayer] = useState<Variant>("hybrid");
-  const [observed, setObserved] = useState("chirps");
+  const [observed, setObserved] = useState("best");
   if (weeks.status === 404) return null; // an older service
   const rows = (weeks.data ?? []).map((week) => {
+    const best =
+      week.best ??
+      (Object.keys(week.chirps).length
+        ? { source: "chirps", name: "CHIRPS", domain: week.chirps }
+        : undefined);
     const reference =
-      observed === "chirps"
-        ? week.chirps
-        : week.references.find((r) => r.source === observed)?.domain;
-    return { week, scores: reference?.[layer], raw: reference?.raw };
+      observed === "best"
+        ? best?.domain
+        : observed === "chirps"
+          ? week.chirps
+          : week.references.find((r) => r.source === observed)?.domain;
+    return {
+      week,
+      by: observed === "best" ? best?.name : undefined,
+      scores: reference?.[layer],
+      raw: reference?.raw,
+    };
   });
   const scored = rows.filter((r) => r.scores);
-  const names: Record<string, string> = { chirps: "CHIRPS" };
+  const names: Record<string, string> = {
+    best: "Best available (CHIRPS, else ARC 2.0, else RFE 2.0)",
+    chirps: "CHIRPS",
+  };
   for (const week of weeks.data ?? [])
     for (const r of week.references) names[r.source] = r.name;
   return (
@@ -131,6 +147,7 @@ function WeeklyScores() {
               <tr>
                 <th>Week (days 8–14)</th>
                 <th>ECMWF run</th>
+                {observed === "best" && <th>Observed by</th>}
                 <th className="num">RMSE</th>
                 <th className="num">MAE</th>
                 <th className="num">Pearson r</th>
@@ -139,7 +156,7 @@ function WeeklyScores() {
               </tr>
             </thead>
             <tbody>
-              {scored.map(({ week, scores, raw }) => (
+              {scored.map(({ week, by, scores, raw }) => (
                 <tr key={week.forecast_id}>
                   <td className="strong">
                     <Link href={`/forecasts?id=${week.forecast_id}`}>
@@ -147,6 +164,7 @@ function WeeklyScores() {
                     </Link>
                   </td>
                   <td>{day(week.initialization)}</td>
+                  {observed === "best" && <td>{by}</td>}
                   <td className="num">{num(scores?.rmse, 2)} mm</td>
                   <td className="num">{num(scores?.mae, 2)} mm</td>
                   <td className="num">{num(scores?.correlation, 3)}</td>
@@ -159,7 +177,7 @@ function WeeklyScores() {
             </tbody>
             <tfoot>
               <tr>
-                <td className="strong" colSpan={2}>
+                <td className="strong" colSpan={observed === "best" ? 3 : 2}>
                   Mean of {scored.length} week{scored.length === 1 ? "" : "s"}
                 </td>
                 <td className="num strong">
@@ -195,11 +213,12 @@ function LatestVerified({ run }: { run: ForecastRun }) {
   const detail = useApi<ForecastDetail>(`/forecasts/${run.forecast_id}`);
   if (!detail.data) return <Skeleton height={200} />;
   const v = detail.data.verification;
+  const sources = observedBy(run);
   return (
     <Card
       eyebrow="Latest verified week"
       title={validDays(run.valid_start, run.valid_end)}
-      subtitle={`${detail.data.model?.model_name ?? "Forecast"}, from the ECMWF run of ${day(run.initialization)}, scored against CHIRPS${v.season ? ` · ${SEASONS[v.season] ?? v.season}` : ""}`}
+      subtitle={`${detail.data.model?.model_name ?? "Forecast"}, from the ECMWF run of ${day(run.initialization)}, scored against ${sources.join(", ")}${v.season ? ` · ${SEASONS[v.season] ?? v.season}` : ""}${sources.includes("CHIRPS") ? "" : ". CHIRPS, the reference, could not be read for this week yet"}`}
       action={
         <LinkButton
           href={`/forecasts?id=${run.forecast_id}`}
@@ -217,7 +236,7 @@ function LatestVerified({ run }: { run: ForecastRun }) {
           establish skill.
         </p>
       )}
-      {v.domain && <OtherObservations run={run} chirps={v.domain} />}
+      <OtherObservations run={run} chirps={v.domain ?? undefined} />
     </Card>
   );
 }
@@ -228,20 +247,25 @@ function OtherObservations({
   chirps,
 }: {
   run: ForecastRun;
-  chirps: Partial<Record<Variant, Metrics>>;
+  chirps?: Partial<Record<Variant, Metrics>>;
 }) {
   const compared = useApi<ReferenceComparison[]>(
     `/forecasts/${run.forecast_id}/references`,
   );
-  const variant: Variant = chirps[primaryOf(run)]
-    ? primaryOf(run)
-    : ((Object.keys(chirps)[0] as Variant | undefined) ?? "raw");
+  const variant: Variant =
+    !chirps || chirps[primaryOf(run)]
+      ? primaryOf(run)
+      : ((Object.keys(chirps)[0] as Variant | undefined) ?? "raw");
   const rows: {
     name: string;
     metrics?: Metrics;
     reason?: string;
   }[] = [
-    { name: "CHIRPS (reference)", metrics: chirps[variant] },
+    {
+      name: "CHIRPS (reference)",
+      metrics: chirps?.[variant],
+      reason: "Not read for this week yet",
+    },
     ...(compared.data ?? []).map((c) => ({
       name: c.name,
       metrics: c.status === "available" ? c.domain?.[variant] : undefined,
@@ -586,10 +610,9 @@ export default function Verification() {
   });
   // Each ECMWF run's forecast of record: a week is listed once.
   const issued = ofRecord(runs.data ?? []);
-  const verified = issued.filter((r) => r.verification_status === "available");
-  const unverified = issued.filter(
-    (r) => r.verification_status !== "available",
-  );
+  // Verified by CHIRPS, ARC 2.0 or RFE 2.0: CHIRPS first, the others when it cannot be read.
+  const verified = issued.filter((r) => observedBy(r).length > 0);
+  const unverified = issued.filter((r) => observedBy(r).length === 0);
   // A week CHIRPS should cover already is overdue (it shows why); the others wait for it.
   const overdue = unverified.filter(
     (r) => chirpsFrom(r).getTime() <= Date.now(),
@@ -605,7 +628,7 @@ export default function Verification() {
         <PageBanner
           title="Forecast Verification"
           crumbs={[{ label: "Verification" }]}
-          subtitle="Each Week-2 forecast is scored against CHIRPS once its week has passed: the seven daily CHIRPS totals are summed on the same 0.05° grid and compared cell by cell."
+          subtitle="Each Week-2 forecast is scored once its week has passed against CHIRPS, ARC 2.0 and RFE 2.0: CHIRPS is the reference, and when it cannot be read the others verify the week. The seven daily totals are summed on the same 0.05° grid and compared cell by cell."
           actions={
             <Button
               variant="amber"
@@ -632,15 +655,15 @@ export default function Verification() {
           <div className="stat">
             <div className="label">Verified forecasts</div>
             <div className="value">{runs.data ? verified.length : "…"}</div>
-            <div className="hint">Against CHIRPS v2.0</div>
+            <div className="hint">Against CHIRPS, ARC 2.0 or RFE 2.0</div>
           </div>
           <div className="stat amber">
-            <div className="label">Awaiting CHIRPS</div>
+            <div className="label">Awaiting observations</div>
             <div className="value">{runs.data ? waiting.length : "…"}</div>
             <div className="hint">
               {overdue.length
                 ? `${overdue.length} more not verified yet: see below`
-                : "CHIRPS lags about two days"}
+                : "The observations lag about two days"}
             </div>
           </div>
           <div className="stat">
@@ -650,7 +673,7 @@ export default function Verification() {
             </div>
             <div className="hint">
               {nextScores
-                ? "When CHIRPS covers the next forecast week"
+                ? "When the observations cover the next forecast week"
                 : "No forecast is waiting"}
             </div>
           </div>
@@ -679,7 +702,7 @@ export default function Verification() {
         )}
         <Card
           title="Seasonal scores"
-          subtitle="Cell-based scores pooled over every verified week of each season."
+          subtitle="Cell-based scores pooled over every week verified against CHIRPS, the reference, in each season."
           action={
             <label
               style={{
@@ -726,7 +749,7 @@ export default function Verification() {
                   <tr>
                     <th>Valid period</th>
                     <th>ECMWF run</th>
-                    <th>CHIRPS expected from</th>
+                    <th>Observations expected from</th>
                     <th>Status</th>
                   </tr>
                 </thead>

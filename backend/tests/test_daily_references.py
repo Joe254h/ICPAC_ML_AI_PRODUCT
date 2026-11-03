@@ -244,3 +244,9 @@ def test_a_week_chirps_cannot_be_read_for_is_checked_against_the_others(
     shown = env.client.get(f"/forecasts/{fid}/observed/map?source=arc2")
     assert shown.status_code == 200 and shown.content[:4] == b"\x89PNG"
     assert env.client.get(f"/forecasts/{fid}/observed/map?source=chirps").status_code != 200
+    # The week counts as verified by ARC 2.0 and RFE 2.0, ARC 2.0 being its observation of
+    # record until CHIRPS can be read.
+    weeks = env.client.get("/verification/weeks").json()
+    week = next(w for w in weeks if w["forecast_id"] == fid)
+    assert week["sources"] == ["ARC 2.0", "RFE 2.0"] and week["chirps"] == {}
+    assert week["best"]["name"] == "ARC 2.0" and week["best"]["domain"]["hybrid"]["rmse"] >= 0

@@ -42,9 +42,12 @@ ready). Every three hours the schedule also verifies the weeks that have ended: 
 covers a week about two days after it ends, so last week's forecast (Sunday to Saturday)
 is verified on about the Tuesday after; a week CHIRPS should cover but that could not be
 verified says why (for example, the CHIRPS server could not be reached) and when it was
-last tried. Meanwhile a week that has ended is checked against ARC 2.0, RFE 2.0 and GPM
-IMERG (other servers): the archive marks it "Checked · ARC 2.0, RFE 2.0" and its page
-shows the forecast beside them, until CHIRPS, the reference, can be read. A server that
+last tried. Every week that has ended is verified against CHIRPS, ARC 2.0 and RFE 2.0 (and
+GPM IMERG with an Earthdata token): CHIRPS is the reference, and when it cannot be read the
+others verify the week. The archive shows which observations verified it ("Verified ·
+ARC 2.0, RFE 2.0"), the Verification page counts and scores each week against the best
+available one (CHIRPS, else ARC 2.0, else RFE 2.0), and the seasonal scores stay pooled
+over the CHIRPS-verified weeks. A server that
 refuses the requests (401, 403 or 429) is left alone for six hours, and every request
 names the service (`ICPAC-Week2-Forecast-Verification/1.0 (+PUBLIC_SITE_URL)`), so a
 data provider can see who is asking. Times on the website are in EAT.

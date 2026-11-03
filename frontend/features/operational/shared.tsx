@@ -260,8 +260,20 @@ export function chirpsFrom(run: Pick<ForecastRun, "valid_end">): Date {
   return new Date(Date.parse(run.valid_end) + CHIRPS_LAG_DAYS * 86_400_000);
 }
 
-/** A forecast's verification: verified, waiting for CHIRPS, or (once CHIRPS should cover
- * its week) not verified yet, with the reason and when it was last tried. */
+/** The observations that scored a forecast's week: CHIRPS (the reference) first, then
+ * ARC 2.0, RFE 2.0 and GPM IMERG. */
+export function observedBy(
+  run: Pick<ForecastRun, "verification_status" | "checked_against">,
+): string[] {
+  return [
+    ...(run.verification_status === "available" ? ["CHIRPS"] : []),
+    ...(run.checked_against ?? []),
+  ];
+}
+
+/** A forecast's verification: by CHIRPS, ARC 2.0 and RFE 2.0, whichever have observed its
+ * week (CHIRPS first; the others when it cannot be read); waiting for them; or, once they
+ * should cover the week, not verified yet, with the reason and when it was last tried. */
 export function VerificationState({
   run,
 }: {
@@ -274,25 +286,29 @@ export function VerificationState({
     | "checked_against"
   >;
 }) {
-  if (run.verification_status === "available")
-    return <Status tone="ok">Verified · CHIRPS</Status>;
+  const sources = observedBy(run);
   const due = chirpsFrom(run);
-  if (run.checked_against?.length && due.getTime() <= Date.now())
+  const ready = due.getTime() <= Date.now();
+  if (sources.length)
     return (
       <>
-        <Status tone="info">Checked · {run.checked_against.join(", ")}</Status>
-        <span className="muted-line">
-          CHIRPS, the reference, not read yet
-          {run.verification_note ? `: ${run.verification_note}` : ""}. Tried
-          every 3 hours.
-        </span>
+        <Status tone="ok">Verified · {sources.join(", ")}</Status>
+        {!sources.includes("CHIRPS") && (
+          <span className="muted-line">
+            {ready
+              ? `CHIRPS not read yet${run.verification_note ? `: ${run.verification_note}` : ""}. Tried every 3 hours.`
+              : `CHIRPS from ${day(due.toISOString())}.`}
+          </span>
+        )}
       </>
     );
-  if (due.getTime() > Date.now())
+  if (!ready)
     return (
       <>
-        <Status tone="progress">Awaiting CHIRPS</Status>
-        <span className="muted-line">from {day(due.toISOString())}</span>
+        <Status tone="progress">Awaiting observations</Status>
+        <span className="muted-line">
+          CHIRPS, ARC 2.0 and RFE 2.0 from {day(due.toISOString())}
+        </span>
       </>
     );
   return (
@@ -301,9 +317,9 @@ export function VerificationState({
       <span className="muted-line">
         {run.verification_note
           ? `${run.verification_note}. `
-          : "Not tried yet since CHIRPS covered it. "}
+          : "Not tried yet since the observations covered it. "}
         {run.verification_tried_at
-          ? `Tried ${dateTime(run.verification_tried_at)}; tried again every 3 hours.`
+          ? `Tried ${dateTime(run.verification_tried_at)}; CHIRPS, ARC 2.0 and RFE 2.0 are tried again every 3 hours.`
           : "Tried every 3 hours."}
       </span>
     </>
