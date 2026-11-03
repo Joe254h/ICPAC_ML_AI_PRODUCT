@@ -90,7 +90,8 @@ function Row({
       </td>
       <td>
         <VerificationState run={run} />
-        {run.verification_status === "available" && (
+        {(run.verification_status === "available" ||
+          !!run.checked_against?.length) && (
           <Link
             className="link-amber"
             style={{ display: "block", marginTop: 6 }}

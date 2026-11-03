@@ -134,6 +134,8 @@ export type ForecastRun = {
   /** Why a week CHIRPS should cover is not verified yet, and when it was last tried. */
   verification_note?: string;
   verification_tried_at?: string;
+  /** The other observations a week was compared with (ARC 2.0, RFE 2.0, GPM IMERG). */
+  checked_against?: string[];
   season?: string;
   created_at: string;
   created_by: string;

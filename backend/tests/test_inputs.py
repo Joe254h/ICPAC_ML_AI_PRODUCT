@@ -405,6 +405,29 @@ def test_chirps_downloads_retry_with_a_doubling_wait():
     assert waits == []
 
 
+def test_a_server_that_refuses_the_service_is_left_alone_for_hours():
+    """CHIRPS answered 404, then 403 Forbidden, then stopped accepting connections from the
+    service: asking again file after file is what gets a client blocked. After a refusal
+    the server is not asked again in that pass, and requests name the service."""
+    calls: list[str] = []
+
+    def forbidden(url: str) -> bytes | None:
+        calls.append(url)
+        request = httpx.Request("GET", url)
+        raise httpx.HTTPStatusError(
+            "403", request=request, response=httpx.Response(403, request=request)
+        )
+
+    server = chirps.Server(forbidden, sleep=lambda _s: None)
+    with pytest.raises(chirps.CHIRPSUnavailable, match=r"refused the requests \(403 Forbidden\)"):
+        server.fetch("https://refusing.example/a.tif")
+    with pytest.raises(chirps.CHIRPSUnavailable, match="left alone for a few hours"):
+        chirps.Server(forbidden).fetch("https://refusing.example/b.tif")
+    assert calls == ["https://refusing.example/a.tif"]
+    with chirps.client() as session:
+        assert session.headers["User-Agent"].startswith("ICPAC-Week2-Forecast-Verification/")
+
+
 def test_an_unreachable_server_costs_one_set_of_retries_per_pass():
     """After a server never answered, its other files fail at once (no 11-minute wait per
     file); a server that answered with an error is not marked."""

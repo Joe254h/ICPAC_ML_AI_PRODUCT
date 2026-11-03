@@ -6,6 +6,7 @@ import zipfile
 from datetime import date, timedelta
 from pathlib import Path
 
+import httpx
 import numpy as np
 import pytest
 import xarray as xr
@@ -207,3 +208,39 @@ def test_verified_forecasts_are_compared_with_the_further_references(env, fast_m
     monkeypatch.setattr(chirps, "download", chc({}))
     again = service.compare_references(record["forecast_id"], "Joe N")
     assert [c["status"] for c in again] == ["available", "available", "unavailable"]
+
+
+def test_a_week_chirps_cannot_be_read_for_is_checked_against_the_others(
+    env, fast_maps, monkeypatch
+):
+    """The CHIRPS server refused the service for days; a week that has ended is meanwhile
+    checked against ARC 2.0 and RFE 2.0 (another server), shown beside its forecast, and
+    verified against CHIRPS once it can be read."""
+    record = run(env, "2026-09-14")
+    fid = record["forecast_id"]
+    start = date(2026, 9, 21)
+    days = [start + timedelta(days=n) for n in range(7)]
+    references = {**cpc_files("arc2", days, 3.0), **cpc_files("rfe2", days, 6.0)}
+
+    def refused(url: str) -> bytes | None:
+        if "chc" in url or "chirps" in url.lower():
+            request = httpx.Request("GET", url)
+            raise httpx.HTTPStatusError(
+                "403", request=request, response=httpx.Response(403, request=request)
+            )
+        return references.get(url)
+
+    monkeypatch.setattr(chirps, "download", refused)
+    monkeypatch.delenv("EARTHDATA_TOKEN", raising=False)
+    seen_from(monkeypatch, date(2026, 10, 15))
+    service = forecasts.ForecastService(env.platform)
+    result = service.verify_due("Joe N")
+    assert result["verified"] == [] and result["compared"] == 2
+    held = env.platform.repo.get(forecasts.KIND, fid)
+    assert "refused the requests (403 Forbidden)" in held["verification_note"]
+    listed = next(r for r in env.client.get("/forecasts").json() if r["forecast_id"] == fid)
+    assert listed["verification_status"] == "unavailable"
+    assert listed["checked_against"] == ["ARC 2.0", "RFE 2.0"]
+    shown = env.client.get(f"/forecasts/{fid}/observed/map?source=arc2")
+    assert shown.status_code == 200 and shown.content[:4] == b"\x89PNG"
+    assert env.client.get(f"/forecasts/{fid}/observed/map?source=chirps").status_code != 200

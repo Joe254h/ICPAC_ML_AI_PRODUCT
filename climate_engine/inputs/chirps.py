@@ -192,6 +192,10 @@ CONNECT_SECONDS = 15
 #: After a server could not be reached, its other files fail at once for this long, so one
 #: unreachable server costs one set of retries per pass, not one per file.
 UNREACHABLE_SECONDS = 30 * 60
+#: A server that refused the service (401, 403, or 429: too many requests) is left alone for
+#: this long: asking again at once, file after file, is what gets a client blocked.
+REFUSED_SECONDS = 6 * 3600
+REFUSALS = (401, 403, 429)
 _unreachable: dict[str, tuple[float, str]] = {}
 
 
@@ -221,9 +225,17 @@ class _IPv4(httpcore.SyncBackend):
         raise last
 
 
+def user_agent() -> str:
+    """Who is asking: the service and its website, so a data provider can see the requests
+    come from one forecast service (and reach its operators) rather than an anonymous
+    script."""
+    site = os.getenv("PUBLIC_SITE_URL") or "https://www.icpac.net"
+    return f"ICPAC-Week2-Forecast-Verification/1.0 (+{site.rstrip('/')})"
+
+
 def client() -> httpx.Client:
     """An HTTP client for the observation servers: IPv4, a short connect timeout and a long
-    read timeout. A configured proxy (HTTPS_PROXY) is still used."""
+    read timeout, naming the service. A configured proxy (HTTPS_PROXY) is still used."""
     transport = httpx.HTTPTransport()
     transport._pool = httpcore.ConnectionPool(
         ssl_context=httpx.create_ssl_context(), network_backend=_IPv4()
@@ -232,6 +244,7 @@ def client() -> httpx.Client:
         timeout=httpx.Timeout(120, connect=CONNECT_SECONDS),
         follow_redirects=True,
         transport=transport,
+        headers={"User-Agent": user_agent()},
     )
 
 
@@ -247,8 +260,13 @@ def download(url: str) -> bytes | None:
 
 def _transient(exc: Exception) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code >= 500 or exc.response.status_code == 429
+        return exc.response.status_code >= 500
     return isinstance(exc, (httpx.TransportError, OSError))
+
+
+def _refused(exc: Exception) -> bool:
+    """The server answered that it will not serve this client (now)."""
+    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in REFUSALS
 
 
 def _unreached(exc: Exception) -> bool:
@@ -261,6 +279,14 @@ def _reason(exc: Exception) -> str:
         return f"it did not accept a connection within {CONNECT_SECONDS} seconds"
     if isinstance(exc, httpx.ConnectError):
         return f"the connection failed ({exc})"
+    if isinstance(exc, httpx.HTTPStatusError):
+        response = exc.response
+        answer = f"{response.status_code} {response.reason_phrase}".strip()
+        if response.status_code == 429:
+            return f"it asked for fewer requests ({answer})"
+        if response.status_code in REFUSALS:
+            return f"it refused the requests ({answer})"
+        return f"it answered {answer}"
     return str(exc)
 
 
@@ -282,6 +308,9 @@ class Server:
         #: What each directory page held: "listed", "missing" (no page) or "empty" (a page
         #: naming no file), with the page's title.
         self.folders: dict[str, tuple[str, str]] = {}
+        #: Years whose files were not at their usual address either: not asked again in
+        #: this pass.
+        self.unaddressed: set[int] = set()
 
     def fetch(self, url: str) -> bytes | None:
         cfg = settings()
@@ -289,6 +318,11 @@ class Server:
         host = urlsplit(url).netloc
         held = _unreachable.get(host)
         if held and held[0] > time.monotonic():
+            if held[1].startswith("it refused") or held[1].startswith("it asked"):
+                raise CHIRPSUnavailable(
+                    f"The {self.name} server {held[1].removeprefix('it ')}; it is left alone "
+                    "for a few hours before it is asked again"
+                )
             raise CHIRPSUnavailable(
                 f"The {self.name} server could not be reached a few minutes ago ({held[1]}); "
                 "it is tried again in the next pass"
@@ -298,7 +332,9 @@ class Server:
                 return (self.get or download)(url)
             except Exception as exc:
                 if not _transient(exc) or attempt == attempts:
-                    if _unreached(exc):
+                    if _refused(exc):
+                        _unreachable[host] = (time.monotonic() + REFUSED_SECONDS, _reason(exc))
+                    elif _unreached(exc):
                         _unreachable[host] = (time.monotonic() + UNREACHABLE_SECONDS, _reason(exc))
                     raise CHIRPSUnavailable(
                         f"The {self.name} server could not be reached after {attempt} "
@@ -445,13 +481,16 @@ def fetch_day(
         return from_held()
     if not listed:
         # No listing names the day (index pages that changed or cannot be read): the file
-        # is tried at the address CHC publishes it under, and kept only if it is a raster.
-        for product in PRODUCTS:
-            for name in day_names(day):
+        # is tried at the address CHC publishes it under (the final product compressed, the
+        # preliminary one not), and kept only if it is a raster. When that fails too, the
+        # other days of the year are not asked for in this pass.
+        if day.year not in server.unaddressed:
+            for product, name in zip(PRODUCTS, day_names(day), strict=True):
                 url = directory(product, day.year) + name
                 data = server.fetch(url)
                 if data and (data[:2] == GZIP_MAGIC or data[:4] in TIFF_MAGIC):
                     return keep(product, url, data)
+            server.unaddressed.add(day.year)
         raise CHIRPSUnavailable(server.unlisted(day))
     raise CHIRPSUnavailable(f"CHIRPS for {day.isoformat()} is not published yet")
 

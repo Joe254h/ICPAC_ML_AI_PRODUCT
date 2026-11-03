@@ -271,11 +271,23 @@ export function VerificationState({
     | "valid_end"
     | "verification_note"
     | "verification_tried_at"
+    | "checked_against"
   >;
 }) {
   if (run.verification_status === "available")
     return <Status tone="ok">Verified · CHIRPS</Status>;
   const due = chirpsFrom(run);
+  if (run.checked_against?.length && due.getTime() <= Date.now())
+    return (
+      <>
+        <Status tone="info">Checked · {run.checked_against.join(", ")}</Status>
+        <span className="muted-line">
+          CHIRPS, the reference, not read yet
+          {run.verification_note ? `: ${run.verification_note}` : ""}. Tried
+          every 3 hours.
+        </span>
+      </>
+    );
   if (due.getTime() > Date.now())
     return (
       <>

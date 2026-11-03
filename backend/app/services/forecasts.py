@@ -68,8 +68,8 @@ REFERENCE_KIND = "reference_comparison"
 #: The observed rainfall a verified week can be mapped from: CHIRPS, the reference of
 #: record, then the further references.
 OBSERVED = {"chirps": "CHIRPS", **daily_references.NAMES}
-#: Verified forecasts whose further comparisons are (re)tried in each pass.
-REFERENCE_RECENT = 8
+#: Forecasts whose week has ended whose further comparisons are (re)tried in each pass.
+REFERENCE_RECENT = 16
 #: How long one pass may spend starting further comparisons: they never hold up the
 #: forecast or its CHIRPS verification, and the rest continue in the next pass.
 REFERENCE_BUDGET_SECONDS = 600
@@ -574,7 +574,23 @@ class ForecastService:
             for r in runs
         ]
         newest = _newest_weekly(listed, now)
-        return [{**r, "latest": r is newest} for r in listed]
+        # The further references each week was compared with (shown while CHIRPS is not).
+        checked: dict[str, list[str]] = {}
+        for comparison in self.repo.list(REFERENCE_KIND):
+            if comparison.get("status") == "available":
+                checked.setdefault(comparison["forecast_id"], []).append(comparison["source"])
+        return [
+            {
+                **r,
+                "latest": r is newest,
+                "checked_against": [
+                    daily_references.NAMES[source]
+                    for source in daily_references.REFERENCES
+                    if source in checked.get(r["forecast_id"], [])
+                ],
+            }
+            for r in listed
+        ]
 
     def upcoming(self) -> list[dict[str, Any]]:
         """The weekly forecasts made for a week that has not begun (held back from the
@@ -757,15 +773,15 @@ class ForecastService:
         return cache.read_bytes()
 
     def observed_png(self, forecast_id: str, source: str) -> bytes:
-        """What fell in a verified forecast's week, from CHIRPS or a further reference (ARC
-        2.0, RFE 2.0, GPM IMERG), as a map in the forecast map's style and colour scale, to
-        be shown beside it."""
+        """What fell in a forecast's week, from CHIRPS (once verified) or a further reference
+        it was compared with (ARC 2.0, RFE 2.0, GPM IMERG), as a map in the forecast map's
+        style and colour scale, to be shown beside it."""
         from climate_engine.cartography import weekly_maps
 
         if source not in OBSERVED:
             raise ValueError(f"Observed rainfall sources: {', '.join(OBSERVED)}")
         record = self.repo.get(KIND, forecast_id)
-        if record.get("verification_status") != "available":
+        if source == "chirps" and record.get("verification_status") != "available":
             raise Unavailable("This week has not been verified against CHIRPS yet")
         cache = package_root().parent / "map-previews" / forecast_id / f"observed-v1-{source}.png"
         if not cache.exists():
@@ -1018,12 +1034,17 @@ class ForecastService:
         }
 
     def compare_due(self, actor: str, progress: Callable[[str], None] | None = None) -> int:
-        """Compare the recent verified forecasts with ARC 2.0, RFE 2.0 and GPM IMERG, for
-        at most REFERENCE_BUDGET_SECONDS; the rest continue in the next pass. Returns the
-        number of comparisons held."""
+        """Compare the recent forecasts whose week has ended (verified, or waiting for
+        CHIRPS) with ARC 2.0, RFE 2.0 and GPM IMERG, for at most REFERENCE_BUDGET_SECONDS;
+        the rest continue in the next pass. Returns the number of comparisons held."""
         say = progress or (lambda _text: None)
         compared = 0
-        recent = [r for r in self.runs() if r.get("verification_status") == "available"]
+        recent = [
+            r
+            for r in self.runs()
+            if r.get("verification_status") == "available"
+            or chirps.window_complete(datetime.fromisoformat(r["valid_start"]).date())
+        ]
         began = time.monotonic()
         for record in recent[:REFERENCE_RECENT]:
             held = self.references(record["forecast_id"])
@@ -1096,14 +1117,15 @@ class ForecastService:
         return [held[s] for s in daily_references.REFERENCES if s in held]
 
     def compare_references(self, forecast_id: str, actor: str) -> list[dict[str, Any]]:
-        """Score a verified forecast against each further reference whose seven days are
-        published: the same metrics as its CHIRPS verification, recorded apart from it
-        (CHIRPS stays the reference of record). A comparison is made once; a reference not
+        """Score a forecast whose week has ended against each further reference whose seven
+        days are published: the same metrics as its CHIRPS verification, recorded apart
+        from it (CHIRPS stays the reference of record). A week CHIRPS cannot be read for yet
+        is checked against them meanwhile. A comparison is made once; a reference not
         published yet, or not configured, is recorded with why and tried again later."""
         record = self.repo.get(KIND, forecast_id)
-        if record.get("verification_status") != "available":
-            raise ValueError("Only a forecast verified against CHIRPS is compared further")
         start = datetime.fromisoformat(record["valid_start"]).date()
+        if record.get("verification_status") != "available" and not chirps.window_complete(start):
+            raise ValueError("A forecast is compared once its week has ended")
         days = chirps.window_days(start)
         grid = operational.authoritative_grid()
         run: ForecastRun | None = None

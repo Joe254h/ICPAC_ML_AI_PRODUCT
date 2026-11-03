@@ -96,8 +96,11 @@ export default function ObservedComparison({
 }) {
   const verified =
     detail.verification.status === "available" && !!detail.verification.domain;
+  // A week that has ended may have been checked against the other observations while
+  // CHIRPS could not be read yet.
+  const ended = Date.parse(detail.valid_end) <= Date.now();
   const compared = useApi<ReferenceComparison[]>(
-    verified ? `/forecasts/${detail.forecast_id}/references` : null,
+    verified || ended ? `/forecasts/${detail.forecast_id}/references` : null,
   );
   const layers = layersOf(detail);
   const [layer, setLayer] = useState<Variant>(primaryOf(detail));
@@ -108,17 +111,21 @@ export default function ObservedComparison({
     if (window.location.hash === `#${OBSERVED_ANCHOR}`)
       document.getElementById(OBSERVED_ANCHOR)?.scrollIntoView();
   }, [detail.forecast_id]);
-  if (!verified) return <NotObservedYet detail={detail} />;
   const observations: Observation[] = [
-    {
-      source: "chirps",
-      name: "CHIRPS",
-      scores: detail.verification.domain ?? {},
-    },
+    ...(verified
+      ? [
+          {
+            source: "chirps" as const,
+            name: "CHIRPS",
+            scores: detail.verification.domain ?? {},
+          },
+        ]
+      : []),
     ...(compared.data ?? [])
       .filter((c) => c.status === "available" && c.domain)
       .map((c) => ({ source: c.source, name: c.name, scores: c.domain ?? {} })),
   ];
+  if (!observations.length) return <NotObservedYet detail={detail} />;
   const shown =
     observations.find((o) => o.source === source) ?? observations[0];
   const week = validDays(detail.valid_start, detail.valid_end);
@@ -127,7 +134,7 @@ export default function ObservedComparison({
       id={OBSERVED_ANCHOR}
       eyebrow="Forecast and observed"
       title="What fell that week"
-      subtitle={`${week}: the forecast beside the observed rainfall, on the same colour scale. RMSE and MAE are the forecast's errors against each observation, over the member states.`}
+      subtitle={`${week}: the forecast beside the observed rainfall, on the same colour scale. RMSE and MAE are the forecast's errors against each observation, over the member states.${verified ? "" : " CHIRPS, the reference, could not be read for this week yet; it is added when it can."}`}
       action={
         <Tabs
           label="Forecast layer"
