@@ -300,7 +300,10 @@ def test_without_the_atmos37_inputs_a_run_holds_raw_and_mbc(env, monkeypatch):
     assert packages.check_package(directory) == []
     assert not (directory / "maps" / "hybrid.png").exists()
     with xr.open_dataset(directory / "forecast.nc") as stored:
-        assert set(stored.data_vars) == {"raw", "mbc", "domain_mask"}
+        layers = {v for v in stored.data_vars if not str(v).startswith("members_above_")}
+        assert layers == {"raw", "mbc", "domain_mask"}
+        # The member probabilities follow the layers produced: none for MBC + AI/ML.
+        assert "members_above_mbc" in stored and "members_above_hybrid" not in stored
     client = env.client
     detail = client.get(f"/forecasts/{fid}").json()
     assert set(detail["maps"]) == {"mbc", "raw"} and detail["primary_layer"] == "mbc"

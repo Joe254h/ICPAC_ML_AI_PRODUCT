@@ -810,6 +810,8 @@ export type ProbabilisticSummary = {
   members?: number;
   cases?: number;
   layer: Variant;
+  /** The layers the verified weeks hold probabilities for, best first. */
+  layers_available?: Variant[];
   threshold_mm: number;
   thresholds_mm: number[];
   source: string;

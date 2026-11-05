@@ -430,13 +430,14 @@ def install(app: FastAPI, dependency) -> None:
 
     @app.get("/verification/probabilistic")
     def probabilistic_verification(
-        layer: Literal["raw", "mbc", "hybrid"] = "hybrid",
+        layer: Literal["raw", "mbc", "hybrid"] | None = None,
         threshold: float = Query(25.0, gt=0, le=500),
         source: Literal["best", "chirps", "arc2", "rfe2", "imerg"] = "best",
         platform=Depends(dependency),
     ) -> dict:
         """Reliability diagram, ROC curve, AUC and Brier skill of the ensemble's chance of
-        exceeding ``threshold`` mm in the week, with 95% intervals."""
+        exceeding ``threshold`` mm in the week, with 95% intervals; without ``layer``, the
+        best layer the verified weeks hold."""
         return ForecastService(platform).probabilistic_summary(layer, threshold, source)
 
     @app.get("/verification/seasonal")

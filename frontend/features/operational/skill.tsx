@@ -95,7 +95,7 @@ function RegionalMeans({ summary }: { summary: VerificationSummary }) {
     );
     return {
       ...baseOption,
-      grid: { left: 52, right: 20, top: 44, bottom: 34 },
+      grid: { left: 52, right: 20, top: 62, bottom: 34 },
       tooltip: {
         trigger: "axis" as const,
         valueFormatter: (value: unknown) =>
@@ -272,6 +272,7 @@ function intervalBars(
     data,
     encode: { x: 0, y: [1, 2] },
     z: 1,
+    itemStyle: { color: colour },
     tooltip: { show: false },
     renderItem: (_params, api) => {
       const x = Number(api.value(0));
@@ -358,6 +359,7 @@ function Reliability({ data }: { data: ProbabilisticSummary }) {
           ],
           symbol: "none",
           lineStyle: { color: AXIS, type: "dashed" as const, width: 1 },
+          itemStyle: { color: AXIS },
         },
         intervalBars(
           "95% interval",
@@ -403,6 +405,7 @@ function Sharpness({ data }: { data: ProbabilisticSummary }) {
     const total = rows.reduce((a, r) => a + r.count, 0) || 1;
     return {
       ...baseOption,
+      legend: { show: false },
       grid: { left: 52, right: 20, top: 16, bottom: 30 },
       tooltip: {
         trigger: "axis" as const,
@@ -476,6 +479,7 @@ function Roc({ data }: { data: ProbabilisticSummary }) {
           ],
           symbol: "none",
           lineStyle: { color: AXIS, type: "dashed" as const, width: 1 },
+          itemStyle: { color: AXIS },
         },
         intervalBars(
           "95% interval of the hit rate",
@@ -546,11 +550,12 @@ function range(interval: [number, number] | null | undefined, digits: number) {
 /** Reliability diagram and ROC curve of the chance that the week's rainfall exceeds a
  * threshold, from how many of the ensemble's members exceed it. */
 export function ProbabilisticVerification() {
-  const [layer, setLayer] = useState<Variant>("hybrid");
+  // No layer picked yet: the service answers for the best one the weeks hold.
+  const [picked, setPicked] = useState<Variant | null>(null);
   const [threshold, setThreshold] = useState(25);
   const [source, setSource] = useState("best");
   const result = useApi<ProbabilisticSummary>(
-    `/verification/probabilistic?layer=${layer}&threshold=${threshold}&source=${source}`,
+    `/verification/probabilistic?${picked ? `layer=${picked}&` : ""}threshold=${threshold}&source=${source}`,
   );
   if (result.status === 404) return null; // an older service
   const data = result.data;
@@ -580,8 +585,8 @@ export function ProbabilisticVerification() {
         <label className="field">
           Forecast layer
           <select
-            value={layer}
-            onChange={(e) => setLayer(e.target.value as Variant)}
+            value={picked ?? result.data?.layer ?? "hybrid"}
+            onChange={(e) => setPicked(e.target.value as Variant)}
           >
             {LAYERS.map((v) => (
               <option key={v} value={v}>

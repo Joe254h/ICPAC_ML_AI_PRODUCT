@@ -168,8 +168,9 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   await expect(
     means.getByRole("img", { name: /Regional mean Week-2 rainfall/ }),
   ).toBeVisible();
+  // The past weeks here hold raw ECMWF and MBC (their runs have no upper-air fields).
   await expect(
-    means.locator("tbody tr").filter({ hasText: "MBC + AI/ML" }).first(),
+    means.locator("tbody tr").filter({ hasText: "MBC" }).first(),
   ).toContainText(" to ");
   const roc = page.locator("section.card").filter({
     has: page.getByRole("heading", { name: /Reliability and ROC/ }),
@@ -177,6 +178,8 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   await expect(
     roc.locator(".stat").filter({ hasText: "Weeks" }).locator(".value"),
   ).toHaveText("4");
+  // The best layer the weeks hold is shown first.
+  await expect(roc.getByLabel("Forecast layer")).toHaveValue("mbc");
   await expect(
     roc.getByRole("img", { name: /Reliability diagram/ }),
   ).toBeVisible();

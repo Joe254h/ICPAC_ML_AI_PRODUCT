@@ -101,7 +101,9 @@ def test_open_data_forecast_runs_end_to_end_through_the_api(client, tmp_path):
     with xr.open_dataset(path) as stored:
         data = stored.load()
     grid = load_grid(MASK)
-    assert set(data.data_vars) == {"raw", "mbc", "domain_mask"}
+    layers = {v for v in data.data_vars if not str(v).startswith("members_above_")}
+    assert layers == {"raw", "mbc", "domain_mask"}
+    assert int(data.attrs["probability_members"]) >= 2
     fields = {name: data[name].values.astype(np.float64) for name in ("raw", "mbc")}
     for values in fields.values():
         assert np.isfinite(values[grid.mask]).sum() == 205_999

@@ -1191,19 +1191,29 @@ class ForecastService:
         return {"source": source, "weeks": len(weeks), "layers": layers, "series": series}
 
     def probabilistic_summary(
-        self, layer: str = "hybrid", threshold: float = 25.0, source: str = "best"
+        self, layer: str | None = None, threshold: float = 25.0, source: str = "best"
     ) -> dict[str, Any]:
         """Reliability, ROC, AUC and Brier skill of the chance that the week's rainfall
         exceeds ``threshold`` mm, pooled over the verified weeks that hold member
-        probabilities, with 95% intervals from resampling the weeks."""
+        probabilities, with 95% intervals from resampling the weeks. Without ``layer``,
+        the best layer the weeks hold: MBC + AI/ML, else MBC, else raw ECMWF."""
         from climate_engine.verification import probabilistic
 
         order = ["chirps", *daily_references.REFERENCES]
         key = f"{float(threshold):g}"
+        weeks = self.verified_weeks()
+        held_layers = {
+            name
+            for week in weeks
+            for tables in (week.get("probabilistic") or {}).values()
+            for name in (tables.get("tables") or {})
+        }
+        available = [name for name in ("hybrid", "mbc", "raw") if name in held_layers]
+        layer = layer or (available[0] if available else "hybrid")
         picked: list[list[list[int]]] = []
         used: dict[str, int] = {}
         members = 0
-        for week in self.verified_weeks():
+        for week in weeks:
             held = week.get("probabilistic") or {}
             for name in order if source == "best" else [source]:
                 tables: dict[str, Any] = held.get(name) or {}
@@ -1219,6 +1229,7 @@ class ForecastService:
         return {
             **result,
             "layer": layer,
+            "layers_available": available,
             "threshold_mm": float(threshold),
             "source": source,
             "observed_by": used,

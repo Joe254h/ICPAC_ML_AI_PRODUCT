@@ -71,6 +71,9 @@ def test_a_forecast_keeps_member_probabilities_and_its_verification_scores_them(
     assert len(tables["tables"]["hybrid"]["25"]) == members + 1
     summary = env.client.get("/verification/probabilistic?layer=hybrid&threshold=25").json()
     assert summary["weeks"] == 1 and summary["observed_by"] == {"CHIRPS": 1}
+    # Without a layer, the best one the weeks hold.
+    default = env.client.get("/verification/probabilistic?threshold=25").json()
+    assert default["layer"] == "hybrid" and default["layers_available"] == ["hybrid", "mbc", "raw"]
     assert len(summary["reliability"]) == members + 1 and "auc_interval" not in summary
     means = env.client.get("/verification/summary").json()
     assert means["weeks"] == 1 and means["series"][0]["observed_by"] == "CHIRPS"
