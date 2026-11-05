@@ -160,6 +160,31 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   const stat = page.locator(".stat").filter({ hasText: "Verified forecasts" });
   await expect(stat.locator(".value")).toHaveText("4");
   await expect(page.getByRole("cell", { name: /SON/ }).first()).toBeVisible();
+  // The regional mean with the scores' 95% intervals, and the ensemble's reliability
+  // diagram and ROC curve from the members' probabilities.
+  const means = page.locator("section.card").filter({
+    has: page.getByRole("heading", { name: /Regional mean and scores/ }),
+  });
+  await expect(
+    means.getByRole("img", { name: /Regional mean Week-2 rainfall/ }),
+  ).toBeVisible();
+  await expect(
+    means.locator("tbody tr").filter({ hasText: "MBC + AI/ML" }).first(),
+  ).toContainText(" to ");
+  const roc = page.locator("section.card").filter({
+    has: page.getByRole("heading", { name: /Reliability and ROC/ }),
+  });
+  await expect(
+    roc.locator(".stat").filter({ hasText: "Weeks" }).locator(".value"),
+  ).toHaveText("4");
+  await expect(
+    roc.getByRole("img", { name: /Reliability diagram/ }),
+  ).toBeVisible();
+  await expect(roc.getByRole("img", { name: /ROC curve/ })).toBeVisible();
+  if (process.env.SCREENSHOTS) {
+    await means.screenshot({ path: `${process.env.SCREENSHOTS}/means.png` });
+    await roc.screenshot({ path: `${process.env.SCREENSHOTS}/roc.png` });
+  }
   // The latest verified week is also scored against ARC 2.0, RFE 2.0 and GPM IMERG.
   const others = page.locator("tbody tr");
   await expect(others.filter({ hasText: "CHIRPS (reference)" })).toBeVisible();
@@ -170,11 +195,9 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   await expect(page.getByText("Not verified yet.")).toBeVisible();
   // It says when its comparison with the observed rainfall comes, and links to the
   // newest verified week's.
-  const pending = page
-    .locator("section.card")
-    .filter({
-      has: page.getByRole("heading", { name: "What fell that week" }),
-    });
+  const pending = page.locator("section.card").filter({
+    has: page.getByRole("heading", { name: "What fell that week" }),
+  });
   await expect(pending).toContainText(
     "appears here once CHIRPS covers the week",
   );
@@ -196,11 +219,9 @@ test("past weeks are forecast and verified, and the correlation map appears", as
     .getByRole("link", { name: "Forecast vs observed →" })
     .click();
   await expect(page).toHaveURL(/#observed$/);
-  const observed = page
-    .locator("section.card")
-    .filter({
-      has: page.getByRole("heading", { name: "What fell that week" }),
-    });
+  const observed = page.locator("section.card").filter({
+    has: page.getByRole("heading", { name: "What fell that week" }),
+  });
   await expect(
     observed.getByRole("img", { name: /Rainfall observed by CHIRPS/ }),
   ).toBeVisible({ timeout: 60_000 });

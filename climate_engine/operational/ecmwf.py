@@ -190,7 +190,8 @@ def _finite(values: np.ndarray, name: str) -> np.ndarray:
     return values
 
 
-def rainfall_features(ds: xr.Dataset, grid: DomainGrid, cfg: dict) -> dict[str, np.ndarray]:
+def _member_cells(ds: xr.Dataset, grid: DomainGrid, cfg: dict):
+    """Each perturbed member's Week-2 total (mm) on the domain cells, in turn."""
     ecmwf = cfg["ecmwf"]
     rain = ecmwf["rainfall"]
     member_dim, step_dim = ecmwf["member_dim"], ecmwf["step_dim"]
@@ -204,8 +205,6 @@ def rainfall_features(ds: xr.Dataset, grid: DomainGrid, cfg: dict) -> dict[str, 
     on_grid = on_model_grid(tp, grid)
     if not on_grid and rain["regrid"] is None:
         raise ValueError("tp is not on the model grid; set ecmwf.rainfall.regrid explicitly")
-    stats = EnsembleStats()
-    negative = 0
     for member in ensemble_members(tp, cfg):
         week2 = week2_accumulation(
             tp.sel({member_dim: member}), rain["accumulation"], step_dim, start, end
@@ -216,7 +215,19 @@ def rainfall_features(ds: xr.Dataset, grid: DomainGrid, cfg: dict) -> dict[str, 
             if resolution:
                 week2 = coarsen(week2, float(resolution))
             cells = to_cells(week2, grid, rain["regrid"]).values
-        cells = _finite(cells * scale, f"tp member {member}")
+        yield _finite(cells * scale, f"tp member {member}")
+
+
+def member_totals(ds: xr.Dataset, grid: DomainGrid, cfg: dict) -> np.ndarray:
+    """The perturbed members' Week-2 totals (mm), (members, cells), for the forecast
+    probabilities."""
+    return np.stack([np.asarray(cells, dtype=np.float32) for cells in _member_cells(ds, grid, cfg)])
+
+
+def rainfall_features(ds: xr.Dataset, grid: DomainGrid, cfg: dict) -> dict[str, np.ndarray]:
+    stats = EnsembleStats()
+    negative = 0
+    for cells in _member_cells(ds, grid, cfg):
         negative += int((cells < 0).sum())
         stats.add(cells)
     mean, spread = stats.result()

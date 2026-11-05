@@ -47,6 +47,10 @@ import {
   primaryOf,
 } from "@/features/operational/shared";
 import PastWeeks, { PAST_WEEKS } from "@/features/operational/past-weeks";
+import {
+  ProbabilisticVerification,
+  SkillSummary,
+} from "@/features/operational/skill";
 
 const SEASONS: Record<string, string> = {
   DJF: "December – February",
@@ -692,6 +696,8 @@ export default function Verification() {
           )
         )}
         <WeeklyScores />
+        <SkillSummary />
+        <ProbabilisticVerification />
         {runs.data && verified.length < PAST_WEEKS && (
           <PastWeeks
             onDone={() => {

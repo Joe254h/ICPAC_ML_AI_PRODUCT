@@ -40,6 +40,8 @@ const NIGHT: Record<string, string> = {
   "#e8ecef": "#2a3530",
   "#cfd6db": "#3b4842",
   "#adb5bd": "#6c7570",
+  // MBC's orange, a step darker on the dark page (validated lightness band and contrast).
+  "#e0802f": "#d0731f",
 };
 
 /** A chart option with its text and grid colours for the dark theme; data colours and

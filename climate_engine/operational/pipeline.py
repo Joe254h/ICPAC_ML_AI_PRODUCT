@@ -28,7 +28,12 @@ from climate_engine.operational.settings import (
 )
 from climate_engine.preprocessing.hybrid7_pc17 import InputContractError
 from climate_engine.provenance import code_version, configuration_checksum
-from climate_engine.verification import continuous_metrics, season_of, sufficient_statistics
+from climate_engine.verification import (
+    continuous_metrics,
+    probabilistic,
+    season_of,
+    sufficient_statistics,
+)
 
 FIELDS = {
     "raw": "Raw ECMWF ensemble-mean Week-2 rainfall",
@@ -101,6 +106,75 @@ class ForecastRun:
             "verification": self.verification,
             "notes": self.notes,
         }
+
+
+def member_probabilities(
+    rainfall: xr.Dataset, grid: DomainGrid, cfg: dict, model: Any, result: InferenceResult
+) -> tuple[dict[str, np.ndarray], int]:
+    """How many members exceed each probability threshold, per layer, (thresholds, cells).
+
+    The raw members are moved onto the forecast's own ensemble mean (their spread is kept),
+    MBC's monthly ratio is applied to each member as to the mean, and the AI/ML layer's
+    correction of the mean (MBC + AI/ML minus MBC) is added to each MBC member."""
+    from climate_engine.operational.ecmwf import member_totals
+
+    members = member_totals(rainfall, grid, cfg).astype(np.float64)
+    raw = np.asarray(result.raw, dtype=np.float64)
+    members = np.maximum(members - members.mean(axis=0) + raw, 0.0)
+    layers = {"raw": members}
+    ratios = getattr(model, "mbc", None)
+    if ratios is not None and result.mbc is not None:
+        month = int(result.metadata["mbc_month"])
+        mbc = np.stack([ratios.apply(member, month) for member in members])
+        layers["mbc"] = mbc
+        if result.hybrid is not None:
+            shift = np.asarray(result.hybrid, dtype=np.float64) - np.asarray(result.mbc)
+            layers["hybrid"] = np.maximum(mbc + shift, 0.0)
+    counts = {name: probabilistic.exceedance_counts(values) for name, values in layers.items()}
+    return counts, len(members)
+
+
+def add_probabilities(
+    dataset: xr.Dataset, counts: dict[str, np.ndarray], members: int, grid: DomainGrid
+) -> xr.Dataset:
+    """The members above each threshold, per layer, as int8 grids (-1 outside the domain)."""
+    dims = ("threshold_mm", "latitude", "longitude")
+    for layer, values in counts.items():
+        grids = np.stack([grid.to_grid(row) for row in values])
+        dataset[probabilistic.VARIABLE.format(layer=layer)] = (
+            dims,
+            np.where(np.isfinite(grids), grids, -1).astype(np.int8),
+            {
+                "long_name": f"{layer} members above each Week-2 threshold",
+                "units": "members",
+                "members": int(members),
+            },
+        )
+    dataset = dataset.assign_coords(
+        threshold_mm=np.asarray(probabilistic.THRESHOLDS_MM, dtype=np.float32)
+    )
+    dataset.attrs["probability_members"] = int(members)
+    return dataset
+
+
+def probability_tables(run: "ForecastRun", observed_cells: np.ndarray, grid: DomainGrid):
+    """The week's contingency tables of each layer and threshold, when the package holds
+    the member counts (forecasts made since they were added)."""
+    dataset = run.dataset
+    members = int(dataset.attrs.get("probability_members") or 0)
+    names = {
+        layer: probabilistic.VARIABLE.format(layer=layer)
+        for layer in RAINFALL_LAYERS
+        if probabilistic.VARIABLE.format(layer=layer) in dataset.data_vars
+    }
+    if not members or not names:
+        return None
+    thresholds = [float(t) for t in dataset["threshold_mm"].values]
+    counts = {
+        layer: np.stack([grid.to_cells(row) for row in dataset[name].values])
+        for layer, name in names.items()
+    }
+    return probabilistic.tables(counts, members, observed_cells, thresholds)
 
 
 def build_dataset(result: InferenceResult, grid: DomainGrid) -> xr.Dataset:
@@ -210,6 +284,12 @@ def run_forecast(
         )
         checks = checks or rain.checks
     dataset = build_dataset(result, grid)
+    probability_note = None
+    try:
+        counts, members = member_probabilities(rainfall, grid, cfg, model, result)
+        dataset = add_probabilities(dataset, counts, members, grid)
+    except Exception as exc:  # the probabilities are an addition; the forecast stands
+        probability_note = f"The member probabilities could not be computed: {exc}"
     start, end = valid_window(cfg, initialization)
     record = model_record or {}
     forecast_id = f"w2-{cycle}-{uuid.uuid4().hex[:8]}"
@@ -294,6 +374,8 @@ def run_forecast(
         input_label=provenance["input_label"],
     )
     notes = list(result.metadata["notes"])
+    if probability_note:
+        notes.append(probability_note)
     if status == "in_progress":
         notes.append(f"The MBC + AI/ML forecast is in progress: it is waiting for {blocker}")
     elif status == "blocked":
@@ -385,7 +467,11 @@ def verify(
             }
     protected = run.provenance["protected_test_period"]
     valid_start = datetime.fromisoformat(run.provenance["forecast_valid_start"]).date()
+    extra = {}
+    if (tables := probability_tables(run, observed_cells, grid)) is not None:
+        extra["probabilistic"] = tables
     return {
+        **extra,
         "status": "available",
         "observation": observation or {},
         "season": season_of(valid_start),

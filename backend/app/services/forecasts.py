@@ -37,6 +37,7 @@ from climate_engine.inputs import chirps, daily_references, ecmwf_opendata
 from climate_engine.operational.ecmwf import PRESSURE_INPUTS
 from climate_engine.operational.pipeline import (
     OPEN_DATA_LABEL,
+    RAINFALL_LAYERS,
     ForecastRun,
     check_domain,
     default_run_root,
@@ -1093,6 +1094,7 @@ class ForecastService:
                     verification = self.verification(record["forecast_id"])
                 except (KeyError, ValueError, FileNotFoundError, Unavailable):
                     continue  # a package that fails its checks is not scored
+            held_references = self.references(record["forecast_id"])
             references = [
                 {
                     "source": c["source"],
@@ -1100,8 +1102,16 @@ class ForecastService:
                     "status": c["status"],
                     "domain": c.get("domain") or {},
                 }
-                for c in self.references(record["forecast_id"])
+                for c in held_references
             ]
+            probability_tables = {
+                source: tables
+                for source, tables in [
+                    ("chirps", verification.get("probabilistic")),
+                    *[(c["source"], c.get("probabilistic")) for c in held_references],
+                ]
+                if tables
+            }
             observed = [
                 {"source": "chirps", "name": "CHIRPS", "domain": verification.get("domain")},
                 *references,
@@ -1124,11 +1134,96 @@ class ForecastService:
                     "references": references,
                     "sources": [o["name"] for o in observed if o["domain"]],
                     "best": {k: best[k] for k in ("source", "name", "domain")},
+                    "probabilistic": probability_tables,
                 }
             )
             if len(weeks) == limit:
                 break
         return weeks
+
+    def verification_summary(self, source: str = "best") -> dict[str, Any]:
+        """The verified weeks' regional means and mean scores of each layer, with 95%
+        intervals from resampling the weeks, against one observation (``best``: each week's
+        observation of record, CHIRPS, else ARC 2.0, else RFE 2.0)."""
+        from climate_engine.verification import probabilistic
+
+        weeks = []
+        for week in self.verified_weeks():
+            if source == "best":
+                domain, name = week["best"]["domain"], week["best"]["name"]
+            elif source == "chirps":
+                domain, name = week["chirps"], "CHIRPS"
+            else:
+                held = next((r for r in week["references"] if r["source"] == source), None)
+                domain, name = (held or {}).get("domain") or {}, (held or {}).get("name", "")
+            if domain:
+                weeks.append((week, domain, name))
+        weeks.reverse()  # oldest first, for the series
+        layers: dict[str, Any] = {}
+        for layer in RAINFALL_LAYERS:
+            scored = [d[layer] for _, d, _ in weeks if layer in d]
+            if not scored:
+                continue
+            layers[layer] = {
+                key: probabilistic.mean_interval([m.get(key) for m in scored])
+                for key in ("rmse", "mae", "bias", "correlation", "forecast_mean", "observed_mean")
+            }
+            if layer != "raw":
+                paired = [(d[layer], d["raw"]) for _, d, _ in weeks if layer in d and "raw" in d]
+                layers[layer]["rmse_change_vs_raw"] = probabilistic.change_interval(
+                    [f.get("rmse") for f, _ in paired], [r.get("rmse") for _, r in paired]
+                )
+        series = [
+            {
+                "forecast_id": week["forecast_id"],
+                "valid_start": week["valid_start"],
+                "valid_end": week["valid_end"],
+                "observed_by": name,
+                "observed_mean": next(
+                    (d[layer]["observed_mean"] for layer in RAINFALL_LAYERS if layer in d), None
+                ),
+                "forecast_mean": {
+                    layer: d[layer]["forecast_mean"] for layer in d if layer in RAINFALL_LAYERS
+                },
+            }
+            for week, d, name in weeks
+        ]
+        return {"source": source, "weeks": len(weeks), "layers": layers, "series": series}
+
+    def probabilistic_summary(
+        self, layer: str = "hybrid", threshold: float = 25.0, source: str = "best"
+    ) -> dict[str, Any]:
+        """Reliability, ROC, AUC and Brier skill of the chance that the week's rainfall
+        exceeds ``threshold`` mm, pooled over the verified weeks that hold member
+        probabilities, with 95% intervals from resampling the weeks."""
+        from climate_engine.verification import probabilistic
+
+        order = ["chirps", *daily_references.REFERENCES]
+        key = f"{float(threshold):g}"
+        picked: list[list[list[int]]] = []
+        used: dict[str, int] = {}
+        members = 0
+        for week in self.verified_weeks():
+            held = week.get("probabilistic") or {}
+            for name in order if source == "best" else [source]:
+                tables: dict[str, Any] = held.get(name) or {}
+                week_table = (tables.get("tables") or {}).get(layer, {}).get(key)
+                if week_table:
+                    members = members or int(tables["members"])
+                    if int(tables["members"]) == members:
+                        picked.append(week_table)
+                        label = OBSERVED.get(name, name)
+                        used[label] = used.get(label, 0) + 1
+                    break
+        result = probabilistic.summary(picked, members) if members else {"weeks": 0}
+        return {
+            **result,
+            "layer": layer,
+            "threshold_mm": float(threshold),
+            "source": source,
+            "observed_by": used,
+            "thresholds_mm": list(probabilistic.THRESHOLDS_MM),
+        }
 
     def references(self, forecast_id: str) -> list[dict[str, Any]]:
         """A forecast's comparisons with the further references, in their order."""
@@ -1186,6 +1281,8 @@ class ForecastService:
                         "season": result["season"],
                         "licence": daily_references.settings(source)["licence"],
                     }
+                    if result.get("probabilistic"):
+                        comparison["probabilistic"] = result["probabilistic"]
             comparison.update(checked_at=now(), checked_by=actor)
             self.repo.save(REFERENCE_KIND, comparison, key)
             results.append(comparison)

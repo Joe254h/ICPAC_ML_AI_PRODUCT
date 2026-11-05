@@ -329,3 +329,27 @@ are written there as `.eml` files, whose links can be opened in the browser.
 The browser tests (`frontend/e2e`) start this mirror and run the weekly cycle through the
 Operations page before checking every page. The mirror's rainfall is a made-up pattern on
 a 2.5° grid: it exercises the chain, it is not weather.
+
+## Scores over the weeks: regional mean, confidence intervals, reliability and ROC
+
+The Verification page adds three views over the verified weeks, for the observation chosen
+(by default each week's best available one: CHIRPS, else ARC 2.0, else RFE 2.0):
+
+* **Regional mean.** The area mean of the week's rainfall over the eleven member states,
+  observed and forecast by each layer, week by week (`GET /verification/summary`).
+* **Mean scores with 95% confidence intervals.** RMSE, MAE, bias, Pearson r and the
+  regional mean of each layer, averaged over the weeks, and MBC's and MBC + AI/ML's RMSE
+  change against raw ECMWF. The intervals come from resampling whole weeks (a bootstrap of
+  2,000 samples): the cells of one week are strongly correlated in space, so resampling
+  cells would make them far too narrow. They need at least three weeks.
+* **Reliability diagram and ROC curve** (`GET /verification/probabilistic`). Each forecast
+  keeps, per grid cell, how many of the ten members exceed 10, 25 and 50 mm in the week
+  (`members_above_raw`, `members_above_mbc`, `members_above_hybrid` in `forecast.nc`). The
+  raw members are moved onto the forecast's own ensemble mean, MBC's monthly ratio is
+  applied to each member, and the AI/ML layer's correction of the mean is added to each MBC
+  member. Each verification keeps a small table per layer and threshold (forecast
+  probability k/10 against whether the event happened), which adds up exactly over weeks:
+  the reliability diagram (with how often each probability was forecast), the ROC curve, its
+  area, the Brier skill score against the observed frequency, and their 95% intervals by
+  resampling weeks. Forecasts made before this version hold no member counts: **Start
+  again** forecasts the last twelve weeks with them.

@@ -3,6 +3,7 @@ runs, packages, maps, countries and verification."""
 
 import asyncio
 from datetime import date
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import Response
@@ -417,6 +418,26 @@ def install(app: FastAPI, dependency) -> None:
     def verified_weeks(platform=Depends(dependency)) -> list[dict]:
         """Every verified week's scores against CHIRPS and the further observations."""
         return ForecastService(platform).verified_weeks()
+
+    @app.get("/verification/summary")
+    def verification_summary(
+        source: Literal["best", "chirps", "arc2", "rfe2", "imerg"] = "best",
+        platform=Depends(dependency),
+    ) -> dict:
+        """Regional means and mean scores of each layer over the verified weeks, with 95%
+        intervals from resampling the weeks."""
+        return ForecastService(platform).verification_summary(source)
+
+    @app.get("/verification/probabilistic")
+    def probabilistic_verification(
+        layer: Literal["raw", "mbc", "hybrid"] = "hybrid",
+        threshold: float = Query(25.0, gt=0, le=500),
+        source: Literal["best", "chirps", "arc2", "rfe2", "imerg"] = "best",
+        platform=Depends(dependency),
+    ) -> dict:
+        """Reliability diagram, ROC curve, AUC and Brier skill of the ensemble's chance of
+        exceeding ``threshold`` mm in the week, with 95% intervals."""
+        return ForecastService(platform).probabilistic_summary(layer, threshold, source)
 
     @app.get("/verification/seasonal")
     def seasonal_verification(

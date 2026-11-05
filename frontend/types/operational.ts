@@ -764,3 +764,74 @@ export type VerifiedWeek = {
     domain: Partial<Record<Variant, Metrics>>;
   };
 };
+
+/** A mean over the verified weeks with its 95% interval from resampling the weeks. */
+export type MeanInterval = {
+  mean: number | null;
+  interval: [number, number] | null;
+  weeks: number;
+};
+
+/** GET /verification/summary: regional means and mean scores of each layer. */
+export type VerificationSummary = {
+  source: string;
+  weeks: number;
+  layers: Partial<
+    Record<
+      Variant,
+      {
+        rmse: MeanInterval;
+        mae: MeanInterval;
+        bias: MeanInterval;
+        correlation: MeanInterval;
+        forecast_mean: MeanInterval;
+        observed_mean: MeanInterval;
+        rmse_change_vs_raw?: {
+          change: number | null;
+          interval: [number, number] | null;
+          weeks: number;
+        };
+      }
+    >
+  >;
+  series: {
+    forecast_id: string;
+    valid_start: string;
+    valid_end: string;
+    observed_by: string;
+    observed_mean: number | null;
+    forecast_mean: Partial<Record<Variant, number>>;
+  }[];
+};
+
+/** GET /verification/probabilistic: reliability, ROC and Brier skill for one threshold. */
+export type ProbabilisticSummary = {
+  weeks: number;
+  members?: number;
+  cases?: number;
+  layer: Variant;
+  threshold_mm: number;
+  thresholds_mm: number[];
+  source: string;
+  observed_by: Record<string, number>;
+  base_rate?: number | null;
+  base_rate_interval?: [number, number] | null;
+  auc?: number | null;
+  auc_interval?: [number, number] | null;
+  brier?: number | null;
+  brier_interval?: [number, number] | null;
+  brier_skill?: number | null;
+  brier_skill_interval?: [number, number] | null;
+  reliability?: {
+    probability: number;
+    observed: number | null;
+    count: number;
+    interval?: [number, number] | null;
+  }[];
+  roc?: {
+    members: number;
+    false_alarm_rate: number | null;
+    hit_rate: number | null;
+    hit_rate_interval?: [number, number] | null;
+  }[];
+};
