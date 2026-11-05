@@ -10,7 +10,7 @@ import httpx
 
 from backend.app.services import forecasts, operational
 from chatbot.agent import AnthropicModel, explain_refusal, provider_message
-from chatbot.providers import MockLLMProvider, provider, provider_name
+from chatbot.providers import MockLLMProvider, output_limit, provider, provider_name
 from climate_engine.core import ROOT, config
 from climate_engine.provenance import code_version
 
@@ -47,7 +47,7 @@ def answer_probe(url: str, key: str | None, model: str) -> str | None:
             json={
                 "model": model,
                 "messages": [{"role": "user", "content": "Reply with OK."}],
-                "max_tokens": 1,
+                **output_limit(url, 1),
                 # As each question sends it: a service may refuse the setting itself.
                 **(
                     {"reasoning_effort": effort}

@@ -65,6 +65,12 @@ Without the language model, forecast questions still get checked answers: the bu
 
 Gemini is strict about tool definitions: it refuses the whole request when a tool's parameter schema is an object with no properties, or uses JSON Schema keywords it does not support. Each tool is therefore sent with only the keywords Gemini accepts (`type`, `description`, `properties`, `required`, `enum`, `items`), and a tool without inputs is sent without parameters. Gemini's thinking models also attach a signature to each tool call that must come back unchanged with the tool's result; the Copilot returns the calls exactly as Gemini sent them. When Gemini refuses a request, the server log says why (`Copilot model ... answered 400: ...`). On the free tier Google may use what is sent to improve its products: the Copilot sends the question and the forecast figures, which are public, but forecasters should not type anything confidential. Check the current limits in Google AI Studio.
 
+### OpenAI (including a ChatGPT Pro subscription's API credits)
+
+A ChatGPT subscription does not include the API, which is billed separately at platform.openai.com, but an eligible ChatGPT Pro subscription gives monthly API credits to one API organization owned by the same email address (claimed under Billing on either side; unused credits do not roll over). Create a key at platform.openai.com → API keys, then deploy with `-LlmProvider openai_compatible -LlmBaseUrl 'https://api.openai.com/v1' -LlmModel 'gpt-5.4-mini' -LlmReasoningEffort low -LlmFallbackModels 'gpt-5.4-nano' -SetLlmKey`.
+
+OpenAI's GPT-5 models refuse `max_tokens` and any temperature other than their default, so requests to OpenAI (and Azure OpenAI) carry `max_completion_tokens` and no temperature unless `LLM_TEMPERATURE` is set; every other service keeps `max_tokens` and 0.2. To test a key from Cloud Shell: `curl -s https://api.openai.com/v1/models -H "Authorization: Bearer $k"` lists the models it may use.
+
 ### Cheapest Claude
 
 `CLAUDE_MODEL=claude-haiku-5-5` with `ANTHROPIC_API_KEY` costs $0.10 per million tokens read and $0.50 per million written; a Copilot question uses roughly 8,000 to 15,000 tokens, about $0.002, so $5 of credit lasts for thousands of questions.

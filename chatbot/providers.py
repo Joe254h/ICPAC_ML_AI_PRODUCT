@@ -11,11 +11,31 @@ import os
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from urllib.parse import urlparse
 
 import httpx
 
 from chatbot.budget import timeout
 from climate_engine.core import config
+
+
+def is_openai(base_url: str) -> bool:
+    """Whether the service is OpenAI's own API (or Azure OpenAI)."""
+    host = (urlparse(base_url).hostname or "").lower()
+    return host == "api.openai.com" or host.endswith(".openai.azure.com")
+
+
+def output_limit(base_url: str, tokens: int) -> dict[str, int]:
+    """The answer's token limit under the name the service takes. OpenAI's current models
+    (GPT-5 and its reasoning models) refuse max_tokens and take max_completion_tokens, which
+    OpenAI accepts for all its chat models; other services keep max_tokens."""
+    return {"max_completion_tokens" if is_openai(base_url) else "max_tokens": tokens}
+
+
+def fixed_temperature(base_url: str) -> bool:
+    """OpenAI's reasoning models accept only their default temperature (1): a request that
+    names any other is refused, so none is sent to OpenAI unless LLM_TEMPERATURE is set."""
+    return is_openai(base_url)
 
 
 class LLMProvider(ABC):
@@ -111,8 +131,8 @@ class OpenAICompatibleProvider(LLMProvider):
             timeout=timeout(float(os.getenv("LLM_TIMEOUT_SECONDS") or 20)),
             json={
                 "model": os.getenv("LLM_MODEL", cfg["model"]),
-                "temperature": 0,
-                "max_tokens": 300,
+                **({} if fixed_temperature(base_url) else {"temperature": 0}),
+                **output_limit(base_url, 300),
                 **extra,
                 "response_format": {"type": "json_object"},
                 "messages": [

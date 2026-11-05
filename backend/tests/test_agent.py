@@ -252,6 +252,48 @@ def test_the_openai_compatible_path_uses_tool_calls(env, fast_maps, monkeypatch)
     assert answer["evidence"] == ["This week's forecast"]
 
 
+def test_openai_is_asked_in_the_fields_its_gpt5_models_accept(env, fast_maps, monkeypatch):
+    """OpenAI's GPT-5 models refuse max_tokens and any temperature but their default (1):
+    every Copilot request to OpenAI failed with 400 and fell back to the fixed answer."""
+    from backend.app.services import health
+
+    run(env)
+    openai = "https://api.openai.com/v1"
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_TOOLS", "true")
+    monkeypatch.setenv("LLM_BASE_URL", openai)
+    monkeypatch.setenv("LLM_MODEL", "gpt-5.4-mini")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "low")
+    monkeypatch.delenv("LLM_TEMPERATURE", raising=False)
+    monkeypatch.delenv("LLM_FALLBACK_MODELS", raising=False)
+    monkeypatch.setattr(agent, "WORKING_MODEL", {})
+    monkeypatch.setattr(agent, "LAST_OUTCOME", {})
+    sent: list[dict] = []
+
+    def post(url: str, headers: dict, timeout: float, json: dict) -> httpx.Response:
+        sent.append(json)
+        request = httpx.Request("POST", url)
+        if "max_tokens" in json or "temperature" in json:
+            refusal = {"error": {"message": "Unsupported parameter: 'max_tokens'."}}
+            return httpx.Response(400, json=refusal, request=request)
+        message = {"content": "Mvua ya wiki ya pili ni ndogo katika eneo kubwa."}
+        return httpx.Response(200, json={"choices": [{"message": message}]}, request=request)
+
+    monkeypatch.setattr(agent.httpx, "post", post)
+    answer = Copilot(env.platform).answer(ChatRequest(message="Mvua itakuwaje?"))
+    assert answer["fallback"] is None and answer["text"].startswith("Mvua ya wiki")
+    assert sent[0]["max_completion_tokens"] >= 4096 and sent[0]["reasoning_effort"] == "low"
+    # Other services keep max_tokens and the low temperature.
+    assert agent.output_limit("https://api.groq.com/openai/v1", 5) == {"max_tokens": 5}
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+    assert agent.OpenAIToolsModel().temperature("qwen/qwen3.8-27b") == 0.2
+    # The status check asks OpenAI the same way.
+    monkeypatch.setattr(health, "_PROBE", {})
+    monkeypatch.setattr(health.httpx, "post", post)
+    assert health.answer_probe(openai, "key", "gpt-5.4-mini") is None
+    assert sent[-1]["max_completion_tokens"] == 1
+
+
 def test_a_refused_gemini_model_gives_way_to_a_current_one(env, fast_maps, monkeypatch):
     """Google serves Gemini 2.5 only to projects that used it before: a new key gets 404."""
     run(env)

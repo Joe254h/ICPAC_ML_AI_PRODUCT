@@ -38,6 +38,7 @@ from anthropic.types.beta import (
 
 from backend.app.services.forecasts import ForecastService
 from chatbot import attachments, web
+from chatbot.providers import fixed_temperature, output_limit
 from chatbot.tone import TONE_RULES, tone_problems
 from climate_engine.core import config
 from climate_engine.inputs import sources as data_sources
@@ -1657,10 +1658,11 @@ class OpenAIToolsModel:
 
     def temperature(self, model: str) -> float | None:
         """LLM_TEMPERATURE, else 0.2; Gemini keeps its default (1.0), which Google asks for
-        with its thinking models."""
+        with its thinking models, and OpenAI's models theirs (the reasoning models refuse
+        any other)."""
         if value := os.getenv("LLM_TEMPERATURE"):
             return float(value)
-        return None if "gemini" in model else 0.2
+        return None if "gemini" in model or fixed_temperature(self.base) else 0.2
 
     def respond(self, system: str, transcript: list[dict], tools: list[dict]) -> Reply:
         messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
@@ -1697,8 +1699,9 @@ class OpenAIToolsModel:
                     )
         body: dict[str, Any] = {
             "model": self.model,
-            # Thinking models (Gemini, Qwen 3) count their reasoning in this limit.
-            "max_tokens": int(os.getenv("LLM_MAX_TOKENS") or 4096),
+            # Thinking models (Gemini, Qwen 3, OpenAI's GPT-5) count their reasoning in this
+            # limit.
+            **output_limit(self.base, int(os.getenv("LLM_MAX_TOKENS") or 4096)),
             "messages": messages,
         }
         if tools:  # a plain request (a translation) carries no tool list at all

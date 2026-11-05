@@ -170,6 +170,12 @@ secret `llm-api-key` and never printed:
   -LlmProvider openai_compatible -LlmBaseUrl 'https://generativelanguage.googleapis.com/v1beta/openai' `
   -LlmModel 'gemini-3.8-flash' -SetLlmKey
 
+# OpenAI (a key from platform.openai.com; a ChatGPT Pro subscription's monthly API credits
+# can pay for it):
+& $Script -ExpectedCommit $Commit -ResourceGroup icpac -AppName icpac-api -ReleaseMode evaluation -AccessMode public `
+  -LlmProvider openai_compatible -LlmBaseUrl 'https://api.openai.com/v1' `
+  -LlmModel 'gpt-5.4-mini' -LlmReasoningEffort low -LlmFallbackModels 'gpt-5.4-nano' -SetLlmKey
+
 # Claude (an Anthropic API key from console.anthropic.com); no base URL is needed:
 & $Script -ExpectedCommit $Commit -ResourceGroup icpac -AppName icpac-api -ReleaseMode evaluation -AccessMode public `
   -LlmProvider anthropic -SetLlmKey
