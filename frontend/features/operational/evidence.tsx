@@ -253,7 +253,7 @@ function Overview({ e }: { e: ExperimentalEvidence }) {
       {e.foundational.length > 0 && (
         <Card
           title="Validation and independent periods"
-          subtitle="Scores fall from the 2020–2021 validation to the independent 2022–2024 period: both are shown, nothing is re-tuned."
+          subtitle="Validation 2020–2021 and independent 2022–2024, both shown; nothing re-tuned."
         >
           <div className="table-wrap">
             <table className="data">
@@ -414,7 +414,7 @@ function OverTime({ e }: { e: ExperimentalEvidence }) {
       </Card>
       <Card
         title="By season"
-        subtitle="Seasons of the initialization month: DJF December–February, MAM March–May, JJA June–August, SON September–November."
+        subtitle="By initialization month: DJF, MAM, JJA, SON."
       >
         <Matrix groups={e.seasonal} metric={metric} label="Season" />
       </Card>
@@ -465,7 +465,7 @@ function Countries({ e }: { e: ExperimentalEvidence }) {
       <div className="grid-2">
         <Card
           title="CatBoost against MBC"
-          subtitle="RMSE reduction of the full CatBoost correction relative to MBC alone. A negative value means the correction made RMSE worse."
+          subtitle="RMSE reduction of the CatBoost correction over MBC; below zero is worse."
         >
           <KeyValues
             items={gains.map(
@@ -535,7 +535,7 @@ function Events({ e }: { e: ExperimentalEvidence }) {
       />
       <Card
         title={`Week-2 rainfall of at least ${threshold} mm`}
-        subtitle="Deterministic yes/no events from each model's rainfall, against CHIRPS, area-weighted over all cells and cases."
+        subtitle="Yes/no events against CHIRPS, area-weighted over all cells and cases."
       >
         <div className="table-wrap">
           <table className="data">

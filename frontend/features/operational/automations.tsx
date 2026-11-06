@@ -129,7 +129,7 @@ export default function Automations() {
         </Notice>
         <Card
           title="Run the connected workflow"
-          subtitle="Select the newest fully published ensemble, issue the available forecast layers, verify due cases, update monitoring, check maps and country summaries, and prepare a frozen bulletin draft."
+          subtitle="Newest ensemble, forecast layers, verification, monitoring, maps, bulletin draft."
         >
           <Button
             disabled={task.running}
@@ -182,7 +182,7 @@ export default function Automations() {
         </Card>
         <Card
           title="External source integrations"
-          subtitle="Reviewed provider requests and server credentials are configured by the operator. Acquired datasets do not silently replace model inputs."
+          subtitle="Provider requests and credentials are set by the operator; acquired data never silently replaces model inputs."
         >
           <p>
             The built-in ECMWF ensemble connector runs the baseline forecast.
@@ -230,7 +230,7 @@ export default function Automations() {
         </Card>
         <Card
           title="Additional forecast products"
-          subtitle="These products require reviewed data for the exact forecast window; climatology, extremes and heat-stress definitions are never guessed."
+          subtitle="These need reviewed data for the forecast window; definitions are never guessed."
         >
           {products.error && <Notice tone="red">{products.error}</Notice>}
           {products.data?.available.map((name) => (
@@ -306,7 +306,7 @@ export default function Automations() {
         )}
         <Card
           title="All 20 capabilities"
-          subtitle="Available means demonstrated by held products. Ready means implemented but awaiting a successful run; partial and blocked entries name the remaining dependency."
+          subtitle="Available: shown by held products. Ready: built, awaiting a run. Partial or blocked: the missing dependency is named."
         >
           <div style={{ overflowX: "auto" }}>
             <table style={{ minWidth: 760, width: "100%" }}>

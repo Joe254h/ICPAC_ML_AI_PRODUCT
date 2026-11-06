@@ -190,7 +190,7 @@ export default function Operations() {
         <PageBanner
           title="Operations"
           crumbs={[{ label: "Operations" }, { label: "Run the weekly cycle" }]}
-          subtitle="Run the weekly Week-2 cycle: download the newest ECMWF ensemble, issue the forecast and verify finished forecasts against CHIRPS. Every task is recorded with who started it."
+          subtitle="Download the newest ECMWF run, issue the forecast, verify finished weeks. Each task records who started it."
         />
         <div className="split" style={{ alignItems: "stretch" }}>
           <Card eyebrow="Weekly cycle" title="Issue this week's forecast">

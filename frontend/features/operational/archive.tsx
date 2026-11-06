@@ -229,7 +229,7 @@ export default function Archive() {
             { label: "Forecasts", href: "/forecasts" },
             { label: "Archive" },
           ]}
-          subtitle="Every Sunday at midnight (EAT) the forecast for days 8 to 14 of that Sunday's ECMWF run is made: Sunday to Saturday of the next week. It is shown from that week's Sunday, and verified against CHIRPS, ARC 2.0 and RFE 2.0 about two days after the week ends."
+          subtitle="Made every Sunday at midnight (EAT) for days 8–14 of that Sunday's ECMWF run; verified about two days after the week ends."
           actions={
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <Button
@@ -287,7 +287,7 @@ export default function Archive() {
         {weekly.length > 0 && (
           <Card
             title={`Weekly forecasts · ${shown.length} of ${weekly.length} week${weekly.length === 1 ? "" : "s"}`}
-            subtitle="Each Sunday's run forecasts days 8 to 14 after it, Sunday to Saturday. Latest · This week: the forecast for the week we are in, which the website shows. A week is verified about two days after it ends, against CHIRPS, ARC 2.0 and RFE 2.0 (CHIRPS first; the others when it cannot be read); Forecast vs observed then shows its forecast map beside the observed rainfall, with RMSE and MAE."
+            subtitle="One forecast per Sunday run. Latest · This week is the one the website shows."
           >
             <Weeks groups={shown} names={names} latest={latest} weekly />
             {(upcoming.data ?? []).map((next) => (
@@ -316,7 +316,7 @@ export default function Archive() {
         {other.length > 0 && (
           <Card
             title={`Forecasts of other runs · ${other.length}`}
-            subtitle="Forecasts made from another day's ECMWF run (on request, or before the weekly schedule) are kept for the record."
+            subtitle="Forecasts from other days' runs, kept for the record."
           >
             <Button variant="outline" onClick={() => setOthers((now) => !now)}>
               {others ? "Hide them" : "Show them"}

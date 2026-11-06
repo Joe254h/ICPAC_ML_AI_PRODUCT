@@ -343,7 +343,7 @@ function Readiness({
       {checks.length > 0 && (
         <Card
           title="Input checks of the last run"
-          subtitle="Each input compared with the frozen model's training data. A failed check stops the AI/ML layer; nothing is filled in."
+          subtitle="Each input against the model's training data. A failed check withholds the AI/ML layer."
         >
           <div className="table-wrap">
             <table className="data">
@@ -434,7 +434,7 @@ function Ecmwf({ source }: { source?: DataSource }) {
           { label: "Data sources", href: "/data" },
           { label: "ECMWF ensemble" },
         ]}
-        subtitle="The forecast input: the real-time ECMWF ensemble from ECMWF Open Data, the run of 03:00 EAT, 0.25°, 15-day range. Only the fields the model reads are downloaded."
+        subtitle="ECMWF Open Data ensemble, 03:00 EAT run, 0.25°. Only the fields the model reads are downloaded."
         facts={[
           "10 perturbed members, as in training",
           "Days 8–14",
@@ -447,7 +447,7 @@ function Ecmwf({ source }: { source?: DataSource }) {
       <div className="grid-2">
         <Card
           title="Download a run"
-          subtitle="Leave the date empty for the newest published run (ECMWF's run of 03:00 EAT, published by about 12:00 EAT)."
+          subtitle="Leave empty for the newest run (published about 12:00 EAT)."
         >
           <div
             style={{
@@ -534,9 +534,7 @@ function Ecmwf({ source }: { source?: DataSource }) {
               <tbody>
                 {inputs.data.map((row) => (
                   <tr key={row.id}>
-                    <td className="strong">
-                      {runTime(row.initialization)}
-                    </td>
+                    <td className="strong">{runTime(row.initialization)}</td>
                     <td className="num">{row.members}</td>
                     <td>{mirrorName(row.mirror)}</td>
                     <td className="num">
@@ -567,7 +565,7 @@ function Chirps() {
       <PageBanner
         title="CHIRPS v2.0"
         crumbs={[{ label: "Data sources", href: "/data" }, { label: "CHIRPS" }]}
-        subtitle="The verification reference: daily satellite-and-gauge rainfall at 0.05°, on the same grid as the forecast. The final product is used when published, else the preliminary product."
+        subtitle="Daily satellite-and-gauge rainfall, 0.05°: the final product when published, else the preliminary one."
         facts={["0.05° daily", "Africa", "Climate Hazards Center, UCSB"]}
         actions={
           <Button

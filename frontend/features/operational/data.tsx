@@ -99,7 +99,7 @@ export default function Data() {
             { label: "Operations", href: "/data/runs" },
             { label: "Data sources" },
           ]}
-          subtitle="The forecast is made from the ECMWF ensemble and verified against CHIRPS. TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG add further observed-rainfall estimates for the monitoring and for comparing verified forecasts. All are downloaded by this service."
+          subtitle="Forecast from the ECMWF ensemble, verified against CHIRPS; TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG for monitoring and checks."
           actions={
             <LinkButton href="/data/runs" variant="amber">
               Operations
@@ -123,10 +123,7 @@ export default function Data() {
           </Card>
         )}
         {planned.length > 0 && (
-          <Card
-            title="Coming later"
-            subtitle="Listed so forecasters know what is planned; their readers have not been built yet, so nothing is computed from them."
-          >
+          <Card title="Coming later" subtitle="Planned; not used yet.">
             <div className="grid-2">
               {planned.map((source) => (
                 <SourceCard key={source.id} source={source} />

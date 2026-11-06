@@ -666,7 +666,7 @@ function UploadModel({ changed }: { changed: () => void }) {
   return (
     <Card
       title="Upload a model"
-      subtitle="A ZIP file holding the model's registration file and the bundle folder it names, as the training pipeline exports them. Every file is checked as for a reviewed model; it is registered as experimental, and a reviewer approves and activates it here."
+      subtitle="A ZIP of the registration file and bundle. Checked, then registered as experimental for a reviewer to approve."
     >
       <div className="model-upload">
         <label className="field">
@@ -730,7 +730,7 @@ export default function Models() {
             { label: "Operations", href: "/data/runs" },
             { label: "Model registry" },
           ]}
-          subtitle="Every operational model version with its evidence and reviewed status. A newly registered model is never used automatically: a reviewer approves it, then activates it."
+          subtitle="Every model version with its evidence and status. A new model is used only after a reviewer approves and activates it."
         />
         {hybrid?.status === "in_progress" && (
           <Notice title="AI/ML layer in progress.">

@@ -60,7 +60,7 @@ function RainfallMaps({ detail }: { detail: ForecastDetail }) {
           { label: "Forecasts", href: "/forecasts" },
           { label: "Rainfall maps" },
         ]}
-        subtitle="Week-2 total rainfall in the ICPAC weekly bulletin's colour classes, for the region or one member state."
+        subtitle="Week-2 total rainfall in the bulletin's colour classes."
         facts={forecastFacts(detail)}
       />
       <div

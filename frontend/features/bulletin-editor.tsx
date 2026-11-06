@@ -118,7 +118,7 @@ export function DraftEditor({
     <Card
       eyebrow="Edit the draft"
       title={draft.title}
-      subtitle="Change the wording, add or remove your own sections, then save. The edited bulletin is a new version; its Word document and web page are made again from it. The country table and the forecast note come from the forecast and are not edited here."
+      subtitle="Edit the wording and sections, then save as a new version. The country table and forecast note come from the forecast."
     >
       <div className="draft-editor">
         {fixed.map((section) => (

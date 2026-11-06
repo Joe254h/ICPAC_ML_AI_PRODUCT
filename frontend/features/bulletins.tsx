@@ -564,7 +564,7 @@ export default function Bulletins({ id }: PageProps) {
             { label: "Bulletin", href: "/bulletin" },
             { label: "Drafts and review" },
           ]}
-          subtitle="Every weekly bulletin goes from draft to review, approval and publication. Each decision needs a named reviewer and a justification, and approved content is sealed so it cannot change."
+          subtitle="Draft, review, approve, publish. Each decision is named; approved content is sealed."
         />
         <Card
           title="Draft a weekly bulletin"

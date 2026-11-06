@@ -245,7 +245,7 @@ test("the model evidence keeps the refit and the pre-refit results apart", async
   await expect(
     page.getByText("Model evidence: the final refit on 2022–2024"),
   ).toBeVisible();
-  await expect(page.locator(".answer")).toContainText("final refit");
+  await expect(page.locator(".answer")).toContainText(/final refit/i);
 });
 
 test("the ECMWF page reports recorded readiness", async ({ page }) => {

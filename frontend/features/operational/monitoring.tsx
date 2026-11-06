@@ -439,7 +439,7 @@ export default function Monitoring() {
         <PageBanner
           title="Rainfall Monitoring"
           crumbs={[{ label: "Monitoring" }]}
-          subtitle="Observed rainfall over the Greater Horn of Africa, dekad by dekad, from five satellite estimates: CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG."
+          subtitle="Dekad rainfall from CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG."
           actions={
             <Button variant="amber" disabled={running} onClick={check}>
               <RefreshCw size={17} className={running ? "spin" : undefined} />
