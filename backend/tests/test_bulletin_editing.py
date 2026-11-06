@@ -3,6 +3,8 @@
 import json
 from types import SimpleNamespace
 
+import httpx
+
 from backend.tests.test_forecasts import env as env  # noqa: F401
 from backend.tests.test_forecasts import fast_maps as fast_maps  # noqa: F401
 from backend.tests.test_forecasts import run
@@ -92,6 +94,23 @@ def test_a_draft_is_translated_and_its_figures_are_checked(env, fast_maps, monke
     assert "Kiswahili speaker" in record["edited"]["summary"]
     assert all(p.startswith("[sw] ") for p in section(record, "rainfall")["text"])
     assert translator.requests[0][2] == []  # a plain request, without tools
+    # One section per request: a slow AI service answers each within its time.
+    assert len(translator.requests) > 1
+    assert all(
+        len(json.loads(r[1][-1]["text"].rsplit("\n\n", 1)[1])) == 1 for r in translator.requests
+    )
+    # A service that takes too long is said in words, not an error page.
+
+    class Slow:
+        label = "slow"
+
+        def respond(self, system, transcript, tools):
+            raise httpx.ReadTimeout("slow")
+
+    monkeypatch.setattr(agent, "chat_model", lambda: Slow())
+    slow = env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "fr"})
+    assert slow.status_code == 422
+    assert "took too long" in slow.json()["detail"] and "Nothing was saved" in slow.json()["detail"]
     # A translation that changes a figure is not saved.
     monkeypatch.setattr(agent, "chat_model", lambda: Translator(keep_figures=False))
     refused = env.client.post(f"/bulletins/{record['id']}/translate", json={"language": "am"})

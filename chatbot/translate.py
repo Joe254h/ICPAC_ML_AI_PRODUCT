@@ -1,8 +1,8 @@
 """A weekly bulletin draft translated by the AI service, every figure checked.
 
 The editable sections (the headline, the decision-support note, the regional rainfall
-statements, the country focus and the forecaster's added sections) are sent in one request
-and come back as JSON. A translation is kept only if each paragraph holds exactly the same
+statements, the country focus and the forecaster's added sections) are sent one section per
+request, so a slow AI service answers each in time, and come back as JSON. A translation is kept only if each paragraph holds exactly the same
 numbers as the English one (amounts, ranges, percentages, dates); otherwise nothing is
 saved. The result is a new draft version, labelled as a machine translation that a speaker
 of the language checks before a reviewer approves it. The country table and the forecast
@@ -110,7 +110,18 @@ def translate(
     model = model or agent.chat_model()
     if model is None:
         raise TranslationRefused("No AI service is set up to translate")
-    reply = model.respond(SYSTEM, [{"role": "user", "text": request_text(source, language)}], [])
-    translated = parse(reply.text)
+    translated: list[dict[str, Any]] = []
+    for section in source:
+        prompt = [{"role": "user", "text": request_text([section], language)}]
+        try:
+            reply = model.respond(SYSTEM, prompt, [])
+        except Exception as exc:  # the service's failure, said in words; nothing is saved
+            from chatbot.service import plain_reason
+
+            raise TranslationRefused(
+                f"The translation stopped at “{section['title']}”: {plain_reason(exc)}. "
+                "Nothing was saved; try again."
+            ) from exc
+        translated.extend(parse(reply.text))
     check(source, translated)
     return translated

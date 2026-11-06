@@ -17,6 +17,7 @@ import {
   TranslateDraft,
 } from "@/features/bulletin-editor";
 import ReviewDialog from "@/components/review-dialog";
+import { useApp } from "@/components/shell";
 import type { Review } from "@/components/review-dialog";
 import {
   Button,
@@ -469,9 +470,17 @@ export default function Bulletins({ id }: PageProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [opened, setOpened] = useState<string | null>(null);
+  const [earlierOpen, setEarlierOpen] = useState(false);
   useEffect(() => setSelected(id), [id]);
-  const runs = ofRecord(forecasts.data ?? []).filter((r) => !r.synthetic);
-  const newest = runs[0];
+  const { current } = useApp();
+  // Sunday forecasts of the model in use, newest first; other runs only when there are none.
+  const issued = ofRecord(forecasts.data ?? []).filter((r) => !r.synthetic);
+  const inUse = current.data?.model?.model_id;
+  const sundays = issued.filter(
+    (r) => r.weekly && (!inUse || r.model_id === inUse),
+  );
+  const runs = sundays.length ? sundays : issued;
+  const newest = runs.find((r) => r.latest) ?? runs[0];
   const target = chosen || newest?.forecast_id || "";
   const groups = byForecast(drafts.data ?? [], runs);
   // The bulletin archive: every forecast week, drafted or not, newest first.
@@ -483,8 +492,20 @@ export default function Bulletins({ id }: PageProps) {
     })),
     ...groups.filter((g) => !runs.some((r) => r.forecast_id === g.forecastId)),
   ];
+  const [shown, ...earlier] = [
+    ...allWeeks.filter((g) => g.forecastId === newest?.forecast_id),
+    ...allWeeks.filter(
+      (g) => g.forecastId !== newest?.forecast_id && g.items.length,
+    ),
+  ];
   const active =
-    drafts.data?.find((d) => d.id === selected) ?? groups[0]?.items[0];
+    drafts.data?.find((d) => d.id === selected) ??
+    shown?.items[0] ??
+    groups[0]?.items[0];
+  // An earlier week's draft opened from a link shows the earlier weeks too.
+  const showEarlier =
+    earlierOpen ||
+    earlier.some((g) => g.items.some((d) => d.id === active?.id));
   // The same week drafted in the site's language (chosen here or in the Copilot).
   const [language] = useLanguage();
   const languageName = TRANSLATIONS[language];
@@ -537,10 +558,10 @@ export default function Bulletins({ id }: PageProps) {
           onChange={(e) => setChosen(e.target.value)}
           aria-label="Forecast to draft"
         >
-          {runs.map((run, i) => (
+          {runs.map((run) => (
             <option key={run.forecast_id} value={run.forecast_id}>
               {forecastLabel(run)}
-              {i === 0 ? " (newest)" : ""}
+              {run.forecast_id === newest?.forecast_id ? " (this week)" : ""}
             </option>
           ))}
         </select>
@@ -570,16 +591,14 @@ export default function Bulletins({ id }: PageProps) {
           title="Draft a weekly bulletin"
           subtitle={
             newest
-              ? `The newest forecast is for ${weekPeriod(newest.valid_start, newest.valid_end)}, from the ECMWF run of ${day(newest.initialization)}. Drafts below are grouped by forecast week, newest first.`
-              : "A draft is made from a forecast; none has been issued yet."
+              ? `This week: ${weekPeriod(newest.valid_start, newest.valid_end)}, run of ${day(newest.initialization)}`
+              : "No forecast issued yet."
           }
         >
           {forecasts.loading && !forecasts.data && <Skeleton height={60} />}
           {picker}
           {newest && !newestDrafted && (
-            <Notice tone="amber">
-              The newest forecast has no bulletin draft yet.
-            </Notice>
+            <Notice tone="amber">This week's forecast has no draft yet.</Notice>
           )}
           {opened && <Notice>{opened}</Notice>}
         </Card>
@@ -617,57 +636,70 @@ export default function Bulletins({ id }: PageProps) {
             className="drafts-layout"
           >
             <aside className="draft-list" aria-label="Drafts">
-              {allWeeks.map((group) => (
-                <section key={group.forecastId} className="draft-group">
-                  <h3>
-                    {group.run
-                      ? weekPeriod(group.run.valid_start, group.run.valid_end)
-                      : group.items[0].facts.period}
-                    <small>
+              {[shown, ...(showEarlier ? earlier : [])]
+                .filter((g): g is (typeof allWeeks)[number] => !!g)
+                .map((group) => (
+                  <section key={group.forecastId} className="draft-group">
+                    <h3>
                       {group.run
-                        ? `Run of ${day(group.run.initialization)}${
-                            group.run.forecast_id === newest?.forecast_id
-                              ? " · newest forecast"
-                              : ""
-                          }`
-                        : "Forecast no longer listed"}
-                    </small>
-                  </h3>
-                  {!group.items.length && group.run && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => create(undefined, group.forecastId)}
-                    >
-                      <FilePlus2 size={15} /> Draft this week
-                    </Button>
-                  )}
-                  {group.items.map((draft) => (
-                    <button
-                      key={draft.id}
-                      type="button"
-                      aria-current={draft.id === active.id}
-                      onClick={() => {
-                        setSelected(draft.id);
-                        router.replace(`/bulletins?id=${draft.id}`);
-                      }}
-                    >
-                      <strong>
-                        {draft.version && draft.version > 1
-                          ? `Version ${draft.version}`
-                          : "First draft"}
-                      </strong>
-                      <span>
-                        <Status tone={STATUS[draft.status][1]}>
-                          {STATUS[draft.status][0]}
-                        </Status>
-                      </span>
-                      <small>Created {dateTime(draft.created_at)}</small>
-                    </button>
-                  ))}
-                </section>
-              ))}
+                        ? weekPeriod(group.run.valid_start, group.run.valid_end)
+                        : group.items[0].facts.period}
+                      <small>
+                        {group.run
+                          ? `Run of ${day(group.run.initialization)}${
+                              group.run.forecast_id === newest?.forecast_id
+                                ? " · this week"
+                                : ""
+                            }`
+                          : "Forecast no longer listed"}
+                      </small>
+                    </h3>
+                    {!group.items.length && group.run && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => create(undefined, group.forecastId)}
+                      >
+                        <FilePlus2 size={15} /> Draft this week
+                      </Button>
+                    )}
+                    {group.items.map((draft) => (
+                      <button
+                        key={draft.id}
+                        type="button"
+                        aria-current={draft.id === active.id}
+                        onClick={() => {
+                          setSelected(draft.id);
+                          router.replace(`/bulletins?id=${draft.id}`);
+                        }}
+                      >
+                        <strong>
+                          {draft.version && draft.version > 1
+                            ? `Version ${draft.version}`
+                            : "First draft"}
+                        </strong>
+                        <span>
+                          <Status tone={STATUS[draft.status][1]}>
+                            {STATUS[draft.status][0]}
+                          </Status>
+                        </span>
+                        <small>Created {dateTime(draft.created_at)}</small>
+                      </button>
+                    ))}
+                  </section>
+                ))}
+              {earlier.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setEarlierOpen(!showEarlier)}
+                >
+                  {showEarlier
+                    ? "Hide earlier drafts"
+                    : `Earlier drafts (${earlier.length})`}
+                </Button>
+              )}
             </aside>
             <div style={{ display: "grid", gap: 28, minWidth: 0 }}>
               <Detail
