@@ -22,7 +22,7 @@ async function unfold(page: Page, name: string | RegExp) {
   const section = page
     .locator("details.card")
     .filter({ has: page.getByRole("heading", { name }) });
-  await section.locator("summary").click();
+  await section.locator(":scope > summary").click();
   return section;
 }
 

@@ -319,7 +319,7 @@ test("another model's forecast is uploaded in the chat and compared with ICPAC's
   const listed = page.locator("details.card").filter({
     has: page.getByRole("heading", { name: "Other models' forecasts" }),
   });
-  await listed.locator("summary").click();
+  await listed.locator(":scope > summary").click();
   await expect(listed).toContainText("Colleague CNN");
   await expect(listed).toContainText("Awaiting CHIRPS");
 });
