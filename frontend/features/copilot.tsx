@@ -428,16 +428,13 @@ function Message({
         )}
         {message.fallback && (
           <p className="chat-fallback">
+            AI assistant unavailable (
+            {(message.fallback_reason ?? "no response").replace(/\.$/, "")}
+            ):{" "}
             {message.kind === "document"
-              ? "Shown as read from the file"
-              : "Answered from the forecast data alone"}
-            , because the AI assistant did not respond:{" "}
-            {(
-              message.fallback_reason ?? "it could not respond just now"
-            ).replace(/\.$/, "")}
-            .
-            {language &&
-              ` It is in English: answers in ${language} come from the AI assistant.`}
+              ? "shown as read"
+              : "forecast data only"}
+            {language ? ", in English" : ""}.
           </p>
         )}
         {!user && <AnswerBasis message={message} />}
@@ -886,11 +883,7 @@ export default function Copilot() {
   const own = listed.find((r) => r.forecast_id === pinned?.forecast_id);
   if (own && !weeks.includes(own)) weeks.push(own);
   const shownWeek =
-    week ||
-    pinned?.forecast_id ||
-    forecast?.forecast_id ||
-    latestWeek ||
-    "";
+    week || pinned?.forecast_id || forecast?.forecast_id || latestWeek || "";
 
   const startNew = () => {
     newConversation();
@@ -904,7 +897,7 @@ export default function Copilot() {
           compact
           title="Forecaster Copilot"
           crumbs={[{ label: "Copilot" }]}
-          subtitle="Questions about this week's forecast, observed rainfall and verification, and about weather and climate."
+          subtitle="Ask about this week's forecast, observed rain and climate."
         />
         <div
           className={cx(

@@ -134,7 +134,7 @@ export default function ObservedComparison({
       id={OBSERVED_ANCHOR}
       eyebrow="Forecast and observed"
       title="What fell that week"
-      subtitle={`${week}: the forecast beside the observed rainfall, on the same colour scale. RMSE and MAE are the forecast's errors against each observation, over the member states.${verified ? "" : " CHIRPS, the reference, could not be read for this week yet; it is added when it can."}`}
+      subtitle={`${week} · same colour scale${verified ? "" : " · CHIRPS not read yet"}`}
       action={
         <Tabs
           label="Forecast layer"

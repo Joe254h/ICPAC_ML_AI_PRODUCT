@@ -487,6 +487,36 @@ def seen_from(monkeypatch, today: date) -> None:
     monkeypatch.setattr(chirps, "window_complete", lambda start, _=None: complete(start, today))
 
 
+def test_the_scores_count_each_week_once_from_its_sunday_run(env, monkeypatch):
+    """Runs of other days overlap the Sunday forecasts' weeks: the verification page listed
+    25-31 Oct, 26 Oct-1 Nov and 27 Oct-2 Nov side by side."""
+    service = forecasts.ForecastService(env.platform)
+
+    def record(forecast_id: str, initialization: str, weekly: bool) -> dict:
+        start = date.fromisoformat(initialization) + timedelta(days=7)
+        return {
+            "forecast_id": forecast_id,
+            "initialization": initialization,
+            "valid_start": start.isoformat(),
+            "valid_end": (start + timedelta(days=6)).isoformat(),
+            "of_record": True,
+            "weekly": weekly,
+            "verification_status": "available",
+            "checked_against": [],
+            "primary_layer": "mbc",
+        }
+
+    listed = [record("tuesday", "2026-10-20", False), record("sunday", "2026-10-18", True)]
+    monkeypatch.setattr(service, "listing", lambda: listed)
+    monkeypatch.setattr(service, "references", lambda forecast_id: [])
+    monkeypatch.setattr(
+        service, "verification", lambda forecast_id: {"domain": {"mbc": {"rmse": 9.0}}}
+    )
+    assert [w["forecast_id"] for w in service.verified_weeks()] == ["sunday"]
+    listed[1]["weekly"] = False  # no Sunday run verified: the other runs are scored
+    assert [w["forecast_id"] for w in service.verified_weeks()] == ["tuesday", "sunday"]
+
+
 def test_finished_forecasts_are_verified_against_chirps(env, fast_maps, monkeypatch):
     record = run(env, "2026-09-14")
     future = run(env, "2026-10-05")

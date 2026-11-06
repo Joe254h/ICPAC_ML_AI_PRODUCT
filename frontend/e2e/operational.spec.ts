@@ -17,6 +17,15 @@ async function mapLoaded(page: Page, name: string | RegExp) {
     .toBeGreaterThan(500);
 }
 
+/** Opens a folded section by its heading and returns it. */
+async function unfold(page: Page, name: string | RegExp) {
+  const section = page
+    .locator("details.card")
+    .filter({ has: page.getByRole("heading", { name }) });
+  await section.locator("summary").click();
+  return section;
+}
+
 test("the home page leads with this week's outlook", async ({ page }) => {
   await page.goto("/");
   // The hero is the live map with the forecast period as its title.
@@ -159,12 +168,11 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   ).toBeVisible();
   const stat = page.locator(".stat").filter({ hasText: "Verified forecasts" });
   await expect(stat.locator(".value")).toHaveText("4");
+  await unfold(page, "Seasonal scores");
   await expect(page.getByRole("cell", { name: /SON/ }).first()).toBeVisible();
   // The regional mean with the scores' 95% intervals, and the ensemble's reliability
-  // diagram and ROC curve from the members' probabilities.
-  const means = page.locator("section.card").filter({
-    has: page.getByRole("heading", { name: /Regional mean and scores/ }),
-  });
+  // diagram and ROC curve from the members' probabilities, each folded away.
+  const means = await unfold(page, /Regional mean and scores/);
   await expect(
     means.getByRole("img", { name: /Regional mean Week-2 rainfall/ }),
   ).toBeVisible();
@@ -172,9 +180,7 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   await expect(
     means.locator("tbody tr").filter({ hasText: "MBC" }).first(),
   ).toContainText(" to ");
-  const roc = page.locator("section.card").filter({
-    has: page.getByRole("heading", { name: /Reliability and ROC/ }),
-  });
+  const roc = await unfold(page, /Reliability and ROC/);
   await expect(
     roc.locator(".stat").filter({ hasText: "Weeks" }).locator(".value"),
   ).toHaveText("4");
@@ -189,7 +195,8 @@ test("past weeks are forecast and verified, and the correlation map appears", as
     await roc.screenshot({ path: `${process.env.SCREENSHOTS}/roc.png` });
   }
   // The latest verified week is also scored against ARC 2.0, RFE 2.0 and GPM IMERG.
-  const others = page.locator("tbody tr");
+  const latest = await unfold(page, /Latest week by observation/);
+  const others = latest.locator("tbody tr");
   await expect(others.filter({ hasText: "CHIRPS (reference)" })).toBeVisible();
   for (const name of ["ARC 2.0", "RFE 2.0", "GPM IMERG"])
     await expect(others.filter({ hasText: name }).first()).toContainText(" mm");
@@ -304,14 +311,17 @@ test("the latest forecast shows its layers, maps and countries", async ({
     "Weekly Forecast for",
   );
   await expect(page.getByText("ECMWF ensemble + MBC").first()).toBeVisible();
-  const products = page.locator("section").filter({
-    has: page.getByRole("heading", { name: "Forecast products" }),
-  });
+  const products = await unfold(page, "Forecast products");
   await expect(products.getByText("Available", { exact: true })).toHaveCount(2);
   await expect(products.getByText("In progress", { exact: true })).toHaveCount(
     1,
   );
-  await mapLoaded(page, "MBC Week-2 rainfall map");
+  // One map, with its layers; the bulletin map is a download, not a second map.
+  await expect(
+    page.getByRole("group", { name: "Map layer" }).first(),
+  ).toBeVisible();
+  const files = await unfold(page, "Downloads");
+  await expect(files.getByText("Map: MBC")).toBeVisible();
   await expect(
     page.locator("tbody tr").filter({ hasText: "Kenya" }).first(),
   ).toBeVisible();

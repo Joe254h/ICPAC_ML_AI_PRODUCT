@@ -1077,17 +1077,23 @@ class ForecastService:
         return compared
 
     def verified_weeks(self, limit: int = 52) -> list[dict[str, Any]]:
-        """Every verified week, newest first (each ECMWF run's forecast of record): the
+        """Every verified week, newest first (each Sunday run's forecast of record; another
+        day's run only while no Sunday run is verified): the
         scores of each layer against CHIRPS (MAE, RMSE, bias, Pearson r, over the domain's
         cells), and against ARC 2.0, RFE 2.0 and GPM IMERG where they were compared. A week
         CHIRPS could not be read for is verified by the others; ``best`` is the observation
         of record for the week: CHIRPS, else ARC 2.0, else RFE 2.0, else GPM IMERG."""
         weeks: list[dict[str, Any]] = []
-        for record in self.listing():
-            if not record["of_record"] or (
-                record.get("verification_status") != "available" and not record["checked_against"]
-            ):
-                continue
+        scored = [
+            r
+            for r in self.listing()
+            if r["of_record"]
+            and (r.get("verification_status") == "available" or r["checked_against"])
+        ]
+        # One forecast per week: the Sunday runs' forecasts, once there are any; another
+        # day's run overlaps them and would count the same days twice.
+        sundays = [r for r in scored if r["weekly"]]
+        for record in sundays or scored:
             verification: dict[str, Any] = {}
             if record.get("verification_status") == "available":
                 try:

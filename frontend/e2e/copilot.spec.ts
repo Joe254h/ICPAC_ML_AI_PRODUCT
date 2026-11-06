@@ -316,9 +316,10 @@ test("another model's forecast is uploaded in the chat and compared with ICPAC's
   await card.getByText("Country by country").click();
   await expect(card.locator("tbody tr").first()).toBeVisible();
   await page.goto("/verification");
-  const listed = page.locator(".card").filter({
+  const listed = page.locator("details.card").filter({
     has: page.getByRole("heading", { name: "Other models' forecasts" }),
   });
+  await listed.locator("summary").click();
   await expect(listed).toContainText("Colleague CNN");
   await expect(listed).toContainText("Awaiting CHIRPS");
 });

@@ -6,8 +6,8 @@ import { CheckCircle2 } from "lucide-react";
 import {
   Button,
   Card,
+  Disclosure,
   ErrorState,
-  LinkButton,
   Notice,
   PageBanner,
   Skeleton,
@@ -105,7 +105,7 @@ function WeeklyScores() {
   return (
     <Card
       title="Scores of every verified week"
-      subtitle="RMSE, MAE and Pearson correlation of each week's forecast against the observed rainfall, over every cell of the region. Lower RMSE and MAE are better; r closer to 1 is better."
+      subtitle="Over all cells. Lower RMSE and MAE are better; r near 1 is better."
     >
       <div className="evidence-controls">
         <label className="field">
@@ -219,29 +219,16 @@ function LatestVerified({ run }: { run: ForecastRun }) {
   const v = detail.data.verification;
   const sources = observedBy(run);
   return (
-    <Card
-      eyebrow="Latest verified week"
-      title={validDays(run.valid_start, run.valid_end)}
-      subtitle={`${detail.data.model?.model_name ?? "Forecast"}, from the ECMWF run of ${day(run.initialization)}, scored against ${sources.join(", ")}${v.season ? ` · ${SEASONS[v.season] ?? v.season}` : ""}${sources.includes("CHIRPS") ? "" : ". CHIRPS, the reference, could not be read for this week yet"}`}
-      action={
-        <LinkButton
-          href={`/forecasts?id=${run.forecast_id}`}
-          variant="outline"
-          size="sm"
-        >
-          Open forecast
-        </LinkButton>
-      }
+    <Disclosure
+      title={`Latest week by observation · ${validDays(run.valid_start, run.valid_end)}`}
+      subtitle={`ECMWF run of ${day(run.initialization)} · ${sources.join(", ")}`}
     >
+      <p style={{ margin: 0 }}>
+        <Link href={`/forecasts?id=${run.forecast_id}`}>Open forecast</Link>
+      </p>
       {v.domain && <MetricsTable metrics={v.domain} />}
-      {v.use && (
-        <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 0 }}>
-          Spatial scores over one week ({v.use}); they do not by themselves
-          establish skill.
-        </p>
-      )}
       <OtherObservations run={run} chirps={v.domain ?? undefined} />
-    </Card>
+    </Disclosure>
   );
 }
 
@@ -281,18 +268,12 @@ function OtherObservations({
   ];
   return (
     <div style={{ marginTop: 22 }}>
-      <h4 style={{ margin: "0 0 4px" }}>Against the other observations</h4>
-      <p style={{ margin: "0 0 10px", color: "var(--muted)", fontSize: 14 }}>
-        The {SERIES[variant].label} forecast scored against each estimate of the
-        same week. Where they agree, the scores are firm; CHIRPS stays the
-        reference of record.
-      </p>
+      <h4 style={{ margin: "0 0 10px" }}>
+        {SERIES[variant].label} against each observation
+      </h4>
       {compared.loading && <Skeleton height={120} />}
       {compared.data && compared.data.length === 0 && (
-        <p style={{ margin: 0, fontSize: 14 }}>
-          ARC 2.0, RFE 2.0 and GPM IMERG are compared in the next verification
-          pass.
-        </p>
+        <p style={{ margin: 0, fontSize: 14 }}>Compared in the next pass.</p>
       )}
       {compared.data && compared.data.length > 0 && (
         <div className="table-wrap">
@@ -341,9 +322,9 @@ function OtherModels() {
   const uploads = useApi<ChatComparison[]>("/external-forecasts");
   if (!uploads.data?.length) return null;
   return (
-    <Card
+    <Disclosure
       title="Other models' forecasts"
-      subtitle="Forecasts uploaded in the Copilot, compared with ICPAC's forecast of the same week and scored against CHIRPS once it covers the week. One week is one case: compare several before drawing conclusions."
+      subtitle="Uploaded in the Copilot; scored once observed"
     >
       <div className="table-wrap">
         <table className="data">
@@ -393,7 +374,7 @@ function OtherModels() {
           </tbody>
         </table>
       </div>
-    </Card>
+    </Disclosure>
   );
 }
 
@@ -402,44 +383,35 @@ function OtherModels() {
 /** The scores in plain words, for readers who are not verification specialists. */
 function HowToRead() {
   return (
-    <Card title="How to read the scores">
+    <Disclosure title="How to read the scores">
       <dl className="score-terms">
         <div>
           <dt>RMSE and MAE</dt>
           <dd>
-            The typical error of the week's rainfall total, in mm. RMSE counts
-            big misses more. Lower is better.
+            Typical error, mm. RMSE weighs big misses more. Lower is better.
           </dd>
         </div>
         <div>
           <dt>Bias</dt>
           <dd>
-            Forecast minus observed, on average: above zero the forecast was too
-            wet, below zero too dry.
+            Forecast minus observed: above zero too wet, below zero too dry.
           </dd>
         </div>
         <div>
           <dt>Pearson r</dt>
-          <dd>
-            In the weekly table: how well the forecast placed the wet and dry
-            areas of that week (1 is a perfect match, 0 none). On the
-            correlation map: how well each place's forecast rose and fell with
-            the observed rain from week to week.
-          </dd>
+          <dd>How well wet and dry areas match: 1 perfect, 0 none.</dd>
         </div>
         <div>
           <dt>Raw ECMWF</dt>
           <dd>
-            The uncorrected ECMWF forecast. A lower error than raw ECMWF means
-            the correction added value.
+            Uncorrected ECMWF. Lower error than raw = the correction helped.
           </dd>
         </div>
       </dl>
       <p className="card-note">
-        Each week is scored against CHIRPS once CHIRPS covers it. A handful of
-        weeks is indicative only; a season or more gives a firmer picture.
+        A few weeks are indicative; a season is firmer.
       </p>
-    </Card>
+    </Disclosure>
   );
 }
 
@@ -460,20 +432,14 @@ function Answer({
   return (
     <section className="card answer-card" aria-label="Verification in brief">
       <p className="answer">
-        On {evidence.scope.cases} {refit ? "" : "independent "}reforecast cases
-        from 2022 to 2024, the{" "}
-        {refit ? "final refit (MBC + CatBoost)" : "MBC + CatBoost correction"}{" "}
-        had <strong>{percent(hybrid.skill_vs_raw)} lower error</strong> than raw
-        ECMWF, and its MBC alone {percent(mbc.skill_vs_raw)} lower.
+        {refit ? "Final refit" : "MBC + CatBoost"}, 2022–2024 (
+        {evidence.scope.cases} cases):{" "}
+        <strong>{percent(hybrid.skill_vs_raw)} lower RMSE</strong> than raw
+        ECMWF; MBC alone {percent(mbc.skill_vs_raw)}.
       </p>
       <p className="answer-sub">
-        Error here is the root-mean-square difference from CHIRPS in weekly
-        rainfall.{" "}
-        {refit &&
-          "The refit learned from 2005–2021; the 2022–2024 years had been used to choose its policy, so this is a retrospective comparison. "}
-        {verified > 0
-          ? `${verified} live ${verified === 1 ? "week has" : "weeks have"} been scored so far; their scores follow.`
-          : "Live weeks are scored below as soon as CHIRPS has observed them."}
+        {refit ? "Retrospective comparison. " : ""}
+        {verified} live week{verified === 1 ? "" : "s"} scored.
       </p>
     </section>
   );
@@ -486,27 +452,17 @@ function ExperimentalSummary({
   evidence: Loaded<ExperimentalEvidence>;
 }) {
   return (
-    <Card
+    <Disclosure
       title={
         evidence.data?.scope.kind === "retrospective"
           ? "Model evidence: the final refit on 2022–2024"
           : "Model evidence: the independent 2022–2024 test"
       }
-      subtitle={
-        evidence.data?.scope.kind === "retrospective"
-          ? "The 2005–2021 refit on 551 reforecast cases, a retrospective comparison. These are not the scores of the forecasts above."
-          : "The frozen pre-refit models on 551 reforecast cases. These are not the scores of the forecasts above, and they do not transfer to a refitted model."
-      }
-      action={
-        <LinkButton
-          href="/verification/experimental"
-          variant="outline"
-          size="sm"
-        >
-          Full verification
-        </LinkButton>
-      }
+      subtitle="551 reforecast cases; not the live scores"
     >
+      <p style={{ margin: 0 }}>
+        <Link href="/verification/experimental">Full verification</Link>
+      </p>
       {evidence.error && (
         <ErrorState message={evidence.error} retry={evidence.reload} />
       )}
@@ -546,7 +502,7 @@ function ExperimentalSummary({
       {evidence.data && (
         <p className="card-note">{String(evidence.data.scope.selection)}</p>
       )}
-    </Card>
+    </Disclosure>
   );
 }
 
@@ -612,8 +568,11 @@ export default function Verification() {
     runs.reload();
     seasonal.reload();
   });
-  // Each ECMWF run's forecast of record: a week is listed once.
-  const issued = ofRecord(runs.data ?? []);
+  // Each Sunday run's forecast of record: a week is listed once. Other days' runs
+  // count only while no Sunday run exists.
+  const recorded = ofRecord(runs.data ?? []);
+  const sundays = recorded.filter((r) => r.weekly);
+  const issued = sundays.length ? sundays : recorded;
   // Verified by CHIRPS, ARC 2.0 or RFE 2.0: CHIRPS first, the others when it cannot be read.
   const verified = issued.filter((r) => observedBy(r).length > 0);
   const unverified = issued.filter((r) => observedBy(r).length === 0);
@@ -632,7 +591,7 @@ export default function Verification() {
         <PageBanner
           title="Forecast Verification"
           crumbs={[{ label: "Verification" }]}
-          subtitle="Each Week-2 forecast is scored once its week has passed against CHIRPS, ARC 2.0 and RFE 2.0: CHIRPS is the reference, and when it cannot be read the others verify the week. The seven daily totals are summed on the same 0.05° grid and compared cell by cell."
+          subtitle="Each week's forecast against CHIRPS, or ARC 2.0 and RFE 2.0 when CHIRPS is missing."
           actions={
             <Button
               variant="amber"
@@ -659,15 +618,15 @@ export default function Verification() {
           <div className="stat">
             <div className="label">Verified forecasts</div>
             <div className="value">{runs.data ? verified.length : "…"}</div>
-            <div className="hint">Against CHIRPS, ARC 2.0 or RFE 2.0</div>
+            <div className="hint">Sunday forecasts</div>
           </div>
           <div className="stat amber">
             <div className="label">Awaiting observations</div>
             <div className="value">{runs.data ? waiting.length : "…"}</div>
             <div className="hint">
               {overdue.length
-                ? `${overdue.length} more not verified yet: see below`
-                : "The observations lag about two days"}
+                ? `${overdue.length} overdue`
+                : "About two days after each week"}
             </div>
           </div>
           <div className="stat">
@@ -676,26 +635,18 @@ export default function Verification() {
               {nextScores ? day(nextScores) : "—"}
             </div>
             <div className="hint">
-              {nextScores
-                ? "When the observations cover the next forecast week"
-                : "No forecast is waiting"}
+              {nextScores ? "Next week's observations" : "Nothing waiting"}
             </div>
           </div>
         </div>
-        <HowToRead />
         {runs.loading && <Skeleton height={240} />}
-        {verified[0] ? (
-          <LatestVerified run={verified[0]} />
-        ) : (
-          runs.data && (
-            <Notice title="No forecast verified yet.">
-              A forecast is verified about two days after its Week-2 window
-              ends, when CHIRPS covers all seven days. Past weeks can be
-              forecast and verified now.
-            </Notice>
-          )
+        {!verified[0] && runs.data && (
+          <Notice title="No forecast verified yet.">
+            Weeks are verified about two days after they end.
+          </Notice>
         )}
         <WeeklyScores />
+        {verified[0] && <LatestVerified run={verified[0]} />}
         <SkillSummary />
         <ProbabilisticVerification />
         {runs.data && verified.length < PAST_WEEKS && (
@@ -706,27 +657,25 @@ export default function Verification() {
             }}
           />
         )}
-        <Card
+        <Disclosure
           title="Seasonal scores"
-          subtitle="Cell-based scores pooled over every week verified against CHIRPS, the reference, in each season."
-          action={
-            <label
-              style={{
-                display: "inline-flex",
-                gap: 8,
-                alignItems: "center",
-                fontSize: 14,
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={includeTest}
-                onChange={(e) => setIncludeTest(e.target.checked)}
-              />
-              Include 2022–2024 test period
-            </label>
-          }
+          subtitle="Pooled over the CHIRPS-verified weeks"
         >
+          <label
+            style={{
+              display: "inline-flex",
+              gap: 8,
+              alignItems: "center",
+              fontSize: 14,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={includeTest}
+              onChange={(e) => setIncludeTest(e.target.checked)}
+            />
+            Include 2022–2024 test period
+          </label>
           {seasonal.data ? (
             <div style={{ display: "grid", gap: 16 }}>
               <ModelScope
@@ -739,15 +688,11 @@ export default function Verification() {
           ) : (
             <Skeleton height={140} />
           )}
-        </Card>
+        </Disclosure>
         {unverified.length > 0 && (
-          <Card
-            title="Awaiting observations"
-            subtitle={
-              overdue.length
-                ? `${overdue.length} week${overdue.length === 1 ? "" : "s"} that CHIRPS should cover ${overdue.length === 1 ? "is" : "are"} not verified yet; each says why. Verification is tried every 3 hours.`
-                : "Each week is verified about two days after it ends, when CHIRPS covers it."
-            }
+          <Disclosure
+            title={`Awaiting observations (${unverified.length})`}
+            subtitle="Tried every 3 hours"
           >
             <div className="table-wrap">
               <table className="data">
@@ -777,8 +722,9 @@ export default function Verification() {
                 </tbody>
               </table>
             </div>
-          </Card>
+          </Disclosure>
         )}
+        <HowToRead />
         <OtherModels />
         <ExperimentalSummary evidence={evidence} />
       </div>

@@ -637,19 +637,14 @@ export function VerificationSummary({ detail }: { detail: ForecastDetail }) {
   if (verification.status === "available" && verification.domain)
     return (
       <>
-        <p style={{ marginTop: 0 }}>
-          Verified against CHIRPS daily rainfall. Scores over the eleven member
-          states for this single week; they do not by themselves establish
-          forecast skill.
-        </p>
+        <p style={{ marginTop: 0 }}>Against CHIRPS, this week only.</p>
         <MetricsTable metrics={verification.domain} />
       </>
     );
   return (
     <Notice title="Not verified yet.">
-      CHIRPS covers the window {validDays(detail.valid_start, detail.valid_end)}{" "}
-      about two days after it ends; the forecast is then verified automatically
-      by the weekly cycle in <Link href="/data/runs">Operations</Link>.
+      Verified automatically about two days after{" "}
+      {validDays(detail.valid_start, detail.valid_end)} ends.
     </Notice>
   );
 }

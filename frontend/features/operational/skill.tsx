@@ -5,7 +5,7 @@
 import { useMemo, useState } from "react";
 import type * as echarts from "echarts";
 import Chart from "@/components/chart";
-import { Card, Notice, Skeleton } from "@/components/ui";
+import { Disclosure, Notice, Skeleton } from "@/components/ui";
 import { SERIES, day, num, signed } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type {
@@ -153,9 +153,9 @@ export function SkillSummary() {
   if (summary.status === 404) return null; // an older service
   const data = summary.data;
   return (
-    <Card
+    <Disclosure
       title="Regional mean and scores, with 95% confidence intervals"
-      subtitle="The area mean of the week's rainfall over the eleven member states, forecast and observed, and each layer's mean scores over the verified weeks. Intervals come from resampling whole weeks (a bootstrap), so they are wide while the weeks are few; they need at least three weeks."
+      subtitle="Forecast and observed area means; mean scores per layer (bootstrap over weeks)"
     >
       <div className="evidence-controls">
         <SourcePicker value={source} onChange={setSource} />
@@ -216,10 +216,8 @@ export function SkillSummary() {
             </table>
           </div>
           <p className="muted-line" style={{ maxWidth: "none" }}>
-            Means of the weekly scores over {data.weeks} week
-            {data.weeks === 1 ? "" : "s"}; the 95% interval follows each value.
-            A negative RMSE change means a lower error than raw ECMWF; if its
-            interval stays below zero the correction helped beyond chance.
+            {data.weeks} week{data.weeks === 1 ? "" : "s"}; 95% interval in
+            brackets. RMSE change below zero: better than raw ECMWF.
           </p>
           <details style={{ marginTop: 10 }}>
             <summary>The weekly regional means</summary>
@@ -256,7 +254,7 @@ export function SkillSummary() {
           </details>
         </>
       )}
-    </Card>
+    </Disclosure>
   );
 }
 
@@ -564,9 +562,9 @@ export function ProbabilisticVerification() {
     .map(([name, weeks]) => `${name} (${weeks})`)
     .join(", ");
   return (
-    <Card
+    <Disclosure
       title="Reliability and ROC: the chance of a wet week"
-      subtitle="Each forecast also gives the chance that the week's rainfall exceeds a threshold: the share of the ensemble's members above it. The reliability diagram shows whether a forecast of 30% happened about 30% of the time; the ROC curve shows how well the chances separate weeks with and without the event (area 1: perfect, 0.5: no skill)."
+      subtitle="Chance = share of members above the threshold"
     >
       <div className="evidence-controls">
         <label className="field">
@@ -600,10 +598,8 @@ export function ProbabilisticVerification() {
       {result.loading && !data && <Skeleton height={320} />}
       {data && data.weeks === 0 && (
         <Notice title="No verified week holds member probabilities yet.">
-          Forecasts keep their members&apos; probabilities from this version on.
           Press Start again on the Forecast archive to forecast the last 12
-          weeks again with them; each week then appears here once CHIRPS, ARC
-          2.0 or RFE 2.0 has verified it.
+          weeks with them.
         </Notice>
       )}
       {data && data.weeks > 0 && (
@@ -619,7 +615,7 @@ export function ProbabilisticVerification() {
               label="Brier skill score"
               value={num(data.brier_skill, 2)}
               interval={range(data.brier_skill_interval, 2)}
-              hint="Above 0: better than always forecasting the observed frequency"
+              hint="Above 0: better than climatology"
             />
             <Stat
               label="Observed frequency"
@@ -646,7 +642,7 @@ export function ProbabilisticVerification() {
               <h4 style={{ margin: "0 0 4px" }}>Reliability diagram</h4>
               <Reliability data={data} />
               <p className="muted-line" style={{ maxWidth: "none" }}>
-                How often each probability was forecast (sharpness):
+                Sharpness:
               </p>
               <Sharpness data={data} />
             </div>
@@ -684,6 +680,6 @@ export function ProbabilisticVerification() {
           </details>
         </>
       )}
-    </Card>
+    </Disclosure>
   );
 }

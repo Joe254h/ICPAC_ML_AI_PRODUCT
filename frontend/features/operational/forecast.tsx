@@ -14,16 +14,14 @@ import {
   Disclosure,
   ErrorState,
   LinkButton,
-  MapFigure,
   Notice,
   PageBanner,
   Skeleton,
   Stat,
-  Tabs,
 } from "@/components/ui";
 import ObservedComparison from "@/features/operational/observed";
 import type { PageProps } from "@/features/view";
-import { SERIES, num, validDays, weekPeriod } from "@/lib/format";
+import { SERIES, num, weekPeriod } from "@/lib/format";
 import { mutate, request } from "@/services/api";
 import { useApi } from "@/services/hooks";
 import { useStaff } from "@/services/staff";
@@ -46,7 +44,6 @@ import {
   forecastFacts,
   laterModel,
   layersOf,
-  mapUrl,
   methodName,
   primaryOf,
   useForecast,
@@ -223,7 +220,6 @@ function Body({
   const layers = layersOf(detail);
   const primary = primaryOf(detail);
   const [mapLayer, setMapLayer] = useState<Variant>(primary);
-  const [figureLayer, setFigureLayer] = useState<Variant>(primary);
   const bulletin = useApi<BulletinStatus>(
     `/forecasts/${detail.forecast_id}/bulletin`,
   );
@@ -243,7 +239,7 @@ function Body({
           { label: "Forecasts", href: "/forecasts/archive" },
           { label: "Latest forecast" },
         ]}
-        subtitle={`Week-2 (days 8–14) total rainfall over the eleven ICPAC member states, valid ${validDays(detail.valid_start, detail.valid_end)}.`}
+        subtitle="Week-2 (days 8–14) total rainfall over the 11 member states."
         facts={forecastFacts(detail)}
         actions={
           <>
@@ -291,7 +287,7 @@ function Body({
           label={`Regional mean · ${SERIES[primary].label}`}
           value={num(means[primary])}
           unit="mm"
-          hint="Area average over the eleven member states"
+          hint="Area mean"
         />
         <Stat
           label="Regional mean · raw ECMWF"
@@ -309,17 +305,8 @@ function Body({
           }
           tone="amber"
         />
-        <Stat
-          label="Ensemble"
-          value={detail.provenance.ensemble_members}
-          unit="members"
-          hint={methodName(detail)}
-        />
       </div>
-      <Card
-        title="Rainfall outlook"
-        subtitle="Hover over a country for its mean; switch layers on the left."
-      >
+      <Card title="Rainfall outlook">
         <ForecastMap
           detail={detail}
           layer={mapLayer}
@@ -327,59 +314,28 @@ function Body({
           height={600}
         />
       </Card>
-      <div className="grid-2">
-        <Card eyebrow="Weekly bulletin" title="What the forecast says">
-          <Outlook bulletin={bulletin.data} />
-        </Card>
-        <Card
-          eyebrow="Bulletin map"
-          title="Total rainfall"
-          action={
-            <Tabs
-              label="Map layer"
-              value={figureLayer}
-              onChange={setFigureLayer}
-              options={layers.map((layer) => ({
-                value: layer,
-                label: SERIES[layer].label,
-              }))}
-            />
-          }
-        >
-          <MapFigure
-            src={mapUrl(detail, figureLayer)}
-            alt={`${SERIES[figureLayer].label} Week-2 rainfall map`}
-            caption={`${SERIES[figureLayer].label} · valid ${validDays(detail.valid_start, detail.valid_end)}`}
-          />
-        </Card>
-      </div>
+      <Card title="What the forecast says">
+        <Outlook bulletin={bulletin.data} />
+      </Card>
       <ObservedComparison detail={detail} />
-      <Card
-        title="Country outlook"
-        subtitle="Area means and ranges of Week-2 rainfall (mm) per member state."
-      >
+      <Card title="Country outlook" subtitle="Area mean and range, mm">
         <CountryTable rows={detail.countries} layers={layers} />
         <div style={{ marginTop: 28 }}>
           <CountryChart rows={detail.countries} layers={layers} />
         </div>
       </Card>
-      <Card
-        title="Forecast products"
-        subtitle="Each layer and what it is made from."
-      >
-        <ProductStatusList detail={detail} />
+      <Card title="Verification">
+        <VerificationSummary detail={detail} />
       </Card>
-      <div className="grid-2">
-        <Card title="Verification">
-          <VerificationSummary detail={detail} />
-        </Card>
-        <Card title="Downloads" subtitle="This forecast's data and maps.">
-          <Downloads detail={detail} />
-        </Card>
-      </div>
+      <Disclosure title="Forecast products" subtitle="The layers">
+        <ProductStatusList detail={detail} />
+      </Disclosure>
+      <Disclosure title="Downloads" subtitle="NetCDF, spreadsheet, maps">
+        <Downloads detail={detail} />
+      </Disclosure>
       <Disclosure
         title="How this forecast was made"
-        subtitle="The run, the inputs, the grid and the correction."
+        subtitle={`${detail.provenance.ensemble_members} members · ${methodName(detail)}`}
       >
         <div>
           <h3>Forecast details</h3>
