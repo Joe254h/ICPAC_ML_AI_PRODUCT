@@ -181,6 +181,10 @@ secret `llm-api-key` and never printed:
   -LlmProvider anthropic -SetLlmKey
 ```
 
+A slow service (a free hosted model) may need more time: `-LlmRequestSeconds 90 -LlmAnswerSeconds 180`
+sets how long the Copilot waits for one reply and for a whole answer (several replies; at most
+180 s). Later runs keep both.
+
 Any other OpenAI-compatible service takes the same three parameters, for example an open
 Qwen model on Groq's free plan (Groq lists the models a key can use at `https://api.groq.com/openai/v1/models`):
 

@@ -249,5 +249,12 @@ $fallback = @($global:DeployTestapp.properties.template.containers[0].env | Wher
 if ($fallback.Count -ne 1 -or $fallback[0].value -ne 'llama-3.3-70b-versatile,openai/gpt-oss-20b') { throw 'The backup models were not set' }
 & $deployment -ExpectedCommit $global:DeployTestcommit -LlmFallbackModels off
 if (@($global:DeployTestapp.properties.template.containers[0].env | Where-Object name -EQ LLM_FALLBACK_MODELS).Count -ne 0) { throw 'The backup models were not removed' }
+# A slow AI service gets more time per reply and per answer, kept on later runs.
+Reset-DeploymentFixture
+& $deployment -ExpectedCommit $global:DeployTestcommit -LlmRequestSeconds 90 -LlmAnswerSeconds 180
+& $deployment -ExpectedCommit $global:DeployTestcommit
+$envs = $global:DeployTestapp.properties.template.containers[0].env
+if (@($envs | Where-Object name -EQ LLM_TIMEOUT_SECONDS)[0].value -ne '90') { throw 'The reply time was not kept' }
+if (@($envs | Where-Object name -EQ LLM_TOTAL_SECONDS)[0].value -ne '180') { throw 'The answer time was not kept' }
 Write-Host 'Copilot service switch tests passed (offline).'
 

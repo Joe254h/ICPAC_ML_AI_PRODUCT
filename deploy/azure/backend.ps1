@@ -32,6 +32,10 @@ param(
     # Models of the same AI service tried when the Copilot's model is at its usage limit or
     # refused (comma-separated, at most five); 'off' removes them.
     [ValidatePattern('^(off|[A-Za-z0-9._:/-]{2,100}(,[A-Za-z0-9._:/-]{2,100}){0,4})$')][string]$LlmFallbackModels,
+    # Seconds the Copilot waits for one reply of its AI service, and for a whole answer
+    # (several replies); a slow free service needs more. Kept on later runs.
+    [ValidateRange(10, 180)][int]$LlmRequestSeconds,
+    [ValidateRange(30, 180)][int]$LlmAnswerSeconds,
     [switch]$SetEarthdataToken,
     [switch]$PlanOnly,
     [switch]$VerifyOnly
@@ -42,7 +46,7 @@ if ($PlanOnly -and $VerifyOnly) { throw 'Choose either -PlanOnly or -VerifyOnly.
 if ($EnableAutomation -and $DisableAutomation) { throw 'Choose either -EnableAutomation or -DisableAutomation.' }
 if ($VerifyOnly -and ($EnableAutomation -or $DisableAutomation)) { throw 'Verification cannot change the automation schedule.' }
 if ($AccessMode -eq 'public' -and $ReleaseMode -ne 'evaluation') { throw 'Public access requires an evaluation release.' }
-if ($VerifyOnly -and ($LlmProvider -or $LlmBaseUrl -or $LlmModel -or $SetLlmKey -or $LlmReasoningEffort -or $LlmFallbackModels -or $SetEarthdataToken)) { throw 'Verification cannot change settings.' }
+if ($VerifyOnly -and ($LlmProvider -or $LlmBaseUrl -or $LlmModel -or $SetLlmKey -or $LlmReasoningEffort -or $LlmFallbackModels -or $LlmRequestSeconds -or $LlmAnswerSeconds -or $SetEarthdataToken)) { throw 'Verification cannot change settings.' }
 
 function Invoke-Azure([string[]]$Arguments) {
     $result = & az @Arguments --only-show-errors --output json
@@ -244,7 +248,9 @@ elseif ($DisableAutomation -or -not (Get-Setting 'AUTOMATION_SCHEDULER_ENABLED')
 Set-Value 'RELEASE_MODE' $ReleaseMode
 Set-Value 'CLOUD_DEPLOYMENT' 'true'
 Set-Value 'OPERATION_WORKER_ENABLED' 'true'
-Set-Value 'LLM_TOTAL_SECONDS' '120'
+if ($LlmAnswerSeconds) { Set-Value 'LLM_TOTAL_SECONDS' "$LlmAnswerSeconds" }
+elseif (-not (Get-Setting 'LLM_TOTAL_SECONDS')) { Set-Value 'LLM_TOTAL_SECONDS' '120' }
+if ($LlmRequestSeconds) { Set-Value 'LLM_TIMEOUT_SECONDS' "$LlmRequestSeconds" }
 Set-Value 'DEPLOYED_AT' ([DateTime]::UtcNow.ToString('o'))
 Set-Value 'AUTO_REGISTER_MODELS' 'true'
 if (-not (Get-Setting 'EMAIL_ACTION_SECRET')) {
