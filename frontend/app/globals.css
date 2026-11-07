@@ -1423,7 +1423,13 @@ select.input,
   font-size: 15px;
 }
 .copilot-page {
-  padding-top: 28px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+/* the Copilot uses the whole page: full width, the height below the header */
+.copilot-page .wrap {
+  max-width: none;
+  padding: 0 20px;
 }
 .copilot {
   position: relative;
@@ -1451,7 +1457,7 @@ select.input,
   display: flex;
   flex-direction: column;
   min-height: 0;
-  height: min(76vh, 780px);
+  height: max(560px, calc(100dvh - 200px));
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
@@ -1661,7 +1667,7 @@ select.input,
   display: flex;
   flex-direction: column;
   min-width: 0;
-  height: min(76vh, 780px);
+  height: max(560px, calc(100dvh - 200px));
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-card);

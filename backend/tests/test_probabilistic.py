@@ -80,3 +80,10 @@ def test_a_forecast_keeps_member_probabilities_and_its_verification_scores_them(
     assert means["layers"]["hybrid"]["rmse"]["mean"] >= 0
     assert "rmse_change_vs_raw" in means["layers"]["hybrid"]
     assert env.client.get("/verification/probabilistic?layer=other").status_code == 422
+    # The forecast's own week, shown under its maps beside the observed rainfall.
+    week = env.client.get(
+        f"/forecasts/{record['forecast_id']}/probabilistic?layer=mbc&threshold=10&source=chirps"
+    ).json()
+    assert week["weeks"] == 1 and week["layer"] == "mbc" and week["threshold_mm"] == 10
+    assert len(week["roc"]) == members and "auc" in week and "brier_skill" in week
+    assert env.client.get("/forecasts/unknown/probabilistic").status_code == 404

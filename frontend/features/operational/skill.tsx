@@ -334,7 +334,7 @@ function unitAxis(name: string) {
   };
 }
 
-function Reliability({ data }: { data: ProbabilisticSummary }) {
+export function Reliability({ data }: { data: ProbabilisticSummary }) {
   const colour = COLOURS[data.layer];
   const option = useMemo(() => {
     const rows = (data.reliability ?? []).filter((r) => r.count > 0);
@@ -445,7 +445,7 @@ function Sharpness({ data }: { data: ProbabilisticSummary }) {
   );
 }
 
-function Roc({ data }: { data: ProbabilisticSummary }) {
+export function Roc({ data }: { data: ProbabilisticSummary }) {
   const colour = COLOURS[data.layer];
   const option = useMemo(() => {
     const points = (data.roc ?? []).filter(
@@ -514,7 +514,7 @@ function Roc({ data }: { data: ProbabilisticSummary }) {
   );
 }
 
-function Stat({
+export function Stat({
   label,
   value,
   interval,

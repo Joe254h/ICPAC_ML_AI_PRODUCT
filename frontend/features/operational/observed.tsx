@@ -5,12 +5,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Card, MapFigure, Notice, Tabs } from "@/components/ui";
-import { SERIES, day, num, validDays } from "@/lib/format";
+import { SERIES, day, num, signed, validDays } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type {
   ForecastDetail,
   ForecastRun,
   Metrics,
+  ProbabilisticSummary,
   ReferenceComparison,
   Variant,
 } from "@/types/operational";
@@ -22,6 +23,7 @@ import {
   ofRecord,
   primaryOf,
 } from "@/features/operational/shared";
+import { Reliability, Roc, Stat } from "@/features/operational/skill";
 
 /** The page anchor the archive links to. */
 export const OBSERVED_ANCHOR = "observed";
@@ -43,6 +45,85 @@ function Scores({ metrics }: { metrics?: Metrics }) {
       RMSE <strong>{num(metrics.rmse)} mm</strong> · MAE{" "}
       <strong>{num(metrics.mae)} mm</strong>
     </span>
+  );
+}
+
+/** This week's chance of rainfall above a threshold, from the members, against the
+ * observation shown: its reliability diagram and ROC curve. */
+function WeekChances({
+  forecastId,
+  layer,
+  source,
+}: {
+  forecastId: string;
+  layer: Variant;
+  source: Source;
+}) {
+  const [threshold, setThreshold] = useState(25);
+  const result = useApi<ProbabilisticSummary>(
+    `/forecasts/${forecastId}/probabilistic?layer=${layer}&threshold=${threshold}&source=${source}`,
+  );
+  if (result.status === 404) return null; // an older service
+  const data = result.data;
+  return (
+    <div style={{ marginTop: 22 }}>
+      <div className="evidence-controls">
+        <h3 style={{ margin: 0, alignSelf: "center" }}>Chance of a wet week</h3>
+        <label className="field">
+          Rainfall above
+          <select
+            value={threshold}
+            onChange={(e) => setThreshold(Number(e.target.value))}
+          >
+            {(data?.thresholds_mm ?? [10, 25, 50]).map((t) => (
+              <option key={t} value={t}>
+                {num(t, 0)} mm
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {data && data.weeks === 0 && (
+        <p className="muted-line" style={{ maxWidth: "none" }}>
+          No member probabilities for this week.
+        </p>
+      )}
+      {data && data.weeks > 0 && (
+        <>
+          <div className="stats" style={{ marginBottom: 18 }}>
+            <Stat
+              label="ROC area"
+              value={num(data.auc, 2)}
+              hint="1 perfect, 0.5 no skill"
+            />
+            <Stat
+              label="Brier skill score"
+              value={num(data.brier_skill, 2)}
+              hint="Above 0: better than climatology"
+            />
+            <Stat
+              label="Observed above"
+              value={
+                data.base_rate == null
+                  ? "—"
+                  : `${num(data.base_rate * 100, 0)}%`
+              }
+              hint={`Share of cells above ${num(threshold, 0)} mm`}
+            />
+          </div>
+          <div className="grid-2">
+            <div>
+              <h4 style={{ margin: "0 0 4px" }}>Reliability diagram</h4>
+              <Reliability data={data} />
+            </div>
+            <div>
+              <h4 style={{ margin: "0 0 4px" }}>ROC curve</h4>
+              <Roc data={data} />
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -178,21 +259,40 @@ export default function ObservedComparison({
           <thead>
             <tr>
               <th>Observed by</th>
-              <th className="num">RMSE (mm)</th>
-              <th className="num">MAE (mm)</th>
+              <th className="num">Forecast mean</th>
+              <th className="num">Observed mean</th>
+              <th className="num">RMSE</th>
+              <th className="num">MAE</th>
+              <th className="num">Bias</th>
+              <th className="num">r</th>
             </tr>
           </thead>
           <tbody>
-            {observations.map((o) => (
-              <tr key={o.source}>
-                <td className="strong">{o.name}</td>
-                <td className="num">{num(o.scores[layer]?.rmse)}</td>
-                <td className="num">{num(o.scores[layer]?.mae)}</td>
-              </tr>
-            ))}
+            {observations.map((o) => {
+              const m = o.scores[layer];
+              return (
+                <tr key={o.source}>
+                  <td className="strong">{o.name}</td>
+                  <td className="num">{num(m?.forecast_mean)}</td>
+                  <td className="num">{num(m?.observed_mean)}</td>
+                  <td className="num">{num(m?.rmse)}</td>
+                  <td className="num">{num(m?.mae)}</td>
+                  <td className="num">{signed(m?.bias)}</td>
+                  <td className="num">{num(m?.correlation, 3)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
+      <p className="muted-line" style={{ maxWidth: "none" }}>
+        mm over the 11 member states; bias above 0: forecast too wet.
+      </p>
+      <WeekChances
+        forecastId={detail.forecast_id}
+        layer={layer}
+        source={shown.source}
+      />
       {compared.data && compared.data.some((c) => c.status !== "available") && (
         <Notice title="Not every observation is in yet.">
           {compared.data

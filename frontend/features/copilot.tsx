@@ -873,12 +873,11 @@ export default function Copilot() {
   // The weeks to choose from: each ECMWF run's forecast, and the conversation's own if it
   // is about an earlier version.
   const listed = Array.isArray(forecastList.data) ? forecastList.data : [];
-  // The weekly forecasts first (the latest at the top), then other runs' forecasts.
+  // The weekly (Sunday) forecasts, the latest at the top; other runs only when there are
+  // none.
   const held = ofRecord(listed).filter((r) => !r.synthetic);
-  const weeks = [
-    ...held.filter((r) => isWeekly(r)),
-    ...held.filter((r) => !isWeekly(r)),
-  ];
+  const sundays = held.filter((r) => isWeekly(r));
+  const weeks = sundays.length ? sundays : held;
   const latestWeek = (held.find((r) => r.latest) ?? weeks[0])?.forecast_id;
   const own = listed.find((r) => r.forecast_id === pinned?.forecast_id);
   if (own && !weeks.includes(own)) weeks.push(own);

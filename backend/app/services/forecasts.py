@@ -1076,7 +1076,9 @@ class ForecastService:
                 continue
         return compared
 
-    def verified_weeks(self, limit: int = 52) -> list[dict[str, Any]]:
+    def verified_weeks(
+        self, limit: int = 52, forecast_id: str | None = None
+    ) -> list[dict[str, Any]]:
         """Every verified week, newest first (each Sunday run's forecast of record; another
         day's run only while no Sunday run is verified): the
         scores of each layer against CHIRPS (MAE, RMSE, bias, Pearson r, over the domain's
@@ -1091,8 +1093,11 @@ class ForecastService:
             and (r.get("verification_status") == "available" or r["checked_against"])
         ]
         # One forecast per week: the Sunday runs' forecasts, once there are any; another
-        # day's run overlaps them and would count the same days twice.
+        # day's run overlaps them and would count the same days twice. ``forecast_id``
+        # asks for that one forecast's week, whichever day's run it is.
         sundays = [r for r in scored if r["weekly"]]
+        if forecast_id is not None:
+            scored = sundays = [r for r in scored if r["forecast_id"] == forecast_id]
         for record in sundays or scored:
             verification: dict[str, Any] = {}
             if record.get("verification_status") == "available":
@@ -1197,17 +1202,22 @@ class ForecastService:
         return {"source": source, "weeks": len(weeks), "layers": layers, "series": series}
 
     def probabilistic_summary(
-        self, layer: str | None = None, threshold: float = 25.0, source: str = "best"
+        self,
+        layer: str | None = None,
+        threshold: float = 25.0,
+        source: str = "best",
+        forecast_id: str | None = None,
     ) -> dict[str, Any]:
         """Reliability, ROC, AUC and Brier skill of the chance that the week's rainfall
         exceeds ``threshold`` mm, pooled over the verified weeks that hold member
-        probabilities, with 95% intervals from resampling the weeks. Without ``layer``,
-        the best layer the weeks hold: MBC + AI/ML, else MBC, else raw ECMWF."""
+        probabilities, with 95% intervals from resampling the weeks (or for one forecast's
+        week, ``forecast_id``). Without ``layer``, the best layer the weeks hold: MBC +
+        AI/ML, else MBC, else raw ECMWF."""
         from climate_engine.verification import probabilistic
 
         order = ["chirps", *daily_references.REFERENCES]
         key = f"{float(threshold):g}"
-        weeks = self.verified_weeks()
+        weeks = self.verified_weeks(forecast_id=forecast_id)
         held_layers = {
             name
             for week in weeks

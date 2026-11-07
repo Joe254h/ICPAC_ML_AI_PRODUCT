@@ -238,6 +238,18 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   await expect(
     observed.getByText(/RMSE [\d.]+ mm · MAE [\d.]+ mm/),
   ).toBeVisible();
+  // Under the maps: the week's means and scores, and its chance of a wet week.
+  await expect(
+    observed.getByRole("columnheader", { name: "Observed mean" }),
+  ).toBeVisible();
+  await expect(
+    observed.getByRole("img", { name: /Reliability diagram/ }),
+  ).toBeVisible();
+  await expect(observed.getByRole("img", { name: /ROC curve/ })).toBeVisible();
+  if (process.env.SCREENSHOTS)
+    await observed.screenshot({
+      path: `${process.env.SCREENSHOTS}/observed.png`,
+    });
   await observed.getByRole("button", { name: "ARC 2.0" }).click();
   await expect(
     observed.getByRole("img", { name: /Rainfall observed by ARC 2\.0/ }),

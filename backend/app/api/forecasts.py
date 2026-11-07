@@ -17,7 +17,7 @@ from backend.app.schemas import (
     StopRequest,
     VerificationRequest,
 )
-from backend.app.services.forecasts import ForecastService
+from backend.app.services.forecasts import KIND, ForecastService
 from backend.app.services.monitoring import MonitoringService
 from backend.app.services.operations import OperationService
 from climate_engine.inputs import sources
@@ -439,6 +439,23 @@ def install(app: FastAPI, dependency) -> None:
         exceeding ``threshold`` mm in the week, with 95% intervals; without ``layer``, the
         best layer the verified weeks hold."""
         return ForecastService(platform).probabilistic_summary(layer, threshold, source)
+
+    @app.get("/forecasts/{forecast_id}/probabilistic")
+    def forecast_probabilistic(
+        forecast_id: str,
+        layer: Literal["raw", "mbc", "hybrid"] | None = None,
+        threshold: float = Query(25.0, gt=0, le=500),
+        source: Literal["best", "chirps", "arc2", "rfe2", "imerg"] = "best",
+        platform=Depends(dependency),
+    ) -> dict:
+        """The same for one forecast's verified week: its reliability and ROC (no intervals
+        from a single week)."""
+        service = ForecastService(platform)
+        try:
+            service.repo.get(KIND, forecast_id)
+        except KeyError:
+            raise HTTPException(404, "Unknown forecast") from None
+        return service.probabilistic_summary(layer, threshold, source, forecast_id)
 
     @app.get("/verification/seasonal")
     def seasonal_verification(

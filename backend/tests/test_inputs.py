@@ -513,6 +513,8 @@ def test_the_scores_count_each_week_once_from_its_sunday_run(env, monkeypatch):
         service, "verification", lambda forecast_id: {"domain": {"mbc": {"rmse": 9.0}}}
     )
     assert [w["forecast_id"] for w in service.verified_weeks()] == ["sunday"]
+    # A forecast's own week, whichever day's run it is (its page asks for it).
+    assert [w["forecast_id"] for w in service.verified_weeks(forecast_id="tuesday")] == ["tuesday"]
     listed[1]["weekly"] = False  # no Sunday run verified: the other runs are scored
     assert [w["forecast_id"] for w in service.verified_weeks()] == ["tuesday", "sunday"]
 

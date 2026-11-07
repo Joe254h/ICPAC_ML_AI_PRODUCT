@@ -17,6 +17,11 @@ test("the Copilot answers from the issued forecast", async ({ page }) => {
   const answer = page.locator(".chat-message.assistant").last();
   await expect(answer).toContainText("Kenya", { timeout: 60_000 });
   await expect(answer).toContainText("mm");
+  // The week list holds the Sunday forecasts only, and the chat fills the page.
+  const weeks = page.getByLabel("Forecast week").locator("option");
+  await expect(weeks.first()).toContainText("latest");
+  if (process.env.SCREENSHOTS)
+    await page.screenshot({ path: `${process.env.SCREENSHOTS}/copilot.png` });
   await expect(page.getByLabel("Conversation country")).toHaveValue("Kenya");
   // The new conversation is saved and listed first, as the current one.
   await expect(saved.first()).toHaveAttribute("aria-current", "true");
