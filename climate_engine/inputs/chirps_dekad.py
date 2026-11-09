@@ -27,6 +27,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from climate_engine import ncio
 from climate_engine.cartography.weekly_maps import Scale
 from climate_engine.core import ROOT
 from climate_engine.inputs.chirps import CHIRPSUnavailable, Server, crop, on_model_grid, settings
@@ -113,7 +114,7 @@ def published(server: Server) -> list[Dekad]:
 def read(path: Path, dekad: Dekad) -> xr.DataArray:
     """The dekad's rainfall (mm) from a CHIRPS dekadal NetCDF, checked and cropped."""
     variable = settings()["variable"]
-    with xr.open_dataset(path) as data:
+    with ncio.open_dataset(path) as data:
         if variable not in data:
             raise ValueError(f"The CHIRPS dekad file has no '{variable}' variable")
         field = data[variable]
@@ -178,7 +179,7 @@ def long_term_mean(path: Path, dekad: Dekad, grid: DomainGrid) -> np.ndarray:
     by default), on the model grid."""
     period = settings()["climatology"]
     variable = settings()["variable"]
-    with xr.open_dataset(path) as data:
+    with ncio.open_dataset(path) as data:
         series = data[variable].sel(time=slice(period["start"], period["end"]))
         times = series["time"].dt
         same = series.where(

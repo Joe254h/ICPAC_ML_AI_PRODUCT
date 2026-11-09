@@ -8,6 +8,7 @@ import xarray as xr
 
 from backend.app.db import now
 from backend.app.services.forecasts import ForecastService, Unavailable
+from climate_engine import ncio
 from climate_engine.cartography import icpac_maps as maps
 from climate_engine.core import ROOT
 from climate_engine.products import supplemental
@@ -53,7 +54,7 @@ class SupplementalService:
                 f"supplemental/{forecast_id}/{metadata['revision']}/products.nc",
                 target.read_bytes(),
             )
-        with xr.open_dataset(target) as dataset:
+        with ncio.open_dataset(target) as dataset:
             summary = {}
             for name in metadata["available"]:
                 values = dataset[name].values
@@ -105,7 +106,7 @@ class SupplementalService:
             target.write_bytes(data)
         if file_checksum(target) != record["data_sha256"]:
             raise ValueError("Supplemental product checksum changed")
-        with xr.open_dataset(target) as opened:
+        with ncio.open_dataset(target) as opened:
             return opened.load()
 
     def map(self, record: dict, product: str) -> bytes:

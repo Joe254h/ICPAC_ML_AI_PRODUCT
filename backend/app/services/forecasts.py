@@ -30,6 +30,7 @@ from backend.app.db import now
 from backend.app.schemas import ForecastRunRequest, PackageImportRequest, VerificationRequest
 from backend.app.services import operational
 from backend.app.services.registry import ModelRegistry, status_at
+from climate_engine import ncio
 from climate_engine.cartography import icpac_maps as maps
 from climate_engine.core import ROOT, checksum
 from climate_engine.forecasts import ECMWFS2SForecastProvider
@@ -764,7 +765,7 @@ class ForecastService:
         cache = package_root().parent / "map-previews" / forecast_id / f"overlay-v1-{layer}.png"
         if not cache.exists():
             cache.parent.mkdir(parents=True, exist_ok=True)
-            with xr.open_dataset(self._path(forecast_id, "forecast.nc")) as data:
+            with ncio.open_dataset(self._path(forecast_id, "forecast.nc")) as data:
                 values = data[layer].values.astype(np.float64)
                 latitude, longitude = data.latitude.values, data.longitude.values
             partial = cache.with_name(f".{cache.name}.partial")
@@ -814,7 +815,7 @@ class ForecastService:
                     raise Unavailable("The CHIRPS week of this forecast is no longer held")
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(held)
-            with xr.open_dataset(path) as data:
+            with ncio.open_dataset(path) as data:
                 return np.array(data["precipitation_week2"].values, dtype=float)
         try:
             compared = self.repo.get(REFERENCE_KIND, f"{forecast_id}-{source}")
@@ -968,7 +969,7 @@ class ForecastService:
         folder.mkdir(parents=True, exist_ok=True)
         name = chirps.file_name(start)
         partial = folder / f".{name}.partial"
-        chirps.to_dataset(week, grid).to_netcdf(partial)
+        ncio.to_netcdf(chirps.to_dataset(week, grid), partial)
         partial.replace(folder / name)
         store = package_store()
         if store is not None:
@@ -1504,7 +1505,7 @@ class ForecastService:
             check_domain(run, grid)
             method = packages.method_label(run.provenance)
             if record["observed_by"] == "chirps":  # the verification's own copy
-                with xr.open_dataset(self._path(record["forecast_id"], OBSERVATION)) as obs:
+                with ncio.open_dataset(self._path(record["forecast_id"], OBSERVATION)) as obs:
                     observed = obs["precipitation_week2"].values.astype(np.float64)
             else:
                 observed = self._observed(

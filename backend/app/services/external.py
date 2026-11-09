@@ -25,6 +25,7 @@ import xarray as xr
 
 from backend.app.db import now
 from backend.app.services import operational
+from climate_engine import ncio
 from climate_engine.core import ROOT
 from climate_engine.inputs import chirps, daily_references
 from climate_engine.inputs import external_forecast as reader
@@ -177,7 +178,7 @@ class ExternalForecasts:
     def _save_field(self, identifier: str, values: np.ndarray, grid, start: date) -> None:
         path = self._field_path(identifier)
         path.parent.mkdir(parents=True, exist_ok=True)
-        xr.Dataset(
+        field = xr.Dataset(
             {
                 "precipitation_week2": (
                     ("latitude", "longitude"),
@@ -187,7 +188,8 @@ class ExternalForecasts:
             },
             coords={"latitude": grid.latitude, "longitude": grid.longitude},
             attrs={"valid_start": start.isoformat()},
-        ).to_netcdf(path)
+        )
+        ncio.to_netcdf(field, path)
         store = package_store()
         if store is not None:
             store.put(f"external/{identifier}.nc", path.read_bytes())
@@ -202,7 +204,7 @@ class ExternalForecasts:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(stored)
         grid = operational.authoritative_grid()
-        with xr.open_dataset(path) as dataset:
+        with ncio.open_dataset(path) as dataset:
             values = np.asarray(dataset["precipitation_week2"].values, dtype=np.float64)
         return grid.to_cells(values)
 
@@ -258,9 +260,9 @@ class ExternalForecasts:
             week = chirps.week_total(start, grid, chirps.Server(), store=folder)
             folder.mkdir(parents=True, exist_ok=True)
             partial = folder / f".{path.name}.partial"
-            chirps.to_dataset(week, grid).to_netcdf(partial)
+            ncio.to_netcdf(chirps.to_dataset(week, grid), partial)
             partial.replace(path)
-        with xr.open_dataset(path) as dataset:
+        with ncio.open_dataset(path) as dataset:
             values = np.asarray(dataset["precipitation_week2"].values, dtype=np.float64)
         return grid.to_cells(values)
 

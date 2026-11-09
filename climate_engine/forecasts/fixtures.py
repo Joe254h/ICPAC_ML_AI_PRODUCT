@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from climate_engine import ncio
+
 LABEL = "SYNTHETIC TEST FIXTURE - NOT ECMWF DATA"
 # Pressure-level steps written into synthetic fixtures. They are test values chosen for
 # the fixture, not the training definition, which stays REQUIRED in
@@ -140,7 +142,7 @@ def write_fixture(
         rainfall = rainfall.sel(step=pd.to_timedelta(list(rainfall_steps_hours), unit="h"))
     if not labelled:
         rainfall.attrs.pop("fixture")
-    rainfall.to_netcdf(rain_path)
+    ncio.to_netcdf(rainfall, rain_path)
     if steps_hours is None:
         return rain_path, None
     plat, plon = coarse_axes(
@@ -151,5 +153,5 @@ def write_fixture(
     pressure = pressure_fixture(initialization, plat, plon, steps_hours, members)
     if not labelled:
         pressure.attrs.pop("fixture")
-    pressure.to_netcdf(pressure_path)
+    ncio.to_netcdf(pressure, pressure_path)
     return rain_path, pressure_path

@@ -18,6 +18,7 @@ import numpy as np
 import xarray as xr
 
 from backend.app.services import operational
+from climate_engine import ncio
 from climate_engine.core import ROOT
 from climate_engine.inputs import chirps, chirps_dekad, daily_references, tamsat
 from climate_engine.inputs.chirps_dekad import Dekad
@@ -171,7 +172,7 @@ class MonitoringService:
         path = self.root() / name
         path.parent.mkdir(parents=True, exist_ok=True)
         partial = path.with_name(f".{path.name}.partial")
-        field.to_dataset().to_netcdf(partial)
+        ncio.to_netcdf(field.to_dataset(), partial)
         partial.replace(path)
         store = package_store()
         if store is not None:
@@ -203,7 +204,7 @@ class MonitoringService:
             path = self.root() / name
             path.parent.mkdir(parents=True, exist_ok=True)
             partial = path.with_name(f".{path.name}.partial")
-            field.to_dataset().to_netcdf(partial)
+            ncio.to_netcdf(field.to_dataset(), partial)
             partial.replace(path)
             store = package_store()
             if store is not None:
@@ -283,7 +284,7 @@ class MonitoringService:
                 )
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(saved)
-        with xr.open_dataset(path) as data:
+        with ncio.open_dataset(path) as data:
             return data["precip"].load()
 
     def overlay_png(self, identifier: str, product: str) -> bytes:

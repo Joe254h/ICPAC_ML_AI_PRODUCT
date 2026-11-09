@@ -21,6 +21,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from climate_engine import ncio
 from climate_engine.core import config
 from climate_engine.inputs.chirps import CHIRPSUnavailable, Server, crop
 from climate_engine.inputs.chirps_dekad import Dekad
@@ -75,7 +76,7 @@ def published(source: Server, today: date | None = None) -> list[Dekad]:
 def read(path: Path, dekad: Dekad) -> xr.DataArray:
     """The dekad's rainfall (mm) from a TAMSAT dekadal NetCDF, checked and cropped."""
     cfg = settings()
-    with xr.open_dataset(path) as data:
+    with ncio.open_dataset(path) as data:
         variable = next((v for v in cfg["variables"] if v in data), None)
         if variable is None:
             raise ValueError(f"The TAMSAT file has none of {', '.join(cfg['variables'])}")

@@ -22,10 +22,10 @@ from functools import cache
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import xarray as xr
 from matplotlib.path import Path as MplPath
 from PIL import Image
 
+from climate_engine import ncio
 from climate_engine.cartography import icpac_maps as maps
 from climate_engine.cartography import weekly_maps
 
@@ -136,7 +136,7 @@ def primary(inputs: BulletinInputs) -> str:
 
 def read_layer(inputs: BulletinInputs, layer: str | None = None) -> Grid:
     layer = layer or primary(inputs)
-    with xr.open_dataset(inputs.package / "forecast.nc") as dataset:
+    with ncio.open_dataset(inputs.package / "forecast.nc") as dataset:
         return Grid(
             np.array(dataset[layer].values, dtype=float),
             np.array(dataset.latitude.values, dtype=float),
@@ -463,7 +463,7 @@ def chance_lines(inputs: BulletinInputs, masks: dict[str, np.ndarray]) -> list[t
     area where at least half of the members exceed 25 and 50 mm in the week. Forecasts made
     before the members' counts were kept have none."""
     layer = primary(inputs)
-    with xr.open_dataset(inputs.package / "forecast.nc") as dataset:
+    with ncio.open_dataset(inputs.package / "forecast.nc") as dataset:
         name = f"members_above_{layer}"
         if name not in dataset:
             return []

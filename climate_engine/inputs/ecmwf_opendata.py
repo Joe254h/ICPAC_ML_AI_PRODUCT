@@ -36,6 +36,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from climate_engine import ncio
 from climate_engine.core import config
 from climate_engine.operational.ecmwf import PRESSURE_INPUTS, coarsen
 
@@ -393,7 +394,7 @@ def fetch(initialization: date, directory: Path) -> FetchResult:
             )
             target = directory / file_name(initialization)
             partial = target.with_name(f".{target.name}.partial")
-            dataset.to_netcdf(partial)
+            ncio.to_netcdf(dataset, partial)
             partial.replace(target)
             return FetchResult(
                 initialization,
@@ -673,7 +674,7 @@ def fetch_pressure(
         )
         target = directory / file_name(initialization, "pl")
         partial = target.with_name(f".{target.name}.partial")
-        dataset.to_netcdf(partial)
+        ncio.to_netcdf(dataset, partial)
         partial.replace(target)
         return FetchResult(
             initialization,

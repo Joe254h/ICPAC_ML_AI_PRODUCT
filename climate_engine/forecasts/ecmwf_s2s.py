@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from climate_engine import ncio
 from climate_engine.forecasts import ForecastProvider
 from climate_engine.operational.ecmwf import PRESSURE_INPUTS, check_pressure_units
 from climate_engine.operational.settings import required, settings
@@ -56,7 +57,9 @@ def open_store(path: Path) -> xr.Dataset:
         raise FileNotFoundError(f"Forecast input missing: {path.name}")
     if path.is_dir() or path.suffix == ".zarr":
         return xr.open_zarr(path)
-    return xr.open_dataset(path)
+    # Read whole: a lazily read file would reach netCDF later, outside the lock. The run's
+    # files are cropped to the region (tens of MB).
+    return ncio.load_dataset(path)
 
 
 def select_cycle(ds: xr.Dataset, cycle: str) -> xr.Dataset:

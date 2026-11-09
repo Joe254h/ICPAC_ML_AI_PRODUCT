@@ -42,6 +42,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from climate_engine import ncio
 from climate_engine.cartography import icpac_maps as maps
 from climate_engine.operational.grid import DomainGrid
 from climate_engine.operational.pipeline import ForecastRun, is_synthetic, present, primary_layer
@@ -394,7 +395,8 @@ def write_package(
     try:
         dataset = run.dataset.copy()
         dataset.attrs["provenance"] = json.dumps(run.provenance, default=str)
-        dataset.to_netcdf(
+        ncio.to_netcdf(
+            dataset,
             staging / "forecast.nc",
             engine="netcdf4",
             format="NETCDF4",
@@ -515,7 +517,7 @@ def load_run(directory: Path) -> ForecastRun:
 
     forecast_id = snapshot["forecast_id"]
     provenance = read("provenance.json")
-    with xr.open_dataset(directory / "forecast.nc") as stored:
+    with ncio.open_dataset(directory / "forecast.nc") as stored:
         dataset = stored.load()
     named = {
         "directory": directory.name,
@@ -557,7 +559,8 @@ def add_verification(
         try:
             names = ["verification.json"]
             if observed is not None:
-                observed.to_netcdf(
+                ncio.to_netcdf(
+                    observed,
                     revision / OBSERVATION_FILE,
                     engine="netcdf4",
                     format="NETCDF4",

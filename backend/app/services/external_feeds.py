@@ -13,9 +13,9 @@ from hashlib import sha256
 from pathlib import Path
 
 import numpy as np
-import xarray as xr
 
 from backend.app.db import now
+from climate_engine import ncio
 from climate_engine.core import ROOT
 from climate_engine.products.store import package_store
 from climate_engine.provenance import file_checksum
@@ -116,7 +116,7 @@ def quality_check(path: Path, profile: dict) -> dict:
     expected = profile["expected_units"]
     seen = set()
     if profile["format"] == "netcdf":
-        with xr.open_dataset(path) as dataset:
+        with ncio.open_dataset(path) as dataset:
             for name, units in expected.items():
                 if name not in dataset or dataset[name].attrs.get("units") != units:
                     raise ValueError(

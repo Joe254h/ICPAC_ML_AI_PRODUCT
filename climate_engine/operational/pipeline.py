@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from climate_engine import ncio
 from climate_engine.core import ROOT, checksum
 from climate_engine.forecasts import ForecastProvider
 from climate_engine.models.residual import InferenceResult, ResidualMBCModel
@@ -402,7 +403,7 @@ def run_forecast(
 
 def load_observed(path: Path, grid: DomainGrid, start: datetime, end: datetime) -> np.ndarray:
     """Observed Week-2 total (mm) on the model grid for exactly the run's valid window."""
-    with xr.open_dataset(path) as ds:
+    with ncio.open_dataset(path) as ds:
         if "precipitation_week2" not in ds:
             raise ValueError("Observation file lacks precipitation_week2")
         field = ds["precipitation_week2"].load()

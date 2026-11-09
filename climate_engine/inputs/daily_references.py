@@ -27,6 +27,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from climate_engine import ncio
 from climate_engine.core import config
 from climate_engine.inputs.chirps import CHIRPSUnavailable, Server, client, crop, read_geotiff
 from climate_engine.inputs.chirps_dekad import Dekad
@@ -134,7 +135,7 @@ def read_imerg(data: bytes, cfg: dict[str, Any]) -> tuple[np.ndarray, np.ndarray
     with tempfile.TemporaryDirectory() as scratch:
         path = Path(scratch) / "day.nc4"
         path.write_bytes(data)
-        with xr.open_dataset(path) as dataset:
+        with ncio.open_dataset(path) as dataset:
             variable = next((v for v in cfg["variables"] if v in dataset), None)
             if variable is None:
                 raise ValueError(f"The IMERG file has none of {', '.join(cfg['variables'])}")
@@ -164,7 +165,7 @@ def fetch_day(
     """One day's rainfall (mm), checked and cropped to the region; a day already held is
     reused."""
     if store is not None and _path(store, source, day).exists():
-        with xr.open_dataset(_path(store, source, day)) as held:
+        with ncio.open_dataset(_path(store, source, day)) as held:
             return held["precip"].load()
     cfg = settings(source)
     source_server = source_server or server(source)
@@ -203,7 +204,7 @@ def fetch_day(
     if store is not None:
         store.mkdir(parents=True, exist_ok=True)
         partial = store / f".{source}-{day.isoformat()}.partial"
-        field.to_dataset().to_netcdf(partial)
+        ncio.to_netcdf(field.to_dataset(), partial)
         partial.replace(_path(store, source, day))
     return field
 

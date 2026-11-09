@@ -86,13 +86,13 @@ def _units(raw: str) -> str:
 def read(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
     """The week's total (mm) on the file's grid: values (latitude, longitude), latitude and
     longitude (ascending), and what was done to get it."""
-    import xarray as xr
+    from climate_engine import ncio
 
     notes: list[str] = []
     try:
-        dataset = xr.open_dataset(path)
+        dataset = ncio.load_dataset(path)  # at most MAX_BYTES
     except ValueError:  # an unusual calendar: read without dates
-        dataset = xr.open_dataset(path, decode_times=False)
+        dataset = ncio.load_dataset(path, decode_times=False)
     except Exception as exc:
         raise Refused(f"The file could not be read as NetCDF ({type(exc).__name__})") from exc
     with dataset:

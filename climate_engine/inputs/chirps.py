@@ -37,6 +37,7 @@ import httpx
 import numpy as np
 import xarray as xr
 
+from climate_engine import ncio
 from climate_engine.core import config
 from climate_engine.operational.grid import DomainGrid
 
@@ -420,7 +421,7 @@ def read_mirror(data: bytes) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     with tempfile.NamedTemporaryFile(suffix=".nc") as handle:
         handle.write(data)
         handle.flush()
-        with xr.open_dataset(handle.name) as opened:
+        with ncio.open_dataset(handle.name) as opened:
             loaded = opened.load()
     precip = loaded["precip"]
     if "time" in precip.dims:
@@ -445,7 +446,7 @@ def _save_day(store: Path, info: "Day", values, latitude, longitude, nodata) -> 
     path = _store_file(store, info.day)
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix(".part")
-    xr.Dataset(
+    day = xr.Dataset(
         {"precip": (("latitude", "longitude"), values, {"units": "mm/day"})},
         coords={"latitude": latitude, "longitude": longitude},
         attrs={
@@ -454,14 +455,15 @@ def _save_day(store: Path, info: "Day", values, latitude, longitude, nodata) -> 
             "url": info.url,
             "sha256": info.sha256,
         },
-    ).to_netcdf(partial)
+    )
+    ncio.to_netcdf(day, partial)
     partial.replace(path)
 
 
 def _held_day(store: Path | None, day: date) -> tuple[xr.Dataset, dict] | None:
     if store is None or not _store_file(store, day).exists():
         return None
-    with xr.open_dataset(_store_file(store, day)) as data:
+    with ncio.open_dataset(_store_file(store, day)) as data:
         data = data.load()
     return data, dict(data.attrs)
 

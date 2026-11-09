@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from climate_engine import ncio
 from climate_engine.core import checksum
 from climate_engine.provenance import file_checksum, permitted_file
 
@@ -48,7 +49,7 @@ def field(entry: dict, reference: xr.Dataset, mask: np.ndarray) -> xr.DataArray:
     path = permitted_file(entry["file"], "DATA_ROOT", "data")
     if file_checksum(path) != entry["sha256"]:
         raise ValueError("A reviewed weekly reference artifact changed")
-    with xr.open_dataset(path) as opened:
+    with ncio.open_dataset(path) as opened:
         data = opened[entry["variable"]].load()
     if file_checksum(path) != entry["sha256"]:
         raise ValueError("The reference artifact changed while it was being read")
@@ -177,7 +178,7 @@ def build(directory: Path, output: Path, primary: str) -> dict:
         }
     document, digest = reviewed
     provenance = json.loads((directory / "provenance.json").read_text(encoding="utf-8"))
-    with xr.open_dataset(directory / "forecast.nc") as dataset:
+    with ncio.open_dataset(directory / "forecast.nc") as dataset:
         derived, metadata = compute(dataset.load(), primary, provenance, document)
     # The output revision also changes when the underlying forecast bytes change.
     forecast_hash = file_checksum(directory / "forecast.nc")
@@ -192,7 +193,7 @@ def build(directory: Path, output: Path, primary: str) -> dict:
 
     partial = revision / f".{uuid4().hex}.nc"
     try:
-        derived.to_netcdf(partial)
+        ncio.to_netcdf(derived, partial)
         partial.replace(target)
     finally:
         partial.unlink(missing_ok=True)
