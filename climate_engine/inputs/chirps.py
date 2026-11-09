@@ -23,6 +23,7 @@ import io
 import os
 import re
 import socket
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -399,6 +400,38 @@ def crop(
     return values[np.ix_(rows, cols)], latitude[rows], longitude[cols]
 
 
+def mirror_url(day: date) -> str | None:
+    """The day's final CHIRPS v2.0 from an open mirror (NOAA CoastWatch ERDDAP, which copies
+    CHC's daily 0.05 degree files), cut to the region by the mirror; None when switched off
+    (``CHIRPS_MIRROR_URL=off``)."""
+    base = os.getenv("CHIRPS_MIRROR_URL") or settings().get("mirror")
+    if not base or base == "off":
+        return None
+    box = settings()["crop"]
+    moment = f"({day.isoformat()}T00:00:00Z)"
+    return (
+        f"{base.rstrip('/')}.nc?precip[{moment}:1:{moment}]"
+        f"[({box['south']}):1:({box['north']})][({box['west']}):1:({box['east']})]"
+    )
+
+
+def read_mirror(data: bytes) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The day's rainfall (mm), latitude and longitude from the mirror's NetCDF."""
+    with tempfile.NamedTemporaryFile(suffix=".nc") as handle:
+        handle.write(data)
+        handle.flush()
+        with xr.open_dataset(handle.name) as opened:
+            loaded = opened.load()
+    precip = loaded["precip"]
+    if "time" in precip.dims:
+        precip = precip.isel(time=0)
+    return (
+        np.asarray(precip.values, dtype=np.float64),
+        np.asarray(loaded["latitude"].values, dtype=np.float64),
+        np.asarray(loaded["longitude"].values, dtype=np.float64),
+    )
+
+
 def _store_file(store: Path, day: date) -> Path:
     return store / "daily" / f"chirps-v2.0.{day.isoformat()}.nc"
 
@@ -463,8 +496,51 @@ def fetch_day(
             _save_day(store, info, *crop(values, latitude, longitude), nodata)
         return field_, info
 
+    def from_chc() -> tuple[np.ndarray, Day]:
+        return _from_chc(day, server, held, keep, from_held)
+
+    def from_mirror() -> tuple[np.ndarray, Day] | None:
+        """The final product from the open mirror, asked once, when CHC cannot give it."""
+        url = mirror_url(day)
+        if url is None:
+            return None
+        try:
+            data = server.get(url) if server.get else download(url)
+        except (httpx.HTTPError, OSError):
+            return None
+        if not data:
+            return None
+        data = bytes(data)
+        if not data.startswith((b"CDF", b"\x89HDF")):
+            return None
+        values, latitude, longitude = read_mirror(data)
+        field_ = on_model_grid(values, latitude, longitude, grid, None)
+        missing = int(np.count_nonzero(~np.isfinite(grid.to_cells(field_))))
+        info = Day(day, "final", url, hashlib.sha256(data).hexdigest(), missing)
+        if store is not None:
+            _save_day(store, info, *crop(values, latitude, longitude), None)
+        return field_, info
+
     if held and held[1].get("product") == "final":
         return from_held()
+    try:
+        return from_chc()
+    except CHIRPSUnavailable:
+        mirrored = from_mirror()
+        if mirrored is None:
+            raise
+        return mirrored
+
+
+def _from_chc(
+    day: date,
+    server: Server,
+    held: tuple[xr.Dataset, dict] | None,
+    keep: Callable[[str, str, bytes], tuple[np.ndarray, Day]],
+    from_held: Callable[[], tuple[np.ndarray, Day]],
+) -> tuple[np.ndarray, Day]:
+    """The day from CHC's own server: listed final, else preliminary, else the copy held,
+    else the file at its usual address."""
     listed = False
     for product in PRODUCTS:
         url = server.daily_url(product, day)

@@ -45,3 +45,5 @@ def _no_startup_registration(monkeypatch):
         "HPC_RECEIPT_ROOT",
     ):
         monkeypatch.delenv(name, raising=False)
+    # The open CHIRPS mirror is never asked from a test unless it sets one.
+    monkeypatch.setenv("CHIRPS_MIRROR_URL", "off")

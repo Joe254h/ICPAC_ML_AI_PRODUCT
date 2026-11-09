@@ -348,6 +348,40 @@ def test_chirps_days_are_found_at_their_address_when_the_listing_names_none(env,
         chirps.week_total(start, env.grid, chirps.Server(chc({})))
 
 
+def test_chirps_days_come_from_the_open_mirror_when_chc_cannot_give_them(
+    env, tmp_path, monkeypatch
+):
+    """CHC refused the service from late October 2026: a day it cannot give is read from
+    NOAA's ERDDAP copy of the final product, cut to the region by the mirror."""
+    monkeypatch.setenv("CHIRPS_MIRROR_URL", "https://mirror.example/erddap/griddap/chirps")
+    start = date(2026, 8, 16)
+    asked: list[str] = []
+
+    def mirror_day(day: date) -> bytes:
+        return xr.Dataset(
+            {"precip": (("time", "latitude", "longitude"), np.full((1, LAT.size, LON.size), 4.0))},
+            coords={"time": [np.datetime64(day.isoformat())], "latitude": LAT, "longitude": LON},
+        ).to_netcdf()
+
+    def get(url: str) -> bytes | None:
+        asked.append(url)
+        if url.startswith("https://mirror.example/"):
+            day = date.fromisoformat(url.split("precip[(")[1][:10])
+            return mirror_day(day)
+        return None  # CHC: no listing, no file
+
+    result = chirps.week_total(start, env.grid, chirps.Server(get), tmp_path)
+    assert result.products == ["final"]
+    assert all(d.url.startswith("https://mirror.example/") for d in result.days)
+    cells = env.grid.to_cells(result.values)
+    assert np.allclose(cells[np.isfinite(cells)], 7 * 4.0)
+    assert "precip[(2026-08-16T00:00:00Z):1:(2026-08-16T00:00:00Z)]" in asked[-7]
+    # Switched off, the week waits for CHC as before.
+    monkeypatch.setenv("CHIRPS_MIRROR_URL", "off")
+    with pytest.raises(chirps.CHIRPSUnavailable):
+        chirps.week_total(start, env.grid, chirps.Server(chc({})))
+
+
 def test_chirps_days_held_are_reused_until_the_final_product_appears(env, tmp_path):
     start = date(2026, 9, 21)
     store = tmp_path / "chirps"
