@@ -36,6 +36,7 @@ from backend.app.services.bulletins import (
     WEEKLY,
     BulletinService,
     RevisionRefused,
+    TranslationBusy,
     decision_label,
 )
 from backend.app.services.registry import ModelRegistry
@@ -425,6 +426,10 @@ def install(app: FastAPI, dependency):
             return BulletinService(platform).start_translation(
                 id, body.language, acting_name(user, body.actor)
             )
+        except TranslationBusy as exc:
+            raise HTTPException(429, str(exc), headers={"Retry-After": "5"}) from None
+        except RevisionRefused as exc:
+            raise HTTPException(422, str(exc)) from None
         except KeyError:
             raise HTTPException(404, "Unknown bulletin") from None
 

@@ -20,6 +20,20 @@ def _day(value: str) -> str:
     return f"{day.day} {day:%b %Y}"
 
 
+def monitoring_health(name: str, held: list[dict], check: dict) -> str:
+    """A cached observation is not evidence that the last provider check succeeded."""
+    cached = ""
+    if held:
+        latest = held[0]
+        cached = f"latest dekad {date.fromisoformat(latest['start']).day}–{_day(latest['end'])}" + (
+            " (preliminary)" if name == "CHIRPS" else ""
+        )
+    if check.get("status") == "failed":
+        reason = check.get("reason") or "the latest provider check failed"
+        return f"Warning · {reason}" + (f"; cached {cached}" if cached else "")
+    return f"Healthy · {cached}" if cached else f"Warning · no {name} dekad downloaded yet"
+
+
 def model_label(model: str) -> str:
     """A model's name in words: gemini-3.8-flash -> Gemini 3.8 Flash."""
     return " ".join(
@@ -146,26 +160,16 @@ def system_health(platform) -> dict:
     )
     from backend.app.services.monitoring import MonitoringService
 
-    dekads = MonitoringService(platform).dekads()
-    components["CHIRPS monitoring"] = (
-        "Healthy · latest dekad "
-        f"{date.fromisoformat(dekads[0]['start']).day}–{_day(dekads[0]['end'])} (preliminary)"
-        if dekads
-        else "Warning · no CHIRPS dekad downloaded yet"
+    monitor = MonitoringService(platform)
+    components["CHIRPS monitoring"] = monitoring_health(
+        "CHIRPS", monitor.dekads(), monitor.last_check() or {}
     )
     from backend.app.services.monitoring import NAMES
 
     for source in ("tamsat", "arc2", "rfe2", "imerg"):
         monitor = MonitoringService(platform, source)
-        held = monitor.dekads()
-        check = monitor.last_check() or {}
-        components[f"{NAMES[source]} monitoring"] = (
-            "Healthy · latest dekad "
-            f"{date.fromisoformat(held[0]['start']).day}–{_day(held[0]['end'])}"
-            if held
-            else f"Warning · {check['reason']}"
-            if check.get("status") == "failed" and check.get("reason")
-            else f"Warning · no {NAMES[source]} dekad downloaded yet"
+        components[f"{NAMES[source]} monitoring"] = monitoring_health(
+            NAMES[source], monitor.dekads(), monitor.last_check() or {}
         )
     from backend.app.services.bulletin_mail import email_status
 

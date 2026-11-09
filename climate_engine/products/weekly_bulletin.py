@@ -424,12 +424,11 @@ def correction_lines(inputs: BulletinInputs) -> list[tuple[str, str]]:
     raw, issued = means.get("raw"), means.get(layer)
     if raw is None or issued is None:
         return []
-    change = (issued - raw) / raw * 100 if raw else 0.0
+    change = f"{(issued - raw) / raw * 100:+.0f}%" if raw else f"{issued - raw:+.1f} mm"
     lines = [
         (
             "Region:",
-            f" raw ECMWF {raw:.1f} mm, {LAYER_WORDS.get(layer, layer)} {issued:.1f} mm "
-            f"({change:+.0f}%).",
+            f" raw ECMWF {raw:.1f} mm, {LAYER_WORDS.get(layer, layer)} {issued:.1f} mm ({change}).",
         )
     ]
     rows = [r for r in facts.get("countries", []) if r.get("raw_mean_mm") is not None]
@@ -470,17 +469,27 @@ def chance_lines(inputs: BulletinInputs, masks: dict[str, np.ndarray]) -> list[t
         counts = np.asarray(dataset[name].values)
         thresholds = [float(t) for t in dataset["threshold_mm"].values]
         members = int(dataset.attrs.get("probability_members") or dataset[name].attrs["members"])
+        weights = np.broadcast_to(
+            np.cos(np.deg2rad(dataset["latitude"].values))[:, None], counts.shape[1:]
+        )
     if members < 2:
         return []
     likely = counts * 2 >= members  # at least half of the members
     lines = []
+    covered = False
     for country, mask in masks.items():
         shares = {}
         for threshold in (25.0, 50.0):
             if threshold not in thresholds:
                 continue
-            cells = likely[thresholds.index(threshold)][mask]
-            shares[threshold] = float(cells.mean() * 100) if cells.size else 0.0
+            index = thresholds.index(threshold)
+            selected = mask & (counts[index] >= 0) & (counts[index] <= members)
+            if not selected.any():
+                continue
+            covered = True
+            shares[threshold] = float(
+                np.average(likely[index][selected], weights=weights[selected]) * 100
+            )
         if shares.get(25.0, 0.0) >= 5:
             above_50 = shares.get(50.0, 0.0)
             lines.append(
@@ -492,6 +501,8 @@ def chance_lines(inputs: BulletinInputs, masks: dict[str, np.ndarray]) -> list[t
                 )
             )
     lines.sort(key=lambda line: -float(line[1].split(" over ")[1].split("%")[0]))
+    if not covered:
+        return []
     if not lines:
         return [
             (
@@ -504,7 +515,8 @@ def chance_lines(inputs: BulletinInputs, masks: dict[str, np.ndarray]) -> list[t
         (
             "How to read:",
             f" where at least half of the {members} ensemble members agree; a single "
-            "best estimate (the maps) can hide this spread.",
+            "best estimate (the maps) can hide this spread. Area shares use latitude weights "
+            "over cells with member counts; this agreement is uncalibrated.",
         ),
         *lines[:6],
     ]

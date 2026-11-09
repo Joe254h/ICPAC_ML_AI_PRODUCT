@@ -9,12 +9,12 @@ forecasts against CHIRPS. It shows three forecast layers:
 
 * **Raw ECMWF**: the ensemble mean of the Week-2 total (perturbed members 1–10, the
   ensemble size the model was trained on);
-* **MBC**: the locked multiplicative bias correction, `max(0, raw × R[month, cell])`,
-  the forecast issued today;
+* **MBC**: the selected model's frozen multiplicative bias correction,
+  `max(0, raw × R[month, cell])`;
 * **MBC + AI/ML**: the hybrid residual-corrected forecast,
-  `max(MBC + CatBoost residual, 0)`, from 37 rainfall and atmospheric features. It is
-  **in progress**: it needs the pressure-level inputs described in
-  [weekly operations](docs/operations.md#the-mbc--aiml-hybrid-layer-in-progress).
+  `max(MBC + CatBoost residual, 0)`, using the selected artifact's frozen input schema.
+  It is available only when compatible pressure-level inputs and an approved evaluation
+  model are present; missing layers remain visibly unavailable.
 
 It also monitors observed rainfall dekad by dekad from CHIRPS and four further estimates, downloaded the
 way ICPAC's
@@ -27,10 +27,11 @@ Rainfall monitoring shows five observed estimates (CHIRPS, TAMSAT, ARC 2.0, RFE 
 GPM IMERG), and each verified forecast is also scored against ARC 2.0, RFE 2.0 and GPM
 IMERG next to CHIRPS, the reference ([operations](docs/operations.md#arc-20-rfe-20-and-gpm-imerg)).
 
-The model in use is the **candidate** `mbc_atmos37_catboost_candidate_v1` (378 trees,
-trained 2008–2019, validated 2020–2021). It is not the production model: production
-needs a passed independent 2022–2024 test from the HPC and a named reviewer. The refit
-arrives as a new version.
+The recorded evaluation decision uses **candidate** `icpac_week2_catboost_refit_v1`
+(300 trees, 24 inputs, fitted on 2005–2021). Its 2022–2024 comparison is retrospective:
+those years had already informed policy selection. It is not a new independent test
+or a production approval. The registered pre-refit models remain available for rollback;
+see the [model lifecycle and evidence](docs/operational_models.md).
 
 | Part | Where |
 |---|---|
@@ -154,7 +155,16 @@ check every page, the bulletin review and the Copilot (`frontend/e2e`).
 
 ## Screenshots
 
-![Overview](docs/screenshots/overview.png)
+The current [engineering review](docs/review-2026-11-09.md) separates local test evidence,
+deployed versions and external scientific inputs. For Copilot instruction tuning on
+Kaggle, use the [multilingual notebook and data guide](training/copilot/README.md).
+The existing [translation kit](docs/language_training.md) remains separate.
+
+![Connected verification workspace](docs/screenshots/review-2026-11-09-verification.png)
+
+[New mobile Copilot](docs/screenshots/review-2026-11-09-copilot-mobile.png) ·
+[Arabic and dark mode](docs/screenshots/review-2026-11-09-arabic-dark.png).
+These review screenshots use local QA fixture data, not operational weather.
 
 [Forecast](docs/screenshots/forecast.png) · [Maps](docs/screenshots/maps.png) ·
 [Member states](docs/screenshots/countries.png) · [Country](docs/screenshots/country.png) ·
@@ -170,7 +180,11 @@ environment's network.
 
 Every number in the interface comes from the API. Anomalies and tercile categories are
 reported as in progress until a Week-2 climatology and thresholds exist, as are the
-bulletin's temperature and heat-stress sections. The 2022–2024 period is the protected independent test: the
-platform never fits, tunes or selects models, and forecasts valid in that period are
-verified for display only. Open dependencies are listed in
+bulletin's temperature and heat-stress sections. The 2022–2024 period remains protected
+from weather-model fitting and tuning by the platform. Pre-refit results are labelled
+as the independent test; the final refit's results are a retrospective comparison,
+not a new independent test. The service never fits or selects weather models, and
+forecasts valid in the protected period are verified for display only. The offline
+Copilot language-training notebook is separate from those scientific artifacts.
+Open dependencies are listed in
 [operational models](docs/operational_models.md#missing-dependencies).

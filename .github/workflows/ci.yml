@@ -43,8 +43,8 @@ jobs:
           PY
       - name: Verify the committed HPC artifacts against their SHA256
         run: python -m scripts.verify_artifacts
-      - run: ruff format --check backend climate_engine chatbot scripts
-      - run: ruff check backend climate_engine chatbot scripts
+      - run: ruff format --check backend climate_engine chatbot scripts training/copilot
+      - run: ruff check backend climate_engine chatbot scripts training/copilot
       - run: mypy backend climate_engine chatbot
       - run: python -X faulthandler -m pytest -q
         env:

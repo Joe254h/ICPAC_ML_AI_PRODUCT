@@ -101,6 +101,23 @@ def test_weeks_are_named_by_their_boundary_dates_as_in_the_reference(inputs):
     assert weekly.FORMAT_VERSION == "icpac-weekly-v3"
 
 
+def test_correction_from_zero_raw_rainfall_reports_mm_instead_of_a_false_zero_percent(inputs):
+    inputs.interpretation["domain_mean_mm"] = {"raw": 0.0, "hybrid": 10.0}
+    line = weekly.correction_lines(inputs)[0][1]
+    assert "+10.0 mm" in line and "+0%" not in line
+
+
+def test_ensemble_area_shares_exclude_missing_counts_and_use_latitude_weights(inputs):
+    counts = np.array([[[10], [0], [-1]]], dtype=np.int8)
+    xr.Dataset(
+        {"members_above_hybrid": (("threshold_mm", "latitude", "longitude"), counts)},
+        coords={"threshold_mm": [25.0], "latitude": [0.0, 60.0, 80.0], "longitude": [40.0]},
+        attrs={"probability_members": 10},
+    ).to_netcdf(inputs.package / "forecast.nc")
+    lines = weekly.chance_lines(inputs, {"Kenya": np.ones((3, 1), dtype=bool)})
+    assert "67%" in lines[1][1]  # 1 / (cos(0) + cos(60)); the missing cell is excluded.
+
+
 def test_rainfall_bullets_use_the_reference_wording_and_the_forecast_grid(inputs):
     sections = {s["key"]: s for s in weekly.sections(inputs)}
     rainfall = sections["rainfall"]

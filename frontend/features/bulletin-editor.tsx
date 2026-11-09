@@ -1,12 +1,12 @@
 "use client";
 /** Editing a weekly bulletin draft on the website, and translating it. Each save is a new
  * draft version; its Word document and maps are made again from it. */
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Languages, Plus, Save, Trash2 } from "lucide-react";
 import { Button, Card, ErrorState, Notice } from "@/components/ui";
 import { useActor } from "@/lib/actor";
 import { useLanguage } from "@/lib/language";
-import { mutate, request } from "@/services/api";
+import { ApiError, mutate, request } from "@/services/api";
 import type { Bulletin, BulletinSection } from "@/types/workflows";
 
 /** A draft being translated on the server, section by section. */
@@ -257,27 +257,102 @@ export function TranslateDraft({
   const [shared, setLanguage] = useLanguage();
   const language = shared in TRANSLATIONS ? shared : "sw";
   const [job, setJob] = useState<TranslationJob | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [recovering, setRecovering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const running = job?.status === "running";
+  const storageKey = `icpac-translation-${draft.id}`;
+  const onDoneRef = useRef(onDone);
+  useEffect(() => {
+    onDoneRef.current = onDone;
+  }, [onDone]);
+  useEffect(() => {
+    let active = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    setJob(null);
+    setRecovering(false);
+    try {
+      const saved = sessionStorage.getItem(storageKey);
+      if (saved) {
+        setRecovering(true);
+        const restore = async () => {
+          try {
+            const held = await request<TranslationJob>(
+              `/bulletins/translations/${encodeURIComponent(saved)}`,
+            );
+            if (!active) return;
+            if (held.status === "done" && held.version_id) {
+              const translated = await request<Bulletin>(
+                `/bulletins/${held.version_id}`,
+              );
+              if (!active) return;
+              onDoneRef.current(translated);
+            }
+            setError(
+              held.status === "failed" ? (held.error ?? "It stopped") : null,
+            );
+            setJob(held);
+            setRecovering(false);
+          } catch (e) {
+            if (!active) return;
+            if (e instanceof ApiError && [401, 403, 404].includes(e.status)) {
+              setRecovering(false);
+              setError(e.message);
+              if (e.status === 404) sessionStorage.removeItem(storageKey);
+            } else {
+              setError(
+                "Connection interrupted; recovering the translation shortly.",
+              );
+              retry = setTimeout(restore, 3000);
+            }
+          }
+        };
+        void restore();
+      }
+    } catch {
+      /* Browser storage may be disabled. */
+    }
+    return () => {
+      active = false;
+      clearTimeout(retry);
+    };
+  }, [storageKey]);
   // Follow the job: the translation runs on the server while the page stays usable.
   useEffect(() => {
     if (!job || job.status !== "running") return;
+    let active = true;
+    const abort = new AbortController();
     const timer = setTimeout(async () => {
       try {
         const next = await request<TranslationJob>(
           `/bulletins/translations/${job.id}`,
+          { signal: abort.signal },
         );
-        if (next.status === "done" && next.version_id)
-          onDone(await request<Bulletin>(`/bulletins/${next.version_id}`));
+        if (!active) return;
+        setError(null);
+        if (next.status === "done" && next.version_id) {
+          const translated = await request<Bulletin>(
+            `/bulletins/${next.version_id}`,
+            { signal: abort.signal },
+          );
+          if (!active) return;
+          onDoneRef.current(translated);
+        }
         if (next.status === "failed") setError(next.error ?? "It stopped");
         setJob(next);
       } catch (e) {
+        if (!active) return;
         setError((e as Error).message);
-        setJob(null);
+        // A temporary network failure must not discard a still-running server job.
+        setJob(e instanceof ApiError && e.status === 404 ? null : { ...job });
       }
     }, 3000);
-    return () => clearTimeout(timer);
-  }, [job, onDone]);
+    return () => {
+      active = false;
+      abort.abort();
+      clearTimeout(timer);
+    };
+  }, [job]);
   return (
     <div className="draft-translate">
       <label className="field">
@@ -292,27 +367,41 @@ export function TranslateDraft({
       </label>
       <Button
         variant="outline"
-        disabled={running}
+        disabled={running || starting || recovering}
         onClick={async () => {
+          setStarting(true);
           setError(null);
           try {
-            setJob(
-              await mutate<TranslationJob>(
-                `/bulletins/${draft.id}/translations`,
-                { language, actor: actor || null },
-              ),
+            const held = await mutate<TranslationJob>(
+              `/bulletins/${draft.id}/translations`,
+              { language, actor: actor || null },
             );
+            setJob(held);
+            try {
+              sessionStorage.setItem(storageKey, held.id);
+            } catch {
+              /* Optional recovery. */
+            }
+            if (held.status === "done" && held.version_id) {
+              onDoneRef.current(
+                await request<Bulletin>(`/bulletins/${held.version_id}`),
+              );
+            }
           } catch (e) {
             setError((e as Error).message);
+          } finally {
+            setStarting(false);
           }
         }}
       >
         <Languages size={16} />{" "}
-        {running
-          ? job?.total
-            ? `Translating · section ${(job.done ?? 0) + 1} of ${job.total}`
-            : "Translating…"
-          : "Translate this draft"}
+        {recovering
+          ? "Recovering translation…"
+          : running
+            ? job?.total
+              ? `Translating · section ${(job.done ?? 0) + 1} of ${job.total}`
+              : "Translating…"
+            : "Translate this draft"}
       </Button>
       {error && <ErrorState message={error} />}
       <Notice>

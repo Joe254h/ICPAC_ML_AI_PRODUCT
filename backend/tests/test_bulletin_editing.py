@@ -1,6 +1,8 @@
 """Editing a weekly bulletin draft on the website and translating it, every figure kept."""
 
 import json
+import threading
+import time
 from types import SimpleNamespace
 
 import httpx
@@ -147,6 +149,43 @@ def test_a_translation_runs_in_the_background_and_the_page_follows_it(env, fast_
         == 422
     )
     assert env.client.get("/bulletins/translations/unknown").status_code == 404
+
+
+def test_background_translations_are_deduplicated_and_bounded(env, fast_maps, monkeypatch):
+    first = draft(env)
+    release = threading.Event()
+
+    class Waiting(Translator):
+        def respond(self, system, transcript, tools):
+            assert release.wait(10)
+            return super().respond(system, transcript, tools)
+
+    monkeypatch.setattr(agent, "chat_model", lambda: Waiting())
+    url = f"/bulletins/{first['id']}/translations"
+    jobs = []
+    try:
+        one = env.client.post(url, json={"language": "sw"})
+        assert one.status_code == 200
+        jobs.append(one.json()["id"])
+        assert env.client.post(url, json={"language": "sw"}).json()["id"] == jobs[0]
+        busy = env.client.post(url, json={"language": "fr"})
+        assert busy.status_code == 429 and busy.headers["Retry-After"] == "5"
+    finally:
+        release.set()
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        states = [env.client.get(f"/bulletins/translations/{job}").json() for job in jobs]
+        if all(s["status"] != "running" for s in states):
+            break
+        time.sleep(0.05)
+    assert all(s["status"] == "done" for s in states), states
+    assert all(s["done"] == s["total"] for s in states)
+    before = len(env.platform.repo.list("bulletin"))
+    again = env.client.post(url, json={"language": "sw"})
+    assert again.status_code == 200
+    assert again.json()["id"] == jobs[0]
+    assert again.json()["version_id"] == states[0]["version_id"]
+    assert len(env.platform.repo.list("bulletin")) == before
 
 
 def test_a_translation_keeps_its_language_and_the_copilot_shows_it(env, fast_maps, monkeypatch):

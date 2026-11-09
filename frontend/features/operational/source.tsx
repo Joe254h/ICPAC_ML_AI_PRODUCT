@@ -106,7 +106,10 @@ function Readiness({
   changed: () => void;
 }) {
   const [actor] = useActor();
-  const { operation, error, running, start } = useOperation(changed);
+  const { operation, error, running, start } = useOperation(
+    changed,
+    "ecmwf-readiness",
+  );
   const model = ready.model;
   const availability = ready.availability;
   const rain = ready.rainfall;
@@ -425,7 +428,7 @@ function Ecmwf({ source }: { source?: DataSource }) {
   const { operation, error, running, start } = useOperation(() => {
     inputs.reload();
     ready.reload();
-  });
+  }, "source-ecmwf");
   return (
     <>
       <PageBanner
@@ -557,8 +560,9 @@ function Ecmwf({ source }: { source?: DataSource }) {
 function Chirps() {
   const windows = useApi<ChirpsWindow[]>("/data/chirps");
   const [actor] = useActor();
-  const { operation, error, running, start } = useOperation(() =>
-    windows.reload(),
+  const { operation, error, running, start } = useOperation(
+    () => windows.reload(),
+    "source-chirps",
   );
   return (
     <>
@@ -796,7 +800,7 @@ function MonitoredSource({
   const { operation, error, running, start } = useOperation(() => {
     dekads.reload();
     onChecked();
-  });
+  }, `source-${id}`);
   return (
     <>
       <PageBanner

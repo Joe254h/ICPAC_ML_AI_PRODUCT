@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from backend.app.db import Repository, now
 
@@ -12,9 +14,21 @@ logger = logging.getLogger("icpac.pipeline")
 class Platform:
     def __init__(self, repository: Repository, register_descriptors: bool = False):
         self.repo = repository
+        # Translation has separate, bounded capacity so a slow model cannot block
+        # forecast operations or create one unbounded thread per public request.
+        self.translation_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="translation")
+        self.translation_slots = threading.BoundedSemaphore(1)
+        self.translation_lock = threading.RLock()
+        self.active_translations: dict[tuple[str, str], str] = {}
+        self.translations_closed = False
         if register_descriptors:
             self.register_descriptors()
             self.apply_model_decision()
+
+    def close_translations(self) -> None:
+        with self.translation_lock:
+            self.translations_closed = True
+        self.translation_pool.shutdown(wait=True)
 
     def register_descriptors(self) -> list[dict]:
         """Register reviewed descriptors not yet in the registry; failures are recorded,

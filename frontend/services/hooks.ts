@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, request } from "@/services/api";
 
 export type Loaded<T> = {
@@ -16,6 +16,7 @@ export function useApi<T>(path: string | null): Loaded<T> {
     loading: path !== null,
   });
   const [tick, setTick] = useState(0);
+  const previousPath = useRef(path);
   useEffect(() => {
     const changed = () => setTick((t) => t + 1);
     window.addEventListener("staff-access", changed);
@@ -27,18 +28,30 @@ export function useApi<T>(path: string | null): Loaded<T> {
       return;
     }
     const abort = new AbortController();
-    setState((old) => ({ ...old, loading: true, error: undefined }));
+    let active = true;
+    const samePath = previousPath.current === path;
+    previousPath.current = path;
+    setState((old) =>
+      samePath
+        ? { ...old, loading: true, error: undefined, status: undefined }
+        : { loading: true },
+    );
     request<T>(path, { signal: abort.signal })
-      .then((data) => setState({ data, loading: false }))
+      .then((data) => {
+        if (active) setState({ data, loading: false });
+      })
       .catch((e: Error) => {
-        if (e.name === "AbortError") return;
+        if (!active || e.name === "AbortError") return;
         setState({
           error: e.message,
           status: e instanceof ApiError ? e.status : undefined,
           loading: false,
         });
       });
-    return () => abort.abort();
+    return () => {
+      active = false;
+      abort.abort();
+    };
   }, [path, tick]);
   const reload = useCallback(() => setTick((t) => t + 1), []);
   return { ...state, reload };

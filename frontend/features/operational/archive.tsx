@@ -196,7 +196,7 @@ export default function Archive() {
   const [all, setAll] = useState(false);
   const [others, setOthers] = useState(false);
   const upcoming = useApi<UpcomingForecast[]>("/forecasts/upcoming");
-  const task = useOperation(() => runs.reload());
+  const task = useOperation(() => runs.reload(), "archive");
   // While the archive is filled or started again, the weeks appear as they are made.
   const reload = useRef(runs.reload);
   reload.current = runs.reload;

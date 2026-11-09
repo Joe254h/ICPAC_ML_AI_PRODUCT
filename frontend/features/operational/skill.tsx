@@ -29,11 +29,12 @@ const GRID = "#e4e8eb";
 const SOURCES = [
   {
     value: "best",
-    label: "Best available (CHIRPS, else ARC 2.0, else RFE 2.0)",
+    label: "Best available (CHIRPS, ARC 2.0, RFE 2.0, GPM IMERG)",
   },
   { value: "chirps", label: "CHIRPS" },
   { value: "arc2", label: "ARC 2.0" },
   { value: "rfe2", label: "RFE 2.0" },
+  { value: "imerg", label: "GPM IMERG" },
 ];
 
 function withInterval(

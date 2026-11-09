@@ -145,11 +145,22 @@ class OperationService:
     def start(
         self, body: OperationRequest, background: bool = True, identifier: str | None = None
     ) -> dict[str, Any]:
+        identifier = identifier or (f"request-{body.request_id}" if body.request_id else None)
         if identifier:
             try:
-                return self.get(identifier)
+                held = self.get(identifier)
             except KeyError:
                 pass
+            else:
+                if body.request_id:
+                    requested = body.model_dump(mode="json")
+                    original = dict(held.get("request") or {})
+                    # A latest past-weeks request records today's effective date.
+                    if body.action == "past_weeks" and body.initialization is None:
+                        original["initialization"] = None
+                    if original != requested:
+                        raise ValueError("This request identity already belongs to another task")
+                return held
         if body.action == "verify_forecast" and not body.forecast_id:
             raise ValueError("Name the forecast to verify")
         if body.model_id:
@@ -178,7 +189,10 @@ class OperationService:
             "selection_mode": "explicit" if body.initialization else "latest",
         }
         if identifier:
-            self.repo.insert_once(KIND, payload, identifier)
+            if not self.repo.insert_once(KIND, payload, identifier):
+                # A concurrent submission won the unique claim: apply the same
+                # request-content check as an ordinary retry before returning it.
+                return self.start(body, background=background, identifier=identifier)
             record = self.get(identifier)
         else:
             record = self.repo.save(KIND, payload)

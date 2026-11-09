@@ -319,7 +319,11 @@ function Body({
       </Card>
       <ObservedComparison detail={detail} />
       <Card title="Country outlook" subtitle="Area mean and range, mm">
-        <CountryTable rows={detail.countries} layers={layers} />
+        <CountryTable
+          rows={detail.countries}
+          layers={layers}
+          forecastId={detail.forecast_id}
+        />
         <div style={{ marginTop: 28 }}>
           <CountryChart rows={detail.countries} layers={layers} />
         </div>

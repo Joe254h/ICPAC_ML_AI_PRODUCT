@@ -79,6 +79,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 # interpreter cleanup. Drain the current task off the event loop.
                 # A forced container stop is recovered through the persisted lease.
                 await asyncio.to_thread(worker.join)
+            await asyncio.to_thread(app.state.platform.close_translations)
             app.state.platform.repo.engine.dispose()
 
     app = FastAPI(title="ICPAC Week-2 Forecast Service", version="0.2.0", lifespan=lifespan)

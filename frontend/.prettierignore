@@ -1,0 +1,2 @@
+# pnpm owns the generated lockfile's formatting.
+pnpm-lock.yaml

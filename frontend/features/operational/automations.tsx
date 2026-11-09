@@ -70,7 +70,7 @@ export default function Automations() {
     latest.reload();
     products.reload();
   }, [workspace.reload, integrations.reload, latest.reload, products.reload]);
-  const task = useOperation(reload);
+  const task = useOperation(reload, "automations");
   useEffect(() => {
     const current = workspace.data?.last_cycle;
     if (current && !task.running && current.id !== task.operation?.id)

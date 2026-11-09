@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pytest
 import xarray as xr
 
 from climate_engine import ncio
@@ -81,3 +82,8 @@ def test_threads_read_and_write_netcdf_at_once(tmp_path):
     for thread in threads:
         thread.join()
     assert errors == []
+
+
+def test_deferred_write_cannot_escape_the_native_lock(tmp_path):
+    with pytest.raises(ValueError, match="Deferred NetCDF"):
+        ncio.to_netcdf(_field(1.0), tmp_path / "deferred.nc", compute=False)

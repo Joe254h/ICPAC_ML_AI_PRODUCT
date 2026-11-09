@@ -273,6 +273,7 @@ export type Seasonal = {
   models?: VerifiedModel[];
   seasons: Record<string, Partial<Record<Variant, Metrics>>>;
   forecasts: string[];
+  observations?: Record<string, string>;
   excluded_protected_period: number;
   scope: string;
   use: string;
@@ -314,6 +315,7 @@ export type BulletinStatus = {
     leads?: string[];
     map?: string;
     missing_dependency?: string;
+    extra?: boolean;
     /** The country focus: which member state and why it was chosen. */
     country?: string;
     why?: string;

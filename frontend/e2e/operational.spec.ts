@@ -302,6 +302,8 @@ test("the About page says what the service is for", async ({ page }) => {
 });
 
 test("no page shows code, identifiers or checksums", async ({ page }) => {
+  // This crawl opens 27 pages, including the first full-grid verification maps.
+  test.setTimeout(240_000);
   const code =
     /w2-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}|[a-z0-9]+_[a-z0-9_]+_v\d|\.ya?ml\b|python -m|sha-?256|\b[0-9a-f]{20,}\b|\{"|week2_steps|max\(|\bHybrid7\b|-candidate\.\d|\bby startup\b|\.(nc|tif|json|py)\b|\b[A-Z][A-Z0-9]*_[A-Z0-9_]{2,}\b/;
   for (const path of [
@@ -440,6 +442,19 @@ test("system status reports the downloaded input and the issued forecast", async
   await expect(row("RFE 2.0 monitoring")).toContainText("Healthy");
   await expect(row("GPM IMERG monitoring")).toContainText("Healthy");
   await expect(row("Bulletin email")).toContainText("Healthy");
+});
+
+test("the weekly bulletin shows the correction figures on its page", async ({
+  page,
+}) => {
+  await page.goto("/bulletin");
+  await expect(
+    page.getByRole("heading", {
+      name: "What the Correction Changed",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByText(/Region: raw ECMWF/)).toBeVisible();
 });
 
 test("a reference the Copilot cites opens as a readable page", async ({

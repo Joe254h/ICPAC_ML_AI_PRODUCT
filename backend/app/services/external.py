@@ -178,18 +178,20 @@ class ExternalForecasts:
     def _save_field(self, identifier: str, values: np.ndarray, grid, start: date) -> None:
         path = self._field_path(identifier)
         path.parent.mkdir(parents=True, exist_ok=True)
-        field = xr.Dataset(
-            {
-                "precipitation_week2": (
-                    ("latitude", "longitude"),
-                    values.astype(np.float32),
-                    {"units": "mm", "long_name": "Uploaded Week-2 total"},
-                )
-            },
-            coords={"latitude": grid.latitude, "longitude": grid.longitude},
-            attrs={"valid_start": start.isoformat()},
+        ncio.to_netcdf(
+            xr.Dataset(
+                {
+                    "precipitation_week2": (
+                        ("latitude", "longitude"),
+                        values.astype(np.float32),
+                        {"units": "mm", "long_name": "Uploaded Week-2 total"},
+                    )
+                },
+                coords={"latitude": grid.latitude, "longitude": grid.longitude},
+                attrs={"valid_start": start.isoformat()},
+            ),
+            path,
         )
-        ncio.to_netcdf(field, path)
         store = package_store()
         if store is not None:
             store.put(f"external/{identifier}.nc", path.read_bytes())

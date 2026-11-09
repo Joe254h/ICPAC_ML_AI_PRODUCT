@@ -440,11 +440,21 @@ class BulletinInputs:
         interpretation = json.loads(
             (directory / "interpretation_inputs.json").read_text(encoding="utf-8")
         )
+        provenance = json.loads((directory / "provenance.json").read_text(encoding="utf-8"))
+        # Older packages omitted training years from provenance.model. Use their own
+        # checksummed model snapshot for newly rendered drafts, never today's registry.
+        # Existing frozen bulletin documents and package files remain unchanged.
+        from climate_engine.products.package import method_description
+
+        model = json.loads((directory / "model.json").read_text(encoding="utf-8"))
+        interpretation["method"]["description"] = method_description(
+            provenance, interpretation.get("primary_layer", "hybrid"), model
+        )
         return cls(
             package=directory,
             forecast_id=interpretation["forecast_id"],
             interpretation=interpretation,
-            provenance=json.loads((directory / "provenance.json").read_text(encoding="utf-8")),
+            provenance=provenance,
             countries_csv=directory / "countries.csv",
             maps={layer: directory / "maps" / f"{layer}.png" for layer in MAP_LAYERS},
         )

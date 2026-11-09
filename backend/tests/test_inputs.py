@@ -364,6 +364,7 @@ def test_chirps_days_come_from_the_open_mirror_when_chc_cannot_give_them(
                     "precip": (
                         ("time", "latitude", "longitude"),
                         np.full((1, LAT.size, LON.size), 4.0),
+                        {"units": "mm/day"},
                     )
                 },
                 coords={
@@ -391,6 +392,43 @@ def test_chirps_days_come_from_the_open_mirror_when_chc_cannot_give_them(
     monkeypatch.setenv("CHIRPS_MIRROR_URL", "off")
     with pytest.raises(chirps.CHIRPSUnavailable):
         chirps.week_total(start, env.grid, chirps.Server(chc({})))
+
+
+@pytest.mark.parametrize("wrong", ["day", "units", "multiple_days"])
+def test_chirps_mirror_rejects_a_wrong_day_units_or_window(env, monkeypatch, wrong):
+    monkeypatch.setenv("CHIRPS_MIRROR_URL", "https://mirror.example/erddap/griddap/chirps")
+    start = date(2026, 10, 1)
+    times = [np.datetime64("2026-10-01")]
+    if wrong == "day":
+        times = [np.datetime64("2026-09-30")]
+    elif wrong == "multiple_days":
+        times.append(np.datetime64("2026-10-02"))
+    data = xr.Dataset(
+        {
+            "precip": (
+                ("time", "latitude", "longitude"),
+                np.ones((len(times), LAT.size, LON.size)),
+                {"units": "m" if wrong == "units" else "mm/day"},
+            )
+        },
+        coords={"time": times, "latitude": LAT, "longitude": LON},
+    )
+    payload = bytes(data.to_netcdf())
+    server = chirps.Server(lambda url: payload if "mirror.example" in url else None)
+    with pytest.raises(chirps.CHIRPSUnavailable):
+        chirps.week_total(start, env.grid, server)
+
+
+def test_chirps_uses_the_current_v2_layout_and_keeps_mirror_versions_separate(monkeypatch):
+    monkeypatch.delenv("CHIRPS_BASE_URL", raising=False)
+    cfg = chirps.settings()
+    assert "/products/CHIRPS/v2.0/" in cfg["final_dir"]
+    assert "/products/CHIRPS/v2.0/" in cfg["prelim_dir"]
+    assert "/products/CHIRPS/v2.0/" in cfg["dekad_dir"]
+    monkeypatch.setenv("CHIRPS_BASE_URL", "http://127.0.0.1:8998/chc")
+    assert chirps.directory("prelim", 2026).startswith(
+        "http://127.0.0.1:8998/chc/products/CHIRPS/v2.0/"
+    )
 
 
 def test_chirps_days_held_are_reused_until_the_final_product_appears(env, tmp_path):

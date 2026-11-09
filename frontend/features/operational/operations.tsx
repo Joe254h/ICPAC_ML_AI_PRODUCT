@@ -163,13 +163,14 @@ export default function Operations() {
       forecasts.reload();
       refresh();
     },
+    "operations",
   );
 
   // A task started elsewhere (another tab, the scheduler) is followed here too.
   useEffect(() => {
     const active = history.data?.find(operationActive);
-    if (active && !operation) follow(active);
-  }, [history.data, operation, follow]);
+    if (active && !operation && !running) follow(active);
+  }, [history.data, operation, running, follow]);
 
   const name = actor.trim();
   const launch = (action: OperationAction) =>

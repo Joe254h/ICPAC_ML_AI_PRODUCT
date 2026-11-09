@@ -9,6 +9,7 @@ import StaffAccess from "@/components/bulletin-access";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -28,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import { BannerSlot } from "@/components/banner";
+import WorkflowNav from "@/components/workflow-nav";
 import { cx } from "@/components/ui";
 import {
   MENUS,
@@ -551,9 +553,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       </header>
       <ServiceNotice health={health} />
       <BannerSlot.Provider value={slot}>
-        <main id="content" key={accessVersion}>
-          {children}
-        </main>
+        <div className={home ? undefined : "workspace-layout"}>
+          {!home && (
+            <Suspense
+              fallback={<aside className="workspace-rail" aria-hidden />}
+            >
+              <WorkflowNav />
+            </Suspense>
+          )}
+          <main id="content" key={accessVersion} className="workspace-main">
+            {children}
+          </main>
+        </div>
       </BannerSlot.Provider>
       <footer className="site-footer">
         <div className="wrap footer-main">

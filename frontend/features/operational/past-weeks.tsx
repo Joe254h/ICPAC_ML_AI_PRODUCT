@@ -14,7 +14,10 @@ export const PAST_WEEKS = 4;
 
 export default function PastWeeks({ onDone }: { onDone?: () => void }) {
   const [actor] = useActor();
-  const { operation, running, error, start } = useOperation(() => onDone?.());
+  const { operation, running, error, start } = useOperation(
+    () => onDone?.(),
+    "past-weeks",
+  );
   const failed =
     operation?.status === "failed" || operation?.status === "interrupted";
   const result = operation?.result as {

@@ -9,7 +9,6 @@ them before every transition. Without a forecast there is nothing to draft.
 import hashlib
 import json
 import os
-import threading
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -135,6 +134,10 @@ def language_of(record: dict[str, Any]) -> str | None:
 
 #: Background translations of drafts, followed by the bulletin page.
 TRANSLATION_KIND = "bulletin_translation"
+
+
+class TranslationBusy(RuntimeError):
+    """The translation worker has no free capacity."""
 
 
 class BulletinService:
@@ -459,7 +462,47 @@ class BulletinService:
     def start_translation(self, identifier: str, language: str, actor: str) -> dict:
         """Translate a draft in the background (a slow AI service takes minutes): a job
         record the page follows, section by section; the draft stays usable meanwhile."""
-        self.repo.get("bulletin", identifier)
+        from chatbot.agent import LANGUAGES
+
+        base = self.repo.get("bulletin", identifier)
+        if language not in LANGUAGES or language == "en":
+            raise RevisionRefused("Choose a language other than English")
+        if base.get("kind") != WEEKLY or base["status"] == "published":
+            raise RevisionRefused("Translate a weekly draft before it is published")
+        with self.platform.translation_lock:
+            key = (identifier, language)
+            # The source version is immutable. A retry after a lost response reuses
+            # its completed translation instead of creating another draft version.
+            completed = next(
+                (
+                    job
+                    for job in self.repo.list(TRANSLATION_KIND)
+                    if job["bulletin_id"] == identifier
+                    and job["language"] == language
+                    and job["status"] == "done"
+                    and job.get("version_id")
+                ),
+                None,
+            )
+            if completed:
+                return completed
+            if held := self.platform.active_translations.get(key):
+                return self.repo.get(TRANSLATION_KIND, held)
+            if self.platform.translations_closed or not self.platform.translation_slots.acquire(
+                blocking=False
+            ):
+                raise TranslationBusy("A bulletin is already being translated; try again shortly")
+            try:
+                job = self._start_translation(identifier, language, actor)
+                self.platform.active_translations[key] = job["id"]
+                self.platform.translation_pool.submit(self._translate_job, dict(job))
+            except Exception:
+                self.platform.active_translations.pop(key, None)
+                self.platform.translation_slots.release()
+                raise
+            return job
+
+    def _start_translation(self, identifier: str, language: str, actor: str) -> dict:
         job = self.repo.save(
             TRANSLATION_KIND,
             {
@@ -470,20 +513,20 @@ class BulletinService:
                 "done": 0,
                 "total": None,
                 "started_at": now(),
+                "updated_at": now(),
                 "version_id": None,
                 "error": None,
             },
         )
-        threading.Thread(
-            target=self._translate_job, args=(job["id"],), name="bulletin-translation", daemon=True
-        ).start()
         return job
 
-    def _translate_job(self, job_id: str) -> None:
-        job = self.repo.get(TRANSLATION_KIND, job_id)
+    def _translate_job(self, job: dict) -> None:
+        # The already-saved job is sufficient to start. A failed extra database read
+        # here could otherwise strand the slot before the cleanup guard is reached.
+        job_id = job["id"]
 
         def progress(done: int, total: int) -> None:
-            job.update(done=done, total=total)
+            job.update(done=done, total=total, updated_at=now())
             self.repo.save(TRANSLATION_KIND, job, job_id)
 
         try:
@@ -496,12 +539,17 @@ class BulletinService:
         except Exception:  # never leave the page waiting on a job that died
             job.update(status="failed", error="The translation could not finish; try again")
         job["finished_at"] = now()
-        self.repo.save(TRANSLATION_KIND, job, job_id)
+        try:
+            self.repo.save(TRANSLATION_KIND, job, job_id)
+        finally:
+            with self.platform.translation_lock:
+                self.platform.active_translations.pop((job["bulletin_id"], job["language"]), None)
+                self.platform.translation_slots.release()
 
     def translation(self, job_id: str) -> dict:
         """A translation job as the page sees it; one cut short by a restart says so."""
         job = self.repo.get(TRANSLATION_KIND, job_id)
-        started = datetime.fromisoformat(job["started_at"])
+        started = datetime.fromisoformat(job.get("updated_at") or job["started_at"])
         if job["status"] == "running" and datetime.now(timezone.utc) - started > timedelta(
             minutes=20
         ):

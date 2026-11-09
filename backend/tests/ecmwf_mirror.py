@@ -210,7 +210,7 @@ def build_chirps_dekad(root: Path, today: date) -> Path:
     lat = np.round(np.arange(-14.975, 24.976, 0.05), 3)
     lon = np.round(np.arange(19.025, 53.976, 0.05), 3)
     pattern = 40 * (1 + np.sin(np.deg2rad(lat * 9))[:, None] * np.cos(np.deg2rad(lon * 7)))
-    folder = root / "chc/products/CHIRPS-2.0/prelim/global_dekad/netcdf"
+    folder = root / "chc/products/CHIRPS/v2.0/prelim/global_dekad/netcdf"
     folder.mkdir(parents=True, exist_ok=True)
     data = xr.Dataset(
         {"precip": (("time", "latitude", "longitude"), pattern[None].astype(np.float32))},
@@ -243,7 +243,7 @@ def build_chirps_days(root: Path, first: date, last: date) -> list[Path]:
     written = []
     day = first
     while day <= last:
-        folder = root / f"chc/products/CHIRPS-2.0/prelim/global_daily/tifs/p05/{day.year}"
+        folder = root / f"chc/products/CHIRPS/v2.0/prelim/global_daily/tifs/p05/{day.year}"
         folder.mkdir(parents=True, exist_ok=True)
         values = np.round(pattern * wetness(day) * 2) / 2  # half millimetres compress well
         path = folder / f"chirps-v2.0.{day.year}.{day.month:02d}.{day.day:02d}.tif"

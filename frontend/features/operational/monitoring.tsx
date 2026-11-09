@@ -415,7 +415,7 @@ export default function Monitoring() {
     latest.reload();
     history.reload();
     estimates.reload();
-  });
+  }, "monitoring");
   const check = () => start("update_chirps", actor || "Forecaster");
   const choose = (next: Source) => {
     setSource(next);

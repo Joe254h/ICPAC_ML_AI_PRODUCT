@@ -234,6 +234,11 @@ def install(app: FastAPI, dependency) -> None:
             body.model_copy(update={"actor": acting_name(user, body.actor)})
         )
 
+    @app.get("/operations/capabilities", dependencies=[Depends(require_operator)])
+    def operation_capabilities() -> dict[str, bool]:
+        """Let independently deployed frontends check safe submission support."""
+        return {"idempotent_submission": True}
+
     @app.get("/operations/{operation_id}", dependencies=[Depends(require_operator)])
     def operation(operation_id: str, platform=Depends(dependency)) -> dict:
         return OperationService(platform).read(operation_id)

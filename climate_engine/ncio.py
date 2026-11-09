@@ -24,19 +24,23 @@ LOCK = threading.RLock()
 
 
 @contextmanager
-def open_dataset(path: str | Path, **kwargs: Any) -> Iterator[xr.Dataset]:
+def open_dataset(path: Any, **kwargs: Any) -> Iterator[xr.Dataset]:
     """``xr.open_dataset``, with the lock held until the ``with`` block ends."""
     with LOCK, xr.open_dataset(path, **kwargs) as dataset:
         yield dataset
 
 
-def load_dataset(path: str | Path, **kwargs: Any) -> xr.Dataset:
+def load_dataset(path: Any, **kwargs: Any) -> xr.Dataset:
     """The whole file in memory, closed before the lock is released."""
     with open_dataset(path, **kwargs) as dataset:
         return dataset.load()
 
 
-def to_netcdf(data: xr.Dataset | xr.DataArray, path: str | Path, **kwargs: Any) -> None:
-    """``data.to_netcdf(path, ...)`` under the lock."""
+def to_netcdf(
+    data: xr.Dataset | xr.DataArray, path: str | Path | None = None, **kwargs: Any
+) -> Any:
+    """Write eagerly under the lock, including in-memory observation snapshots."""
+    if kwargs.get("compute") is False:
+        raise ValueError("Deferred NetCDF writes must not escape the native I/O lock")
     with LOCK:
-        data.to_netcdf(path, **kwargs)
+        return data.to_netcdf(path, **kwargs)

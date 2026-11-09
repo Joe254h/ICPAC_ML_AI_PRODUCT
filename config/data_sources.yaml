@@ -38,15 +38,15 @@ chirps:
   # Daily files verify the Week-2 forecasts (a Week-2 window is seven days, not a dekad).
   # The final product is published about three weeks after each month; the preliminary
   # product a few days after each pentad. Final is used whenever it exists.
-  final_dir: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/africa_daily/tifs/p05/{year}/"
+  final_dir: "https://data.chc.ucsb.edu/products/CHIRPS/v2.0/africa_daily/tifs/p05/{year}/"
   # When CHC's server cannot give a day (it refused this service from late October 2026),
   # the final product is read from an open mirror: NOAA CoastWatch ERDDAP, which copies
   # CHC's daily 0.05 degree files and cuts out the region. CHIRPS_MIRROR_URL replaces it
   # ("off" switches it off). The mirror holds the final product only (weeks later).
   mirror: "https://coastwatch.pfeg.noaa.gov/erddap/griddap/chirps20GlobalDailyP05"
-  prelim_dir: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/prelim/global_daily/tifs/p05/{year}/"
+  prelim_dir: "https://data.chc.ucsb.edu/products/CHIRPS/v2.0/prelim/global_daily/tifs/p05/{year}/"
   # Preliminary dekadal NetCDF (variable precip), the monitoring framework's own source.
-  dekad_dir: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/prelim/global_dekad/netcdf/"
+  dekad_dir: "https://data.chc.ucsb.edu/products/CHIRPS/v2.0/prelim/global_dekad/netcdf/"
   variable: precip
   # Kept files cover the model grid, which contains the framework's Greater Horn of
   # Africa box (20-53 E, 15 S - 24 N).

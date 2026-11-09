@@ -28,7 +28,7 @@ export default function CountryCards({ detail }: { detail: ForecastDetail }) {
         return (
           <Link
             key={row.country}
-            href={`/countries/${countrySlug(row.country)}`}
+            href={`/countries/${countrySlug(row.country)}?id=${encodeURIComponent(detail.forecast_id)}`}
             className="country-card"
           >
             <span className="country-name">{row.country}</span>

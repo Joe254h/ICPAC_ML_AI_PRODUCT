@@ -2650,6 +2650,9 @@ select.input,
   .brand-name small {
     font-size: 11.5px;
   }
+  .site-top .brand-name small {
+    display: none;
+  }
   .utility {
     gap: 6px;
   }
@@ -2743,10 +2746,21 @@ select.input,
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 12px 16px;
+  min-width: 0;
+  max-width: 100%;
+}
+.evidence-controls .field {
+  min-width: 0;
+  max-width: 100%;
+}
+.evidence-controls select {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
 }
 .figure-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
   gap: 18px;
 }
 .evidence-card {
@@ -4239,4 +4253,176 @@ ol.lifecycle li:not(:last-child)::after {
   color: var(--muted);
   font-size: 0.85em;
   line-height: 1.4;
+}
+
+/* Inset workspace adapted from shadcn/ui dashboard-01 using ICPAC's tokens. */
+.workspace-layout {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  max-width: 1600px;
+  margin: 0 auto;
+}
+.workspace-main {
+  min-width: 0;
+}
+.workspace-rail {
+  padding: 28px 16px;
+  border-inline-end: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.workspace-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+.workspace-symbol {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  background: var(--green-50);
+  color: var(--green-800);
+  border: 1px solid var(--green-line);
+}
+.workspace-identity b {
+  display: block;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+}
+.workspace-identity small {
+  display: block;
+  color: var(--muted);
+  max-width: 140px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.workspace-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0 10px 10px;
+}
+.workspace-rail ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-rail nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--radius);
+  color: var(--text);
+  min-height: 40px;
+  line-height: 1.4;
+  text-decoration: none;
+}
+.workspace-rail nav a:hover {
+  background: var(--green-50);
+  color: var(--ink);
+}
+.workspace-rail nav a[aria-current="page"] {
+  background: var(--green-50);
+  color: var(--green-800);
+  box-shadow: inset 3px 0 var(--green-600);
+  font-weight: 600;
+}
+.workspace-rail[dir="rtl"] nav a[aria-current="page"] {
+  box-shadow: inset -3px 0 var(--green-600);
+}
+.workspace-number {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.workspace-tools {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.workspace-tools a {
+  justify-content: space-between;
+}
+.workspace-context {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 14px;
+  margin-top: 28px;
+}
+.workspace-context .workspace-label {
+  margin: 0;
+  line-height: 1.6;
+}
+.workspace-context b {
+  color: var(--ink);
+  font-size: 13px;
+}
+.workspace-context > span:last-child {
+  color: var(--muted);
+  font-size: 11px;
+}
+.workspace-help {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 24px 10px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.site-footer .brand {
+  min-width: 0;
+  max-width: 100%;
+}
+.site-footer .brand-name {
+  min-width: 0;
+}
+.site-footer .brand-name small {
+  white-space: normal;
+}
+@media (max-width: 1199px) {
+  .workspace-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace-rail {
+    padding: 12px 24px;
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--line);
+    min-width: 0;
+  }
+  .workspace-identity,
+  .workspace-tools,
+  .workspace-context,
+  .workspace-help,
+  .workspace-rail .workspace-label {
+    display: none;
+  }
+  .workspace-rail nav {
+    overflow-x: auto;
+  }
+  .workspace-rail ol {
+    display: flex;
+    width: max-content;
+    gap: 6px;
+  }
+  .workspace-rail nav a {
+    white-space: nowrap;
+    padding: 8px 10px;
+    min-height: 40px;
+  }
+}
+@media (max-width: 767px) {
+  .workspace-rail {
+    padding: 8px 16px;
+  }
 }

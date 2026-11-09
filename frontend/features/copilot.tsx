@@ -391,7 +391,7 @@ function Message({
             </small>
           </form>
         ) : (
-          <div className="chat-text">
+          <div className="chat-text" dir="auto">
             {user ? message.text : <Markdown text={message.text} />}
           </div>
         )}
@@ -1137,7 +1137,14 @@ export default function Copilot() {
                   ))}
                 </select>
               </label>
-              <Link href="/bulletin" className="context-link">
+              <Link
+                href={
+                  shownWeek
+                    ? `/bulletin?id=${encodeURIComponent(shownWeek)}`
+                    : "/bulletin"
+                }
+                className="context-link"
+              >
                 <FileText size={16} aria-hidden /> Bulletin
               </Link>
               <button
@@ -1427,6 +1434,7 @@ export default function Copilot() {
               </label>
               <textarea
                 ref={composer}
+                dir="auto"
                 id="copilot-question"
                 rows={1}
                 maxLength={2000}

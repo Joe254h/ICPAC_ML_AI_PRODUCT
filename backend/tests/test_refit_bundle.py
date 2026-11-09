@@ -106,6 +106,17 @@ def test_registration_records_the_refit_contract_and_its_retrospective_scores(re
     assert any("NOT unbiased" in w for w in fields["bundle"]["bundle_warnings"])
 
 
+def test_bulletin_method_uses_the_forecasts_frozen_refit_snapshot(refit):
+    from climate_engine.products.package import method_description
+
+    fields, _ = refit
+    legacy = {"model": {"family": "hybrid7_pc17"}, "model_version": fields["version"]}
+    text = method_description(legacy, "hybrid", fields)
+    assert "Final refit" in text and "2005-2021" in text
+    assert "retrospective comparison" in text
+    assert "Pre-refit" not in text and "2005-2019" not in text
+
+
 def test_a_changed_refit_file_is_refused(tmp_path, monkeypatch):
     root = tmp_path / "artifacts"
     shutil.copytree(BUNDLE, root / "bundles" / BUNDLE.name)

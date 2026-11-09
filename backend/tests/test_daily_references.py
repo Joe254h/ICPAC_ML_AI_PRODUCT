@@ -256,3 +256,32 @@ def test_a_week_chirps_cannot_be_read_for_is_checked_against_the_others(
     assert maps["cases"] >= 1 and maps["metrics"]["bias"]["available"]
     drawn = env.client.get("/verification/maps/bias")
     assert drawn.status_code == 200 and drawn.content[:4] == b"\x89PNG"
+    # Seasonal pooling must read ARC's statistics, not the missing CHIRPS file.
+    seasonal = env.client.get("/verification/seasonal")
+    assert seasonal.status_code == 200, seasonal.text
+    assert seasonal.json()["observations"][fid] == "ARC 2.0"
+    assert seasonal.json()["seasons"]["SON"]["hybrid"]["cases"] == 1
+    assert maps["observations"][fid] == "ARC 2.0"
+    # Restarted replicas draw the exact scored observation from Blob, without asking
+    # NOAA for the week again (or silently scoring a different revision).
+    from backend.tests.test_bulletins import Blobs
+    from climate_engine.products.store import PackageStore
+
+    blobs = Blobs()
+    store = PackageStore(blobs)
+    comparison = env.platform.repo.get(forecasts.REFERENCE_KIND, f"{fid}-arc2")
+    snapshot = comparison["observation"]
+    path = service.data_root() / "reference_weeks" / snapshot["file"]
+    key = f"inputs/reference_weeks/{snapshot['file']}"
+    store.put(key, path.read_bytes())
+    path.unlink()
+    monkeypatch.setattr(forecasts, "package_store", lambda: store)
+    monkeypatch.setattr(daily_references, "days_total", lambda *a, **k: pytest.fail("network read"))
+    assert np.isfinite(service._observed(fid, held, "arc2", env.grid)[env.grid.mask]).all()
+    store.put(key, b"changed")
+    with pytest.raises(forecasts.Unavailable, match="failed its checks"):
+        service._observed(fid, held, "arc2", env.grid)
+    # A newer, unverified version replaces this one as the forecast of record.
+    replacement = run(env, "2026-09-14")
+    assert replacement["forecast_id"] != fid
+    assert service.verified(None, False)[1] == []

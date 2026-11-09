@@ -26,9 +26,14 @@ test("a restored source retry is followed to completion without another submissi
   let polls = 0;
   await page.route("**/api/operations/recovery-check", (route) => {
     polls += 1;
+    if (polls === 1)
+      return route.fulfill({
+        status: 503,
+        json: { detail: "Temporary API interruption" },
+      });
     return route.fulfill({
       json:
-        polls === 1
+        polls === 2
           ? waiting
           : {
               ...waiting,
@@ -50,9 +55,17 @@ test("a restored source retry is followed to completion without another submissi
     page.getByRole("button", { name: "Workflow running…" }),
   ).toBeDisabled();
   await expect(
+    page.getByText(/Connection interrupted; checking again/),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Workflow running…" }),
+  ).toBeDisabled();
+  await expect(
     page.getByRole("link", { name: "Open prepared bulletin →" }),
   ).toBeVisible({ timeout: 30000 });
   expect(submissions).toBe(0);
+  expect(polls).toBeGreaterThanOrEqual(3);
 });
 
 test("the 20-capability workspace runs a connected workflow without publishing", async ({

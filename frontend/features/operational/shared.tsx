@@ -454,9 +454,11 @@ export function mapUrl(
 export function CountryTable({
   rows,
   layers,
+  forecastId,
 }: {
   rows: CountryRow[];
   layers: Variant[];
+  forecastId: string;
 }) {
   const main = layers.includes("hybrid") ? "hybrid" : "mbc";
   return (
@@ -481,7 +483,9 @@ export function CountryTable({
             return (
               <tr key={row.country}>
                 <td className="strong">
-                  <Link href={"/countries/" + countrySlug(row.country)}>
+                  <Link
+                    href={`/countries/${countrySlug(row.country)}?id=${encodeURIComponent(forecastId)}`}
+                  >
                     {row.country}
                   </Link>
                 </td>

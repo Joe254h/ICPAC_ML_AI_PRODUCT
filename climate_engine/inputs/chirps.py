@@ -416,16 +416,23 @@ def mirror_url(day: date) -> str | None:
     )
 
 
-def read_mirror(data: bytes) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def read_mirror(data: bytes, day: date) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """The day's rainfall (mm), latitude and longitude from the mirror's NetCDF."""
-    with tempfile.NamedTemporaryFile(suffix=".nc") as handle:
-        handle.write(data)
-        handle.flush()
-        with ncio.open_dataset(handle.name) as opened:
+    # Close the writer before NetCDF opens the file (Windows locks an open temp file).
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "day.nc"
+        path.write_bytes(data)
+        with ncio.open_dataset(path) as opened:
             loaded = opened.load()
     precip = loaded["precip"]
-    if "time" in precip.dims:
-        precip = precip.isel(time=0)
+    if precip.dims != ("time", "latitude", "longitude") or precip.sizes["time"] != 1:
+        raise ValueError("The CHIRPS mirror must supply exactly one daily grid")
+    if np.datetime64(loaded["time"].values[0], "D") != np.datetime64(day):
+        raise ValueError("The CHIRPS mirror returned a different day")
+    units = str(precip.attrs.get("units", "")).strip().lower()
+    if units not in {"mm", "mm/day", "mm d-1", "mm day-1", "millimeters"}:
+        raise ValueError("The CHIRPS mirror daily rainfall must be in mm")
+    precip = precip.isel(time=0)
     return (
         np.asarray(precip.values, dtype=np.float64),
         np.asarray(loaded["latitude"].values, dtype=np.float64),
@@ -446,17 +453,19 @@ def _save_day(store: Path, info: "Day", values, latitude, longitude, nodata) -> 
     path = _store_file(store, info.day)
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix(".part")
-    day = xr.Dataset(
-        {"precip": (("latitude", "longitude"), values, {"units": "mm/day"})},
-        coords={"latitude": latitude, "longitude": longitude},
-        attrs={
-            "day": info.day.isoformat(),
-            "product": info.product,
-            "url": info.url,
-            "sha256": info.sha256,
-        },
+    ncio.to_netcdf(
+        xr.Dataset(
+            {"precip": (("latitude", "longitude"), values, {"units": "mm/day"})},
+            coords={"latitude": latitude, "longitude": longitude},
+            attrs={
+                "day": info.day.isoformat(),
+                "product": info.product,
+                "url": info.url,
+                "sha256": info.sha256,
+            },
+        ),
+        partial,
     )
-    ncio.to_netcdf(day, partial)
     partial.replace(path)
 
 
@@ -507,16 +516,19 @@ def fetch_day(
         if url is None:
             return None
         try:
-            data = server.get(url) if server.get else download(url)
-        except (httpx.HTTPError, OSError):
+            data = server.fetch(url)
+        except CHIRPSUnavailable:
             return None
         if not data:
             return None
         data = bytes(data)
         if not data.startswith((b"CDF", b"\x89HDF")):
             return None
-        values, latitude, longitude = read_mirror(data)
-        field_ = on_model_grid(values, latitude, longitude, grid, None)
+        try:
+            values, latitude, longitude = read_mirror(data, day)
+            field_ = on_model_grid(values, latitude, longitude, grid, None)
+        except (ValueError, KeyError, OSError):
+            return None  # A malformed mirror response never becomes an observation.
         missing = int(np.count_nonzero(~np.isfinite(grid.to_cells(field_))))
         info = Day(day, "final", url, hashlib.sha256(data).hexdigest(), missing)
         if store is not None:

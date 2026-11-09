@@ -1,7 +1,7 @@
 "use client";
 /** Verification of issued forecasts against CHIRPS. */
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import {
   Button,
@@ -71,8 +71,12 @@ function mean(values: (number | null | undefined)[]): number | null {
 
 /** Every verified week's scores: CHIRPS, or one of the further observations, against the
  * chosen forecast layer, with raw ECMWF's RMSE beside it. */
-function WeeklyScores() {
+function WeeklyScores({ refresh }: { refresh: number }) {
   const weeks = useApi<VerifiedWeek[]>("/verification/weeks");
+  const reload = weeks.reload;
+  useEffect(() => {
+    if (refresh) reload();
+  }, [refresh, reload]);
   const [layer, setLayer] = useState<Variant>("hybrid");
   const [observed, setObserved] = useState("best");
   if (weeks.status === 404) return null; // an older service
@@ -97,7 +101,7 @@ function WeeklyScores() {
   });
   const scored = rows.filter((r) => r.scores);
   const names: Record<string, string> = {
-    best: "Best available (CHIRPS, else ARC 2.0, else RFE 2.0)",
+    best: "Best available (CHIRPS, ARC 2.0, RFE 2.0, GPM IMERG)",
     chirps: "CHIRPS",
   };
   for (const week of weeks.data ?? [])
@@ -557,6 +561,7 @@ function SeasonalTable({ seasonal }: { seasonal: Seasonal }) {
 
 export default function Verification() {
   const runs = useApi<ForecastRun[]>("/forecasts");
+  const [refresh, setRefresh] = useState(0);
   const [includeTest, setIncludeTest] = useState(false);
   /** Another model's verified weeks; empty: the model in use. */
   const [model, setModel] = useState<string | null>(null);
@@ -567,7 +572,8 @@ export default function Verification() {
   const { operation, running, error, start } = useOperation(() => {
     runs.reload();
     seasonal.reload();
-  });
+    setRefresh((value) => value + 1);
+  }, "verification");
   // Each Sunday run's forecast of record: a week is listed once. Other days' runs
   // count only while no Sunday run exists.
   const recorded = ofRecord(runs.data ?? []);
@@ -591,7 +597,7 @@ export default function Verification() {
         <PageBanner
           title="Forecast Verification"
           crumbs={[{ label: "Verification" }]}
-          subtitle="Each week's forecast against CHIRPS, or ARC 2.0 and RFE 2.0 when CHIRPS is missing."
+          subtitle="Each week's forecast against CHIRPS, or ARC 2.0, RFE 2.0 and GPM IMERG when CHIRPS is missing."
           actions={
             <Button
               variant="amber"
@@ -622,7 +628,7 @@ export default function Verification() {
           </div>
           <div className="stat amber">
             <div className="label">Awaiting observations</div>
-            <div className="value">{runs.data ? waiting.length : "…"}</div>
+            <div className="value">{runs.data ? unverified.length : "…"}</div>
             <div className="hint">
               {overdue.length
                 ? `${overdue.length} overdue`
@@ -645,21 +651,27 @@ export default function Verification() {
             Weeks are verified about two days after they end.
           </Notice>
         )}
-        <WeeklyScores />
-        {verified[0] && <LatestVerified run={verified[0]} />}
-        <SkillSummary />
-        <ProbabilisticVerification />
+        <WeeklyScores refresh={refresh} />
+        {verified[0] && (
+          <LatestVerified
+            key={`${verified[0].forecast_id}-${refresh}`}
+            run={verified[0]}
+          />
+        )}
+        <SkillSummary key={`summary-${refresh}`} />
+        <ProbabilisticVerification key={`probability-${refresh}`} />
         {runs.data && verified.length < PAST_WEEKS && (
           <PastWeeks
             onDone={() => {
               runs.reload();
               seasonal.reload();
+              setRefresh((value) => value + 1);
             }}
           />
         )}
         <Disclosure
           title="Seasonal scores"
-          subtitle="Pooled over the CHIRPS-verified weeks"
+          subtitle="Pooled over verified weeks, using each week's observation of record"
         >
           <label
             style={{
@@ -676,8 +688,20 @@ export default function Verification() {
             />
             Include 2022–2024 test period
           </label>
+          {seasonal.error && (
+            <ErrorState message={seasonal.error} retry={seasonal.reload} />
+          )}
           {seasonal.data ? (
             <div style={{ display: "grid", gap: 16 }}>
+              {seasonal.data.observations && (
+                <p className="card-note">
+                  Observed rainfall:{" "}
+                  {Array.from(
+                    new Set(Object.values(seasonal.data.observations)),
+                  ).join(", ") || "none yet"}
+                  . Different observation products can change the scores.
+                </p>
+              )}
               <ModelScope
                 shown={seasonal.data.model_id}
                 models={seasonal.data.models}

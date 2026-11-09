@@ -129,7 +129,7 @@ function Body({
             <Link
               key={c}
               className="btn btn-outline btn-sm"
-              href={"/countries/" + countrySlug(c)}
+              href={`/countries/${countrySlug(c)}?id=${encodeURIComponent(detail.forecast_id)}`}
             >
               {c}
             </Link>

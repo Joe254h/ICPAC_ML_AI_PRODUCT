@@ -176,6 +176,17 @@ function Body({ detail }: { detail: ForecastDetail }) {
       {get("focus") && (
         <Product section={get("focus") as Section} eyebrow="Country focus" />
       )}
+      {sections
+        .filter((section) => section.extra)
+        .map((section) => (
+          <Card
+            key={section.key}
+            eyebrow="This week in figures"
+            title={section.title}
+          >
+            <Bullets section={section} />
+          </Card>
+        ))}
       {get("about") && (
         <Card title="About this forecast">
           {get("about")?.text.map((text, i) => (

@@ -153,9 +153,11 @@ def method_label(provenance: dict[str, Any]) -> str:
     return f"MBC + {family} {str(model.get('algorithm', '')).upper()}".strip()
 
 
-def method_description(provenance: dict[str, Any], primary: str) -> str:
+def method_description(
+    provenance: dict[str, Any], primary: str, model_snapshot: dict[str, Any] | None = None
+) -> str:
     """The issued layer's method in words, for the bulletin and the Copilot."""
-    model = provenance.get("model", {})
+    model = {**(model_snapshot or {}), **provenance.get("model", {})}
     family = model.get("family")
     policy = provenance.get("hybrid_policy") or {}
     version = provenance.get("model_version") or ""
@@ -272,7 +274,7 @@ def interpretation_inputs(
         "generation_time": p["generation_time"],
         "method": {
             "label": method_label(p),
-            "description": method_description(p, primary),
+            "description": method_description(p, primary, model),
             "baseline": p["model"].get("baseline"),
             "policy": (p.get("hybrid_policy") or {}).get("policy"),
         },

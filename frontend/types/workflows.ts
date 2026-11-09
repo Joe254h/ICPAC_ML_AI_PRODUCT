@@ -135,6 +135,7 @@ export type BulletinSection = {
   text: string[];
   leads: string[];
   missing_dependency?: string;
+  extra?: boolean;
   /** The country focus: why this country was chosen. */
   why?: string;
   /** A section the forecaster added. */

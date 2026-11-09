@@ -304,6 +304,16 @@ def run_forecast(
         if blocker is None
         else {"status": status, "reason": blocker},
     }
+    model_metadata: dict[str, Any] = {
+        k: result.metadata[k] for k in ("algorithm", "family", "baseline", "trees")
+    }
+    model_metadata.update(
+        {
+            k: record[k]
+            for k in ("training_period", "validation_period", "test_period")
+            if k in record
+        }
+    )
     provenance = {
         "forecast_id": forecast_id,
         "model_id": record.get("model_id"),
@@ -364,7 +374,7 @@ def run_forecast(
         "mbc_month": result.metadata["mbc_month"],
         "doy_date": result.metadata["doy_date"],
         "protected_test_period": touches_protected_test(cfg, start, end),
-        "model": {k: result.metadata[k] for k in ("algorithm", "family", "baseline", "trees")},
+        "model": model_metadata,
     }
     dataset.attrs.update(
         forecast_id=forecast_id,

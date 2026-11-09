@@ -70,7 +70,10 @@ async function proxy(request: NextRequest, segments: string[]) {
     });
   } catch {
     return Response.json(
-      { detail: "Climate API unavailable. Check backend service and API_URL." },
+      {
+        detail:
+          "The forecast service is temporarily unavailable. Please try again shortly.",
+      },
       { status: 503 },
     );
   }

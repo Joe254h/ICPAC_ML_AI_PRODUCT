@@ -134,6 +134,9 @@ class ForecastRunRequest(BaseModel):
 class OperationRequest(BaseModel):
     """A background operational task (see backend/app/services/operations.py)."""
 
+    # Browser submission identity survives a lost POST response and a reload.
+    request_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+
     action: Literal[
         "fetch_ecmwf",
         "run_forecast",

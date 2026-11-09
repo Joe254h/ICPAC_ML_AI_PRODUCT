@@ -13,6 +13,8 @@ available; otherwise the run holds raw ECMWF and MBC and records why the hybrid 
 in progress.
 """
 
+import hashlib
+import io
 import json
 import os
 import re
@@ -823,10 +825,42 @@ class ForecastService:
             compared = {}
         if compared.get("status") != "available":
             raise Unavailable(f"{OBSERVED[source]} has not been compared for this week yet")
+        if snapshot := compared.get("observation"):
+            path = self.data_root() / "reference_weeks" / snapshot["file"]
+            key = f"inputs/reference_weeks/{snapshot['file']}"
+            payload = path.read_bytes() if path.exists() else None
+            if payload is None:
+                store = package_store()
+                payload = store.get(key) if store is not None else None
+            if payload is None or hashlib.sha256(payload).hexdigest() != snapshot["sha256"]:
+                raise Unavailable(f"The frozen {OBSERVED[source]} observation failed its checks")
+            with ncio.open_dataset(io.BytesIO(payload), engine="scipy") as dataset:
+                return np.array(dataset["precipitation_week2"].values, dtype=float)
+        # Legacy comparisons have no frozen grid; the original daily cache is still
+        # supported. New comparisons always hold their scored observation in Blob too.
         total, _ = daily_references.days_total(
             source, chirps.window_days(start), self.data_root() / source / "daily"
         )
         return np.asarray(daily_references.on_grid(total, grid), dtype=float)
+
+    def _freeze_reference(
+        self, forecast_id: str, source: str, values: np.ndarray, grid: Any
+    ) -> dict:
+        field = xr.Dataset(
+            {"precipitation_week2": (("latitude", "longitude"), values, {"units": "mm"})},
+            coords={"latitude": grid.latitude, "longitude": grid.longitude},
+            attrs={"forecast_id": forecast_id, "source": source},
+        )
+        payload = bytes(ncio.to_netcdf(field, engine="scipy"))
+        digest = hashlib.sha256(payload).hexdigest()
+        name = f"{forecast_id}-{source}-{digest}.nc"
+        store = package_store()
+        if store is not None:
+            store.put(f"inputs/reference_weeks/{name}", payload)
+        path = self.data_root() / "reference_weeks" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        return {"file": name, "sha256": digest}
 
     def bulletin(self, forecast_id: str) -> dict[str, Any]:
         self.repo.get(KIND, forecast_id)
@@ -1289,6 +1323,7 @@ class ForecastService:
                 pass
             name = daily_references.NAMES[source]
             base = {"forecast_id": forecast_id, "source": source, "name": name}
+            comparison: dict[str, Any]
             if not daily_references.window_published(source, days):
                 comparison = {**base, "status": "waiting", "reason": f"{name} lags a few days"}
             else:
@@ -1300,14 +1335,18 @@ class ForecastService:
                     comparison = {**base, "status": "unavailable", "reason": str(exc)}
                 else:
                     run = run or packages.load_run(self.directory(forecast_id))
-                    observed = grid.to_cells(daily_references.on_grid(total, grid))
+                    observed_grid = np.asarray(daily_references.on_grid(total, grid), dtype=float)
+                    observed = grid.to_cells(observed_grid)
                     result = verify(run, observed, grid, settings(), {"source": name, **origin})
+                    snapshot = self._freeze_reference(forecast_id, source, observed_grid, grid)
                     comparison = {
                         **base,
                         "status": "available",
                         "domain": result["domain"],
                         "season": result["season"],
                         "licence": daily_references.settings(source)["licence"],
+                        "observation": snapshot,
+                        "origin": origin,
                     }
                     if result.get("probabilistic"):
                         comparison["probabilistic"] = result["probabilistic"]
@@ -1324,12 +1363,12 @@ class ForecastService:
         read) ARC 2.0, else RFE 2.0; None while none has."""
         if record.get("verification_status") == "available":
             return "chirps"
-        for source in ("arc2", "rfe2"):
+        for source in daily_references.REFERENCES:
             try:
                 compared = self.repo.get(REFERENCE_KIND, f"{record['forecast_id']}-{source}")
             except KeyError:
                 continue
-            if compared.get("status") == "available":
+            if compared.get("status") == "available" and compared.get("domain"):
                 return source
         return None
 
@@ -1342,9 +1381,16 @@ class ForecastService:
         runs are verified, other days' runs (overlapping their weeks) are left out."""
         model_id = model_id or ModelRegistry(self.platform).current()["model"]["model_id"]
         records, skipped = [], 0
+        seen = set()
         for record in self.runs():
             if record["model_id"] != model_id:
                 continue
+            # The newest forecast of this model and initialization is the record.
+            # An older scored version must not silently stand in for its replacement.
+            initialization = record["initialization"][:10]
+            if initialization in seen:
+                continue
+            seen.add(initialization)
             if variant is not None and variant not in record.get("layers", VARIANTS):
                 continue
             source = self.observed_by(record)
@@ -1364,13 +1410,10 @@ class ForecastService:
     def verified_models(self, include_protected: bool) -> list[dict[str, Any]]:
         """Each model with verified forecasts and how many, so a page can say that the
         model now in use has none yet and show an earlier model's scores, by name."""
-        counts: dict[str, int] = {}
-        for record in self.runs():
-            if self.observed_by(record) is None:
-                continue
-            if record["protected_test_period"] and not include_protected:
-                continue
-            counts[record["model_id"]] = counts.get(record["model_id"], 0) + 1
+        counts = {
+            model_id: len(self.verified(model_id, include_protected)[1])
+            for model_id in {r["model_id"] for r in self.runs()}
+        }
         names = {
             m["model_id"]: m.get("model_name") or "An earlier model"
             for m in self.repo.list("model")
@@ -1383,6 +1426,7 @@ class ForecastService:
                 "cases": n,
             }
             for model_id, n in counts.items()
+            if n
         ]
 
     def seasonal(self, model_id: str | None = None, include_protected: bool = False) -> dict:
@@ -1395,7 +1439,13 @@ class ForecastService:
         model_id, records, skipped = self.verified(model_id, include_protected)
         pooled: dict[str, dict[str, list[dict[str, float]]]] = {}
         for record in records:
-            result = self._read(record["forecast_id"], "verification.json")
+            result = (
+                self._read(record["forecast_id"], "verification.json")
+                if record["observed_by"] == "chirps"
+                else self.repo.get(
+                    REFERENCE_KIND, f"{record['forecast_id']}-{record['observed_by']}"
+                )
+            )
             for variant, metrics in result["domain"].items():
                 pooled.setdefault(result["season"], {}).setdefault(variant, []).append(
                     metrics["statistics"]
@@ -1407,6 +1457,7 @@ class ForecastService:
                 for season, variants in pooled.items()
             },
             "forecasts": [record["forecast_id"] for record in records],
+            "observations": {r["forecast_id"]: OBSERVED[r["observed_by"]] for r in records},
             "excluded_protected_period": skipped,
             "models": self.verified_models(include_protected),
             "scope": "cell-based metrics pooled over the verified forecasts of each season",
@@ -1427,6 +1478,7 @@ class ForecastService:
             "model_id": model_id,
             "cases": cases,
             "cases_by_variant": counts,
+            "observations": {r["forecast_id"]: OBSERVED[r["observed_by"]] for r in records},
             "default_variant": "hybrid" if counts["hybrid"] else "mbc",
             "forecasts": [record["forecast_id"] for record in records],
             "excluded_protected_period": skipped,
@@ -1475,6 +1527,12 @@ class ForecastService:
                     r["observed_by"],
                     packages.read_manifest(self.directory(r["forecast_id"]))["files"].get(
                         "verification.json"
+                    ),
+                    json.dumps(
+                        self.repo.get(REFERENCE_KIND, f"{r['forecast_id']}-{r['observed_by']}")
+                        if r["observed_by"] != "chirps"
+                        else {},
+                        sort_keys=True,
                     ),
                 )
                 for r in records

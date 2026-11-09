@@ -124,12 +124,12 @@ class AutomationService:
         forecasts = ForecastService(self.platform)
         runs = forecasts.runs()
         latest = next((r for r in runs if not r.get("synthetic")), None)
-        # Verified by CHIRPS, or by ARC 2.0 or RFE 2.0 while CHIRPS cannot be read.
-        verified = [
-            r for r in runs if not r.get("synthetic") and forecasts.observed_by(r) is not None
-        ]
+        # Use the maps' model, observation priority and forecast-of-record selection.
+        # Replaced versions or overlapping daily runs must not inflate readiness.
+        model = current_record(self.platform)
+        verified = forecasts.verified(model["model_id"], False)[1] if model else []
         layers = (latest or {}).get("layers", [])
-        hybrid = hybrid_status(current_record(self.platform))
+        hybrid = hybrid_status(model)
         cfg = scheduler_settings()
         sunday, due = due_run(datetime.now(timezone.utc))
         try:
@@ -247,7 +247,8 @@ class AutomationService:
             ),
             "verification": (
                 "available" if verified else "waiting",
-                f"{len(verified)} real cases verified against CHIRPS, ARC 2.0 or RFE 2.0; "
+                f"{len(verified)} forecasts of the model in use verified against CHIRPS, "
+                "ARC 2.0, RFE 2.0 or GPM IMERG; "
                 "each about two days after its week ends.",
             ),
             "spatial_verification": (
