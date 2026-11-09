@@ -358,10 +358,21 @@ def test_chirps_days_come_from_the_open_mirror_when_chc_cannot_give_them(
     asked: list[str] = []
 
     def mirror_day(day: date) -> bytes:
-        return xr.Dataset(
-            {"precip": (("time", "latitude", "longitude"), np.full((1, LAT.size, LON.size), 4.0))},
-            coords={"time": [np.datetime64(day.isoformat())], "latitude": LAT, "longitude": LON},
-        ).to_netcdf()
+        return bytes(
+            xr.Dataset(
+                {
+                    "precip": (
+                        ("time", "latitude", "longitude"),
+                        np.full((1, LAT.size, LON.size), 4.0),
+                    )
+                },
+                coords={
+                    "time": [np.datetime64(day.isoformat())],
+                    "latitude": LAT,
+                    "longitude": LON,
+                },
+            ).to_netcdf()
+        )
 
     def get(url: str) -> bytes | None:
         asked.append(url)
