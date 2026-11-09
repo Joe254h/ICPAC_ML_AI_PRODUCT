@@ -381,6 +381,60 @@ li.open > .dropdown {
   border-color: var(--action-light);
   color: var(--green-800);
 }
+/* site language: in the bar on wide screens, in the folded menu below that */
+.language-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+}
+.language-picker:hover,
+.language-picker:focus-within {
+  border-color: var(--action-light);
+  color: var(--green-800);
+}
+.language-picker select {
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  max-width: 110px;
+}
+.language-picker select:focus {
+  outline: none;
+}
+/* in the bar: the icon and a short code, with the list over them */
+.language-picker.in-bar {
+  position: relative;
+  gap: 4px;
+  cursor: pointer;
+}
+.language-picker .code {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.language-picker.in-bar select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  opacity: 0;
+}
+.language-picker.in-bar:focus-within {
+  outline: 2px solid var(--action-light);
+  outline-offset: 2px;
+}
+.language-picker.in-menu {
+  display: none;
+}
 /* staff access, right of the status */
 .staff-button,
 .staff-chip {
@@ -2291,6 +2345,19 @@ select.input,
   .mainnav.mobile-open {
     display: block;
   }
+  .language-picker.in-bar {
+    display: none;
+  }
+  .mainnav .language-picker.in-menu {
+    display: flex;
+    max-width: var(--page);
+    margin: 0 24px 18px;
+  }
+  .mainnav .language-picker.in-menu select {
+    flex: 1;
+    max-width: none;
+    font-size: 16px;
+  }
   .mainnav ul {
     flex-direction: column;
     height: auto;
@@ -2344,6 +2411,118 @@ select.input,
   .dropdown-label {
     grid-column: 1 / -1;
   }
+}
+/* first, when the menus barely miss: closer menus and staff access as an icon */
+.site-top.tight .headbar {
+  gap: 16px;
+}
+.site-top.tight .mainnav .item {
+  padding: 0 8px;
+}
+.site-top.tight .staff-button .label,
+.site-top.tight .staff-chip .label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.site-top.tight .staff-button,
+.site-top.tight .staff-chip {
+  width: 38px;
+  padding: 0;
+  justify-content: center;
+}
+/* the same fold on a wide screen when the menus do not fit the bar (a long language, the
+   staff's buttons): the shell measures the bar and sets "crowded" */
+.site-top.crowded .menu-toggle {
+  display: inline-flex;
+}
+.site-top.crowded .headbar {
+  justify-content: space-between;
+}
+.site-top.crowded .mainnav {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  max-height: calc(100vh - 72px);
+  overflow-y: auto;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+}
+.site-top.crowded .mainnav.mobile-open {
+  display: block;
+}
+.site-top.crowded .language-picker.in-bar {
+  display: none;
+}
+.site-top.crowded .mainnav .language-picker.in-menu {
+  display: flex;
+  max-width: var(--page);
+  margin: 0 24px 18px;
+}
+.site-top.crowded .mainnav .language-picker.in-menu select {
+  flex: 1;
+  max-width: none;
+  font-size: 16px;
+}
+.site-top.crowded .mainnav ul {
+  flex-direction: column;
+  height: auto;
+  gap: 0;
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: 6px 24px 18px;
+}
+.site-top.crowded .mainnav li {
+  display: block;
+}
+.site-top.crowded .mainnav li + li {
+  border-top: 1px solid var(--line);
+}
+.site-top.crowded .mainnav li.staff {
+  margin-left: 0;
+}
+.site-top.crowded .mainnav li.staff::before {
+  display: none;
+}
+.site-top.crowded .mainnav .item {
+  width: 100%;
+  height: 52px;
+  padding: 0;
+  justify-content: space-between;
+  font-size: 16px;
+  box-shadow: none;
+}
+.site-top.crowded .mainnav .item[aria-current="page"] {
+  box-shadow: none;
+}
+.site-top.crowded .dropdown,
+.site-top.crowded .mainnav li.staff > .dropdown,
+.site-top.crowded .mainnav li:nth-last-child(2) > .dropdown {
+  position: static;
+  min-width: 0;
+  border: 0;
+  box-shadow: none;
+  padding: 0 0 12px;
+}
+.site-top.crowded li.open > .dropdown {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+}
+.site-top.crowded .dropdown-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+}
+.site-top.crowded .dropdown-label {
+  grid-column: 1 / -1;
 }
 @media (max-width: 1100px) {
   .grid-4 {

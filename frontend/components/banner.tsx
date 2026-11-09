@@ -6,6 +6,7 @@
 import Link from "next/link";
 import { createContext, useContext } from "react";
 import { createPortal } from "react-dom";
+import { useT } from "@/lib/i18n";
 
 export const BannerSlot = createContext<HTMLElement | null>(null);
 
@@ -23,16 +24,17 @@ export type Banner = {
 };
 
 export function Crumbs({ crumbs }: { crumbs: Crumb[] }) {
+  const t = useT();
   return (
     <nav className="crumbs" aria-label="Breadcrumb">
-      <Link href="/">Home</Link>
+      <Link href="/">{t("Home")}</Link>
       {crumbs.map((crumb) => (
         <span key={crumb.label}>
           {" / "}
           {crumb.href ? (
-            <Link href={crumb.href}>{crumb.label}</Link>
+            <Link href={crumb.href}>{t(crumb.label)}</Link>
           ) : (
-            crumb.label
+            t(crumb.label)
           )}
         </span>
       ))}
@@ -49,12 +51,13 @@ export function PageBanner({
   compact,
 }: Banner) {
   const slot = useContext(BannerSlot);
+  const t = useT();
   if (!slot) return null;
   return createPortal(
     <>
       {compact && <span className="banner-compact" hidden />}
       {crumbs && <Crumbs crumbs={crumbs} />}
-      <h1>{title}</h1>
+      <h1>{t(title)}</h1>
       {subtitle && <p>{subtitle}</p>}
       {facts && facts.length > 0 && (
         <div className="hero-facts">

@@ -95,6 +95,35 @@ test("a header menu opens on click and its pages are links", async ({
   await expect(page).toHaveURL(/\/countries$/);
 });
 
+test("the site language changes the menus and the Copilot's language", async ({
+  page,
+}) => {
+  await page.goto("/forecasts/archive");
+  // The page banner renders once the page is live.
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Forecast Archive" }),
+  ).toBeVisible();
+  const nav = page.getByRole("navigation", { name: "Main" });
+  await page.locator(".utility").getByLabel("Site language").selectOption("sw");
+  await expect(nav.getByRole("button", { name: "Utabiri" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Hifadhi ya utabiri" }),
+  ).toBeVisible();
+  // The choice is the Copilot's answer language too, and it lasts across pages.
+  await page.goto("/copilot");
+  await expect(nav.getByRole("link", { name: "Msaidizi" })).toBeVisible();
+  await expect(
+    page.locator(".utility").getByLabel("Site language"),
+  ).toHaveValue("sw");
+  await page.locator(".utility").getByLabel("Site language").selectOption("en");
+  await expect(nav.getByRole("link", { name: "Copilot" })).toBeVisible();
+  // On a phone the choice sits in the folded menu.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await expect(nav.getByLabel("Site language")).toBeVisible();
+  await noHorizontalScroll(page);
+});
+
 test("rainfall monitoring shows the newest dekad of all five estimates", async ({
   page,
 }) => {

@@ -12,6 +12,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -19,6 +20,7 @@ import {
 import {
   ChevronDown,
   ExternalLink,
+  Languages,
   Menu as MenuIcon,
   Moon,
   Search,
@@ -37,6 +39,8 @@ import {
   menuRoutes,
 } from "@/features/routes";
 import type { Menu, Route } from "@/features/routes";
+import { SITE_LANGUAGES, translate } from "@/lib/i18n";
+import { useLanguage } from "@/lib/language";
 import { useTheme } from "@/lib/theme";
 import { useApi } from "@/services/hooks";
 import type { Loaded } from "@/services/hooks";
@@ -74,11 +78,13 @@ function MenuEntry({
   active,
   state,
   setState,
+  t,
 }: {
   menu: Menu;
   active?: Route;
   state: MenuState;
   setState: (state: MenuState) => void;
+  t: (text: string) => string;
 }) {
   const open = state.menu === menu;
   const groups = menuGroups(menu);
@@ -93,7 +99,7 @@ function MenuEntry({
           href={href(routes[0])}
           aria-current={current ? "page" : undefined}
         >
-          {menu}
+          {t(menu)}
         </Link>
       </li>
     );
@@ -121,7 +127,7 @@ function MenuEntry({
           )
         }
       >
-        {menu} <ChevronDown size={16} aria-hidden className="chevron" />
+        {t(menu)} <ChevronDown size={16} aria-hidden className="chevron" />
       </button>
       <div className={cx("dropdown", groups.length > 1 && "grouped")}>
         {groups.map((group) => (
@@ -132,7 +138,7 @@ function MenuEntry({
               group.routes.length > 6 && "columns",
             )}
           >
-            {group.label && <p className="dropdown-label">{group.label}</p>}
+            {group.label && <p className="dropdown-label">{t(group.label)}</p>}
             {group.routes.map((route) => (
               <Link
                 key={route.path}
@@ -140,8 +146,10 @@ function MenuEntry({
                 aria-current={active?.path === route.path ? "page" : undefined}
                 onClick={() => setState({ menu: null, pinned: false })}
               >
-                {route.title}
-                {route.soon && <span className="soon">Coming later</span>}
+                {t(route.title)}
+                {route.soon && (
+                  <span className="soon">{t("Coming later")}</span>
+                )}
               </Link>
             ))}
           </div>
@@ -151,7 +159,13 @@ function MenuEntry({
   );
 }
 
-function SearchDialog({ close }: { close: () => void }) {
+function SearchDialog({
+  close,
+  t,
+}: {
+  close: () => void;
+  t: (text: string) => string;
+}) {
   const router = useRouter();
   const [text, setText] = useState("");
   const [index, setIndex] = useState(0);
@@ -162,10 +176,11 @@ function SearchDialog({ close }: { close: () => void }) {
       (route) =>
         route.nav !== false &&
         (!needle ||
-          route.title.toLowerCase().includes(needle) ||
-          route.menu.toLowerCase().includes(needle)),
+          [route.title, route.menu, t(route.title), t(route.menu)].some(
+            (name) => name.toLowerCase().includes(needle),
+          )),
     ).slice(0, 12);
-  }, [text]);
+  }, [text, t]);
   useEffect(() => input.current?.focus(), []);
   useEffect(() => setIndex(0), [text]);
   const go = (route?: Route) => {
@@ -209,8 +224,8 @@ function SearchDialog({ close }: { close: () => void }) {
                 className={cx(i === index && "active")}
                 onClick={close}
               >
-                <span>{route.title}</span>
-                <small>{route.menu}</small>
+                <span>{t(route.title)}</span>
+                <small>{t(route.menu)}</small>
               </Link>
             </li>
           ))}
@@ -222,6 +237,50 @@ function SearchDialog({ close }: { close: () => void }) {
         </ul>
       </div>
     </div>
+  );
+}
+
+/** The site's language: menus, page names and the footer, and the language the Copilot
+ * answers in and the bulletin is offered in. In the bar it shows a short code; the list
+ * itself gives each language's own name. */
+function LanguagePicker({
+  language,
+  choose,
+  compact,
+}: {
+  language: string;
+  choose: (code: string) => void;
+  compact?: boolean;
+}) {
+  const known = language in SITE_LANGUAGES;
+  return (
+    <label
+      className={cx("language-picker", compact ? "in-bar" : "in-menu")}
+      title={translate("Site language", language)}
+    >
+      <Languages size={16} aria-hidden />
+      {compact && (
+        <span className="code" aria-hidden>
+          {language.toUpperCase()}
+        </span>
+      )}
+      {/* Uncontrolled, so a re-render while the choice is being made cannot put the
+          earlier language back; a change made elsewhere remounts it. */}
+      <select
+        key={language}
+        aria-label="Site language"
+        defaultValue={language}
+        onChange={(e) => choose(e.target.value)}
+      >
+        {Object.entries(SITE_LANGUAGES).map(([code, name]) => (
+          <option key={code} value={code} lang={code}>
+            {name}
+          </option>
+        ))}
+        {/* A language chosen in the Copilot that the menus do not come in yet. */}
+        {!known && <option value={language}>{language}</option>}
+      </select>
+    </label>
   );
 }
 
@@ -285,6 +344,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const health = useApi<Health>("/health");
   const status = statusOf(health);
   const [theme, setTheme] = useTheme();
+  const [language, chooseLanguage] = useLanguage();
+  const t = useCallback(
+    (text: string) => translate(text, language),
+    [language],
+  );
   const [menuState, setMenuState] = useState<MenuState>({
     menu: null,
     pinned: false,
@@ -294,6 +358,40 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   const [accessVersion, setAccessVersion] = useState(0);
   const nav = useRef<HTMLElement>(null);
+  const bar = useRef<HTMLDivElement>(null);
+  // When the menus do not fit the bar (a long language, the staff's buttons), the bar
+  // first tightens (closer menus, staff access as an icon) and then folds the menus into
+  // the menu button, as it does below 1240 px. ``fitsFrom[step]`` is the bar width the
+  // step before needs.
+  const [fit, setFit] = useState(0);
+  const fitsFrom = useRef([0, 0, 0]);
+  useLayoutEffect(() => setFit(0), [language]);
+  useLayoutEffect(() => {
+    const head = bar.current;
+    const menus = nav.current;
+    const list = menus?.querySelector("ul");
+    if (!head || !menus || !list) return;
+    const check = () => {
+      if (fit > 0 && head.clientWidth >= fitsFrom.current[fit]) {
+        setFit(fit - 1);
+        return;
+      }
+      if (fit === 2) return;
+      if (getComputedStyle(menus).position === "absolute") return; // folded by width
+      const over = list.scrollWidth - menus.clientWidth;
+      if (over > 0) {
+        fitsFrom.current[fit + 1] = head.clientWidth + over;
+        setFit(fit + 1);
+      }
+    };
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(head);
+    observer.observe(list);
+    const utility = head.querySelector(".utility");
+    if (utility) observer.observe(utility);
+    return () => observer.disconnect();
+  }, [fit, language]);
   useEffect(() => {
     const changed = () => setAccessVersion((v) => v + 1);
     window.addEventListener("staff-access", changed);
@@ -342,8 +440,15 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       <a href="#content" className="sr-only focus:not-sr-only">
         Skip to content
       </a>
-      <header className={cx("site-top", home && "home")}>
-        <div className="wrap headbar">
+      <header
+        className={cx(
+          "site-top",
+          home && "home",
+          fit > 0 && "tight",
+          fit > 1 && "crowded",
+        )}
+      >
+        <div ref={bar} className="wrap headbar">
           <Link
             className="brand"
             href="/"
@@ -352,7 +457,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <img src="/igad-seal.png" alt="" width={40} height={40} />
             <div className="brand-name">
               <b>ICPAC</b>
-              <small>Week-2 Rainfall Outlook</small>
+              <small>{t("Week-2 Rainfall Outlook")}</small>
             </div>
           </Link>
           <nav
@@ -368,17 +473,24 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   active={active}
                   state={menuState}
                   setState={setMenuState}
+                  t={t}
                 />
               ))}
             </ul>
+            <LanguagePicker language={language} choose={chooseLanguage} />
           </nav>
           <div className="utility">
+            <LanguagePicker
+              language={language}
+              choose={chooseLanguage}
+              compact
+            />
             <button
               type="button"
               className="icon-button"
               onClick={() => setSearch(true)}
               aria-label="Search"
-              title="Search (press /)"
+              title={`${t("Search")} (/)`}
             >
               <Search size={18} aria-hidden />
             </button>
@@ -426,7 +538,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <div className="wrap">
               <div ref={setSlot} className="banner-slot" />
               <div className="banner-fallback">
-                <h1>{active?.title ?? "Page not found"}</h1>
+                <h1>{t(active?.title ?? "Page not found")}</h1>
               </div>
             </div>
           </div>
@@ -444,11 +556,13 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <img src="/igad-seal-white.png" alt="" width={42} height={42} />
             <div className="brand-name">
               <b>ICPAC</b>
-              <small>IGAD Climate Prediction and Applications Centre</small>
+              <small>
+                {t("IGAD Climate Prediction and Applications Centre")}
+              </small>
             </div>
           </Link>
           <nav className="footer-links" aria-label="ICPAC">
-            <Link href="/about">About this service</Link>
+            <Link href="/about">{t("About this service")}</Link>
             {ORGANISATION.map(([label, url]) => (
               <a key={url} href={url} target="_blank" rel="noreferrer">
                 {label} <ExternalLink size={12} aria-hidden />
@@ -459,11 +573,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <nav className="wrap sitemap" aria-label="Site map">
           {MENUS.map((menu) => (
             <div key={menu}>
-              <h2>{menu}</h2>
+              <h2>{t(menu)}</h2>
               <ul>
                 {menuRoutes(menu).map((route) => (
                   <li key={route.path}>
-                    <Link href={href(route)}>{route.title}</Link>
+                    <Link href={href(route)}>{t(route.title)}</Link>
                   </li>
                 ))}
               </ul>
@@ -472,12 +586,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </nav>
         <div className="wrap legal">
           <span>
-            © ICPAC {new Date().getUTCFullYear()} · WMO Regional Climate Centre
-            for Eastern Africa
+            © ICPAC {new Date().getUTCFullYear()} ·{" "}
+            {t("WMO Regional Climate Centre for Eastern Africa")}
           </span>
         </div>
       </footer>
-      {search && <SearchDialog close={() => setSearch(false)} />}
+      {search && <SearchDialog close={() => setSearch(false)} t={t} />}
     </AppContext.Provider>
   );
 }
