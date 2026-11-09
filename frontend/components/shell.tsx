@@ -371,13 +371,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     const menus = nav.current;
     const list = menus?.querySelector("ul");
     if (!head || !menus || !list) return;
+    const narrow = window.matchMedia("(max-width: 1239px)");
     const check = () => {
+      if (narrow.matches) {
+        // The stylesheet folds the menus; measure again once the screen is wide.
+        if (fit > 0) setFit(0);
+        return;
+      }
       if (fit > 0 && head.clientWidth >= fitsFrom.current[fit]) {
         setFit(fit - 1);
         return;
       }
       if (fit === 2) return;
-      if (getComputedStyle(menus).position === "absolute") return; // folded by width
       const over = list.scrollWidth - menus.clientWidth;
       if (over > 0) {
         fitsFrom.current[fit + 1] = head.clientWidth + over;

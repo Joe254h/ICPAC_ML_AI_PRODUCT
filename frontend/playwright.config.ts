@@ -35,7 +35,7 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
     },
     {
-      command: `rm -rf ${path.join(state, "service")} && mkdir -p ${path.join(state, "service")} && python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000`,
+      command: `rm -rf ${path.join(state, "service")} && mkdir -p ${path.join(state, "service")} && python -X faulthandler -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000`,
       cwd: "..",
       url: "http://127.0.0.1:8000/health",
       reuseExistingServer: !process.env.CI,
