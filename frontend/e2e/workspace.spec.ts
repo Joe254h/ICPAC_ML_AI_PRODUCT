@@ -80,7 +80,7 @@ test("draft translation recovers after reload and a temporary API failure", asyn
     edited: { language: "Kiswahili", summary: "Browser recovery fixture" },
   };
   let submissions = 0;
-  let polls = 0;
+  let recover = false;
   let completed = false;
   await page.route("**/api/bulletins", (route) =>
     route.fulfill({ json: completed ? [translated, ...stored] : stored }),
@@ -92,24 +92,20 @@ test("draft translation recovers after reload and a temporary API failure", asyn
     });
   });
   await page.route("**/api/bulletins/translations/qa-translation", (route) => {
-    polls += 1;
-    if (polls <= 2)
+    if (!recover)
       return route.fulfill({
         status: 503,
         json: { detail: "Temporary API failure" },
       });
-    if (polls > 3) completed = true;
+    completed = true;
     return route.fulfill({
-      json:
-        polls === 3
-          ? { id: "qa-translation", status: "running", done: 2, total: 4 }
-          : {
-              id: "qa-translation",
-              status: "done",
-              done: 4,
-              total: 4,
-              version_id: translated.id,
-            },
+      json: {
+        id: "qa-translation",
+        status: "done",
+        done: 4,
+        total: 4,
+        version_id: translated.id,
+      },
     });
   });
   await page.route("**/api/bulletins/qa-translated-version", (route) =>
@@ -132,6 +128,7 @@ test("draft translation recovers after reload and a temporary API failure", asyn
   ).toContainText(
     "Connection interrupted; recovering the translation shortly.",
   );
+  recover = true;
   await expect(page).toHaveURL(/id=qa-translated-version/, { timeout: 30_000 });
   await expect(
     page.getByText("Kiswahili version.", { exact: true }),

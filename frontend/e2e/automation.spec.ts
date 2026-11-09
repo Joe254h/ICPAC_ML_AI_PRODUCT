@@ -24,16 +24,17 @@ test("a restored source retry is followed to completion without another submissi
     route.fulfill({ json: { ...workspace, last_cycle: waiting } }),
   );
   let polls = 0;
+  let phase: "offline" | "waiting" | "complete" = "offline";
   await page.route("**/api/operations/recovery-check", (route) => {
     polls += 1;
-    if (polls === 1)
+    if (phase === "offline")
       return route.fulfill({
         status: 503,
         json: { detail: "Temporary API interruption" },
       });
     return route.fulfill({
       json:
-        polls === 2
+        phase === "waiting"
           ? waiting
           : {
               ...waiting,
@@ -57,10 +58,12 @@ test("a restored source retry is followed to completion without another submissi
   await expect(
     page.getByText(/Connection interrupted; checking again/),
   ).toBeVisible();
+  phase = "waiting";
   await page.reload();
   await expect(
     page.getByRole("button", { name: "Workflow running…" }),
   ).toBeDisabled();
+  phase = "complete";
   await expect(
     page.getByRole("link", { name: "Open prepared bulletin →" }),
   ).toBeVisible({ timeout: 30000 });
