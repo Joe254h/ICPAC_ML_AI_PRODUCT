@@ -9,7 +9,8 @@ them before every transition. Without a forecast there is nothing to draft.
 import hashlib
 import json
 import os
-from datetime import date
+import threading
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -130,6 +131,10 @@ def check_consistency(bulletin: dict) -> dict:
 def language_of(record: dict[str, Any]) -> str | None:
     """The language a draft is written in (its name), or None for English."""
     return (record.get("edited") or {}).get("language") or None
+
+
+#: Background translations of drafts, followed by the bulletin page.
+TRANSLATION_KIND = "bulletin_translation"
 
 
 class BulletinService:
@@ -450,7 +455,66 @@ class BulletinService:
             base_id=identifier,
         )
 
-    def translate(self, identifier: str, language: str, actor: str, model: Any = None) -> dict:
+    def start_translation(self, identifier: str, language: str, actor: str) -> dict:
+        """Translate a draft in the background (a slow AI service takes minutes): a job
+        record the page follows, section by section; the draft stays usable meanwhile."""
+        self.repo.get("bulletin", identifier)
+        job = self.repo.save(
+            TRANSLATION_KIND,
+            {
+                "bulletin_id": identifier,
+                "language": language,
+                "actor": actor,
+                "status": "running",
+                "done": 0,
+                "total": None,
+                "started_at": now(),
+                "version_id": None,
+                "error": None,
+            },
+        )
+        threading.Thread(
+            target=self._translate_job, args=(job["id"],), name="bulletin-translation", daemon=True
+        ).start()
+        return job
+
+    def _translate_job(self, job_id: str) -> None:
+        job = self.repo.get(TRANSLATION_KIND, job_id)
+
+        def progress(done: int, total: int) -> None:
+            job.update(done=done, total=total)
+            self.repo.save(TRANSLATION_KIND, job, job_id)
+
+        try:
+            made = self.translate(
+                job["bulletin_id"], job["language"], job["actor"], progress=progress
+            )
+            job.update(status="done", version_id=made["id"], done=job.get("total"))
+        except RevisionRefused as exc:
+            job.update(status="failed", error=str(exc))
+        except Exception:  # never leave the page waiting on a job that died
+            job.update(status="failed", error="The translation could not finish; try again")
+        job["finished_at"] = now()
+        self.repo.save(TRANSLATION_KIND, job, job_id)
+
+    def translation(self, job_id: str) -> dict:
+        """A translation job as the page sees it; one cut short by a restart says so."""
+        job = self.repo.get(TRANSLATION_KIND, job_id)
+        started = datetime.fromisoformat(job["started_at"])
+        if job["status"] == "running" and datetime.now(timezone.utc) - started > timedelta(
+            minutes=20
+        ):
+            job.update(status="failed", error="The translation was interrupted; try again")
+        return job
+
+    def translate(
+        self,
+        identifier: str,
+        language: str,
+        actor: str,
+        model: Any = None,
+        progress: Any = None,
+    ) -> dict:
         """A new version of a draft with its editable sections in another language, every
         figure checked; a speaker of the language checks it before a reviewer approves it."""
         from chatbot.agent import LANGUAGES
@@ -463,7 +527,9 @@ class BulletinService:
         base = self.repo.get("bulletin", identifier)
         sections = base["facts"]["sections"]
         try:
-            by_key = {t["key"]: t for t in translated_sections(sections, name, model)}
+            by_key = {
+                t["key"]: t for t in translated_sections(sections, name, model, progress=progress)
+            }
         except TranslationRefused as exc:
             raise RevisionRefused(str(exc)) from exc
         changes, notes = [], []

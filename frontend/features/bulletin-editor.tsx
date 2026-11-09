@@ -1,13 +1,23 @@
 "use client";
 /** Editing a weekly bulletin draft on the website, and translating it. Each save is a new
  * draft version; its Word document and maps are made again from it. */
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Languages, Plus, Save, Trash2 } from "lucide-react";
 import { Button, Card, ErrorState, Notice } from "@/components/ui";
 import { useActor } from "@/lib/actor";
 import { useLanguage } from "@/lib/language";
-import { mutate } from "@/services/api";
+import { mutate, request } from "@/services/api";
 import type { Bulletin, BulletinSection } from "@/types/workflows";
+
+/** A draft being translated on the server, section by section. */
+type TranslationJob = {
+  id: string;
+  status: "running" | "done" | "failed";
+  done?: number;
+  total?: number | null;
+  version_id?: string | null;
+  error?: string | null;
+};
 
 const EDITABLE = ["headline", "decision_support", "rainfall", "focus"];
 
@@ -246,8 +256,28 @@ export function TranslateDraft({
   // The site's language (the Copilot's too): choosing one here changes it there.
   const [shared, setLanguage] = useLanguage();
   const language = shared in TRANSLATIONS ? shared : "sw";
-  const [busy, setBusy] = useState(false);
+  const [job, setJob] = useState<TranslationJob | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const running = job?.status === "running";
+  // Follow the job: the translation runs on the server while the page stays usable.
+  useEffect(() => {
+    if (!job || job.status !== "running") return;
+    const timer = setTimeout(async () => {
+      try {
+        const next = await request<TranslationJob>(
+          `/bulletins/translations/${job.id}`,
+        );
+        if (next.status === "done" && next.version_id)
+          onDone(await request<Bulletin>(`/bulletins/${next.version_id}`));
+        if (next.status === "failed") setError(next.error ?? "It stopped");
+        setJob(next);
+      } catch (e) {
+        setError((e as Error).message);
+        setJob(null);
+      }
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [job, onDone]);
   return (
     <div className="draft-translate">
       <label className="field">
@@ -262,26 +292,27 @@ export function TranslateDraft({
       </label>
       <Button
         variant="outline"
-        disabled={busy}
+        disabled={running}
         onClick={async () => {
-          setBusy(true);
           setError(null);
           try {
-            onDone(
-              await mutate<Bulletin>(`/bulletins/${draft.id}/translate`, {
-                language,
-                actor: actor || null,
-              }),
+            setJob(
+              await mutate<TranslationJob>(
+                `/bulletins/${draft.id}/translations`,
+                { language, actor: actor || null },
+              ),
             );
           } catch (e) {
             setError((e as Error).message);
-          } finally {
-            setBusy(false);
           }
         }}
       >
         <Languages size={16} />{" "}
-        {busy ? "Translating… about a minute" : "Translate this draft"}
+        {running
+          ? job?.total
+            ? `Translating · section ${(job.done ?? 0) + 1} of ${job.total}`
+            : "Translating…"
+          : "Translate this draft"}
       </Button>
       {error && <ErrorState message={error} />}
       <Notice>

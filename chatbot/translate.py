@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from collections.abc import Callable
 from typing import Any
 
 from chatbot import agent
@@ -101,7 +102,10 @@ def check(source: list[dict[str, Any]], translated: list[dict[str, Any]]) -> Non
 
 
 def translate(
-    sections: list[dict[str, Any]], language: str, model: Any = None
+    sections: list[dict[str, Any]],
+    language: str,
+    model: Any = None,
+    progress: Callable[[int, int], None] | None = None,
 ) -> list[dict[str, Any]]:
     """The editable sections in ``language`` (a name such as "Kiswahili"), checked."""
     source = editable(sections)
@@ -111,7 +115,9 @@ def translate(
     if model is None:
         raise TranslationRefused("No AI service is set up to translate")
     translated: list[dict[str, Any]] = []
-    for section in source:
+    for done, section in enumerate(source):
+        if progress:
+            progress(done, len(source))
         prompt = [{"role": "user", "text": request_text([section], language)}]
         try:
             reply = model.respond(SYSTEM, prompt, [])

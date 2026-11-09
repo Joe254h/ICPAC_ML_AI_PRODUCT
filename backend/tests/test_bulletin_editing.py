@@ -122,6 +122,33 @@ def test_a_draft_is_translated_and_its_figures_are_checked(env, fast_maps, monke
     )
 
 
+def test_a_translation_runs_in_the_background_and_the_page_follows_it(env, fast_maps, monkeypatch):
+    """A slow AI service takes minutes: the draft stays usable while the page follows the
+    job section by section."""
+    import time
+
+    first = draft(env)
+    monkeypatch.setattr(agent, "chat_model", lambda: Translator())
+    job = env.client.post(f"/bulletins/{first['id']}/translations", json={"language": "sw"})
+    assert job.status_code == 200, job.text
+    job_id = job.json()["id"]
+    for _ in range(100):
+        state = env.client.get(f"/bulletins/translations/{job_id}").json()
+        if state["status"] != "running":
+            break
+        time.sleep(0.1)
+    assert state["status"] == "done" and state["total"] > 1
+    version = env.client.get(f"/bulletins/{state['version_id']}").json()
+    assert version["edited"]["language"] == "Kiswahili"
+    assert (
+        env.client.post(
+            f"/bulletins/{first['id']}/translations", json={"language": "en"}
+        ).status_code
+        == 422
+    )
+    assert env.client.get("/bulletins/translations/unknown").status_code == 404
+
+
 def test_a_translation_keeps_its_language_and_the_copilot_shows_it(env, fast_maps, monkeypatch):
     first = draft(env)
     translator = Translator()

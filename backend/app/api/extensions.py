@@ -409,6 +409,32 @@ def install(app: FastAPI, dependency):
         except RevisionRefused as exc:
             raise HTTPException(422, str(exc)) from None
 
+    @app.post("/bulletins/{id}/translations")
+    def start_bulletin_translation(
+        id: str,
+        body: BulletinTranslateRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_operator),
+    ) -> dict:
+        """Translate a draft in the background; follow it at /bulletins/translations/{job}."""
+        from chatbot.agent import LANGUAGES
+
+        if body.language not in LANGUAGES or body.language == "en":
+            raise HTTPException(422, "Choose a language other than English")
+        try:
+            return BulletinService(platform).start_translation(
+                id, body.language, acting_name(user, body.actor)
+            )
+        except KeyError:
+            raise HTTPException(404, "Unknown bulletin") from None
+
+    @app.get("/bulletins/translations/{job_id}")
+    def bulletin_translation(job_id: str, platform=Depends(dependency)) -> dict:
+        try:
+            return BulletinService(platform).translation(job_id)
+        except KeyError:
+            raise HTTPException(404, "Unknown translation") from None
+
     @app.post("/bulletins/{id}/resend")
     def resend_bulletin_email(
         id: str,
