@@ -250,3 +250,9 @@ def test_a_week_chirps_cannot_be_read_for_is_checked_against_the_others(
     week = next(w for w in weeks if w["forecast_id"] == fid)
     assert week["sources"] == ["ARC 2.0", "RFE 2.0"] and week["chirps"] == {}
     assert week["best"]["name"] == "ARC 2.0" and week["best"]["domain"]["hybrid"]["rmse"] >= 0
+    # The error and skill maps count it too, scored against ARC 2.0.
+    assert service.observed_by(held) == "arc2"
+    maps = env.client.get("/verification/maps").json()
+    assert maps["cases"] >= 1 and maps["metrics"]["bias"]["available"]
+    drawn = env.client.get("/verification/maps/bias")
+    assert drawn.status_code == 200 and drawn.content[:4] == b"\x89PNG"

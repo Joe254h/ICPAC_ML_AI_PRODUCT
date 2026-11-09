@@ -70,6 +70,10 @@ def test_drafts_are_the_weekly_bulletin_of_the_latest_forecast(env, fast_maps, m
     assert '<span class="tag">In progress</span>' not in text
     assert "<h2>Rainfall by Country</h2>" in text and "<h2>About this forecast</h2>" in text
     assert "DRAFT - NOT APPROVED" in text and "SYNTHETIC" not in text
+    # The method beside the run date is the issued layer's: a hybrid bulletin's label also
+    # begins with "ECMWF ensemble + MBC", which made it say MBC.
+    hybrid = "ECMWF ensemble + MBC + AI/ML" in draft["facts"]["label"].split(" · ")
+    assert ("Method: MBC<" in text) is not hybrid
     assert 'class="chip draft"' in text and "IGAD Climate Prediction and Applications" in text
     attachment = client.get(f"/bulletins/{draft['id']}/export").headers["content-disposition"]
     assert attachment == 'attachment; filename="Weekly_Forecast_for_12-19_October_2026.html"'

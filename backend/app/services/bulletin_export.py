@@ -196,7 +196,9 @@ class WeeklyHTMLExporter:
         maps = images(document)
         period = facts.get("period", "")
         status_text, status_class = STATUS.get(bulletin["status"], (bulletin["status"], "draft"))
-        method = "MBC" if "ECMWF ensemble + MBC" in facts.get("label", "") else None
+        # The label's parts, not its text: "ECMWF ensemble + MBC" is also the start of
+        # "ECMWF ensemble + MBC + AI/ML", which made every hybrid bulletin say MBC.
+        method = "MBC" if "ECMWF ensemble + MBC" in facts.get("label", "").split(" · ") else None
         method = method or (bulletin.get("method") or "MBC + AI/ML hybrid")
         issued = _date(provenance.get("forecast_initialization"))
 

@@ -234,8 +234,9 @@ function VerificationMap({ metric }: { metric: string }) {
                 {entry.min_cases} verified{" "}
                 {entry.min_cases === 1 ? "forecast" : "forecasts"} of{" "}
                 {modelName(data)}; {data.cases}{" "}
-                {data.cases === 1 ? "is" : "are"} verified so far. Each weekly
-                forecast is verified once CHIRPS covers its week.
+                {data.cases === 1 ? "is" : "are"} verified so far. Weeks are
+                verified about two days after they end, against CHIRPS (else ARC
+                2.0 or RFE 2.0).
               </InProgress>
               <PastWeeks onDone={status.reload} />
               <Notice tone="green">

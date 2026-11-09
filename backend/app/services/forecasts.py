@@ -1318,31 +1318,54 @@ class ForecastService:
     def chirps_inputs(self) -> list[dict[str, Any]]:
         return sorted(self.repo.list(CHIRPS_KIND), key=lambda r: r["valid_start"], reverse=True)
 
+    def observed_by(self, record: dict[str, Any]) -> str | None:
+        """The observation that scored a forecast: CHIRPS, else (while CHIRPS cannot be
+        read) ARC 2.0, else RFE 2.0; None while none has."""
+        if record.get("verification_status") == "available":
+            return "chirps"
+        for source in ("arc2", "rfe2"):
+            try:
+                compared = self.repo.get(REFERENCE_KIND, f"{record['forecast_id']}-{source}")
+            except KeyError:
+                continue
+            if compared.get("status") == "available":
+                return source
+        return None
+
     def verified(
         self, model_id: str | None, include_protected: bool, variant: str | None = None
     ) -> tuple[str, list[dict[str, Any]], int]:
         """Verified forecasts of one model (the model in use by default) that hold
-        ``variant`` (any layer by default), and how many protected-period forecasts were
-        left out."""
+        ``variant`` (any layer by default), each with ``observed_by`` (CHIRPS, else ARC 2.0
+        or RFE 2.0), and how many protected-period forecasts were left out. Once Sunday
+        runs are verified, other days' runs (overlapping their weeks) are left out."""
         model_id = model_id or ModelRegistry(self.platform).current()["model"]["model_id"]
         records, skipped = [], 0
         for record in self.runs():
-            if record["model_id"] != model_id or record.get("verification_status") != "available":
+            if record["model_id"] != model_id:
                 continue
             if variant is not None and variant not in record.get("layers", VARIANTS):
+                continue
+            source = self.observed_by(record)
+            if source is None:
                 continue
             if record["protected_test_period"] and not include_protected:
                 skipped += 1
                 continue
-            records.append(record)
-        return model_id, records, skipped
+            records.append({**record, "observed_by": source})
+        sundays = [
+            r
+            for r in records
+            if ecmwf_opendata.is_weekly(date.fromisoformat(r["initialization"][:10]))
+        ]
+        return model_id, sundays or records, skipped
 
     def verified_models(self, include_protected: bool) -> list[dict[str, Any]]:
         """Each model with verified forecasts and how many, so a page can say that the
         model now in use has none yet and show an earlier model's scores, by name."""
         counts: dict[str, int] = {}
         for record in self.runs():
-            if record.get("verification_status") != "available":
+            if self.observed_by(record) is None:
                 continue
             if record["protected_test_period"] and not include_protected:
                 continue
@@ -1448,9 +1471,10 @@ class ForecastService:
             tuple(
                 (
                     r["forecast_id"],
-                    packages.read_manifest(self.directory(r["forecast_id"]))["files"][
+                    r["observed_by"],
+                    packages.read_manifest(self.directory(r["forecast_id"]))["files"].get(
                         "verification.json"
-                    ],
+                    ),
                 )
                 for r in records
             ),
@@ -1479,8 +1503,13 @@ class ForecastService:
             run = packages.load_run(self.directory(record["forecast_id"]))
             check_domain(run, grid)
             method = packages.method_label(run.provenance)
-            with xr.open_dataset(self._path(record["forecast_id"], OBSERVATION)) as obs:
-                observed = obs["precipitation_week2"].values.astype(np.float64)
+            if record["observed_by"] == "chirps":  # the verification's own copy
+                with xr.open_dataset(self._path(record["forecast_id"], OBSERVATION)) as obs:
+                    observed = obs["precipitation_week2"].values.astype(np.float64)
+            else:
+                observed = self._observed(
+                    record["forecast_id"], record, record["observed_by"], grid
+                )
             for name, collected in stats.items():
                 collected.add(run.dataset[name].values, observed)
         style, title = VERIFICATION_MAPS[metric]
@@ -1490,7 +1519,16 @@ class ForecastService:
             values = stats[variant].metric(metric)
         label = {"raw": "RAW ECMWF", "mbc": "MBC", "hybrid": method}[variant]
         weeks = len(records)
-        lines = [f"{weeks} verified {'week' if weeks == 1 else 'weeks'} against CHIRPS"]
+        by: dict[str, int] = {}
+        for record in records:
+            name = OBSERVED[record["observed_by"]]
+            by[name] = by.get(name, 0) + 1
+        counted = f"{weeks} verified {'week' if weeks == 1 else 'weeks'}"
+        lines = [
+            f"{counted} against {next(iter(by))}"
+            if len(by) == 1
+            else f"{counted}: " + ", ".join(f"{name} {n}" for name, n in by.items())
+        ]
         if metric == "correlation" and (r := critical_correlation(weeks)) is not None:
             # Few weeks make r noisy; white cells had no rain to correlate.
             lines.append(

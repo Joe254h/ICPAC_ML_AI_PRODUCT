@@ -124,10 +124,9 @@ class AutomationService:
         forecasts = ForecastService(self.platform)
         runs = forecasts.runs()
         latest = next((r for r in runs if not r.get("synthetic")), None)
+        # Verified by CHIRPS, or by ARC 2.0 or RFE 2.0 while CHIRPS cannot be read.
         verified = [
-            r
-            for r in runs
-            if r.get("verification_status") == "available" and not r.get("synthetic")
+            r for r in runs if not r.get("synthetic") and forecasts.observed_by(r) is not None
         ]
         layers = (latest or {}).get("layers", [])
         hybrid = hybrid_status(current_record(self.platform))
@@ -248,7 +247,8 @@ class AutomationService:
             ),
             "verification": (
                 "available" if verified else "waiting",
-                f"{len(verified)} real cases verified; observations must cover the complete forecast window.",
+                f"{len(verified)} real cases verified against CHIRPS, ARC 2.0 or RFE 2.0; "
+                "each about two days after its week ends.",
             ),
             "spatial_verification": (
                 "available" if len(verified) >= 3 else "waiting",
