@@ -412,6 +412,104 @@ def about_lines(inputs: BulletinInputs) -> list[tuple[str, str]]:
     return lines
 
 
+LAYER_WORDS = {"raw": "raw ECMWF", "mbc": "MBC", "hybrid": "MBC + AI/ML"}
+
+
+def correction_lines(inputs: BulletinInputs) -> list[tuple[str, str]]:
+    """What the bias correction (and the AI/ML layer) did to the raw ECMWF rainfall: the
+    regional mean before and after, and the member states it changed most."""
+    facts = inputs.interpretation
+    layer = primary(inputs)
+    means = facts.get("domain_mean_mm") or {}
+    raw, issued = means.get("raw"), means.get(layer)
+    if raw is None or issued is None:
+        return []
+    change = (issued - raw) / raw * 100 if raw else 0.0
+    lines = [
+        (
+            "Region:",
+            f" raw ECMWF {raw:.1f} mm, {LAYER_WORDS.get(layer, layer)} {issued:.1f} mm "
+            f"({change:+.0f}%).",
+        )
+    ]
+    rows = [r for r in facts.get("countries", []) if r.get("raw_mean_mm") is not None]
+    moved = sorted(rows, key=lambda r: -abs(r["forecast_mean_mm"] - r["raw_mean_mm"]))[:3]
+    for row in moved:
+        delta = row["forecast_mean_mm"] - row["raw_mean_mm"]
+        if abs(delta) >= 0.5:
+            lines.append(
+                (
+                    f"{row['country']}:",
+                    f" {'lowered' if delta < 0 else 'raised'} by {abs(delta):.1f} mm "
+                    f"(raw {row['raw_mean_mm']:.1f} mm).",
+                )
+            )
+    if layer == "hybrid":
+        ml = [r for r in rows if r.get("hybrid_minus_mbc_mean_mm") is not None]
+        if ml:
+            top = max(ml, key=lambda r: abs(r["hybrid_minus_mbc_mean_mm"]))
+            lines.append(
+                (
+                    "AI/ML layer:",
+                    f" its largest change from MBC is in {top['country']} "
+                    f"({top['hybrid_minus_mbc_mean_mm']:+.1f} mm).",
+                )
+            )
+    return lines
+
+
+def chance_lines(inputs: BulletinInputs, masks: dict[str, np.ndarray]) -> list[tuple[str, str]]:
+    """Where most ensemble members agree on heavier rain: the share of each member state's
+    area where at least half of the members exceed 25 and 50 mm in the week. Forecasts made
+    before the members' counts were kept have none."""
+    layer = primary(inputs)
+    with xr.open_dataset(inputs.package / "forecast.nc") as dataset:
+        name = f"members_above_{layer}"
+        if name not in dataset:
+            return []
+        counts = np.asarray(dataset[name].values)
+        thresholds = [float(t) for t in dataset["threshold_mm"].values]
+        members = int(dataset.attrs.get("probability_members") or dataset[name].attrs["members"])
+    if members < 2:
+        return []
+    likely = counts * 2 >= members  # at least half of the members
+    lines = []
+    for country, mask in masks.items():
+        shares = {}
+        for threshold in (25.0, 50.0):
+            if threshold not in thresholds:
+                continue
+            cells = likely[thresholds.index(threshold)][mask]
+            shares[threshold] = float(cells.mean() * 100) if cells.size else 0.0
+        if shares.get(25.0, 0.0) >= 5:
+            above_50 = shares.get(50.0, 0.0)
+            lines.append(
+                (
+                    f"{country}:",
+                    f" above 25 mm over {shares[25.0]:.0f}% of its area"
+                    + (f", above 50 mm over {above_50:.0f}%" if above_50 >= 1 else "")
+                    + ".",
+                )
+            )
+    lines.sort(key=lambda line: -float(line[1].split(" over ")[1].split("%")[0]))
+    if not lines:
+        return [
+            (
+                "Region:",
+                f" in no member state do at least half of the {members} members give more "
+                "than 25 mm over 5% of its area.",
+            )
+        ]
+    return [
+        (
+            "How to read:",
+            f" where at least half of the {members} ensemble members agree; a single "
+            "best estimate (the maps) can hide this spread.",
+        ),
+        *lines[:6],
+    ]
+
+
 def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
     grid = read_layer(inputs)
     masks = country_masks(grid)
@@ -470,6 +568,26 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
                 **_paragraphs(focus_bullets),
                 "map_layer": primary(inputs),
                 "map_country": focus.country,
+            }
+        )
+    # Two sections a deterministic, bias-corrected forecast needs: what the correction did,
+    # and how far the ensemble agrees (the first step towards probabilities).
+    if correction := correction_lines(inputs):
+        result.append(
+            {
+                "key": "correction",
+                "title": "What the Correction Changed",
+                "extra": True,
+                **_paragraphs(correction),
+            }
+        )
+    if chances := chance_lines(inputs, masks):
+        result.append(
+            {
+                "key": "chances",
+                "title": "Where the Ensemble Agrees on Heavier Rain",
+                "extra": True,
+                **_paragraphs(chances),
             }
         )
     result.append(

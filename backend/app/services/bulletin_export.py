@@ -230,6 +230,13 @@ class WeeklyHTMLExporter:
             )
             if key == "rainfall" and (countries := sections.get("countries")):
                 body.append(_countries(countries))
+        # What the correction changed and where the ensemble agrees.
+        for extra in (s for s in facts["sections"] if s.get("extra")):
+            items = "".join(f"<li>{p}</li>" for p in _paragraphs(extra))
+            body.append(
+                '<section class="card"><p class="label">This week in figures</p>'
+                f"<h2>{escape(extra['title'])}</h2><ul>{items}</ul></section>"
+            )
         # The forecaster's own sections (an advisory, impacts), before the forecast note.
         for note in (s for s in facts["sections"] if s.get("note")):
             body.append(

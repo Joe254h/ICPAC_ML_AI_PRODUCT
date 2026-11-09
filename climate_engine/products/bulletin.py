@@ -551,7 +551,10 @@ class WordTemplateGenerator(BulletinGenerator):
         anchor = last.get("focus", FOCUS_LAST) if focus else FOCUS_LAST
         if anchor in FOCUS:
             anchor = FOCUS_LAST
-        document = insert_after(document, anchor, notes_xml(notes) + about_xml(content["about"]))
+        extras = [s for s in content.values() if s.get("extra")]
+        document = insert_after(
+            document, anchor, notes_xml(extras + notes) + about_xml(content["about"])
+        )
         if not focus:
             document = omit_paragraphs(document, FOCUS)
         document = omit_paragraphs(document, unused)

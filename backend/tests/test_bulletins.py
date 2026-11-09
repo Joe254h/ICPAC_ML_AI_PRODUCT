@@ -73,6 +73,12 @@ def test_drafts_are_the_weekly_bulletin_of_the_latest_forecast(env, fast_maps, m
     # The method beside the run date is the issued layer's: a hybrid bulletin's label also
     # begins with "ECMWF ensemble + MBC", which made it say MBC.
     hybrid = "ECMWF ensemble + MBC + AI/ML" in draft["facts"]["label"].split(" · ")
+    # What the correction changed, and where the ensemble agrees on heavier rain.
+    keys = [s["key"] for s in draft["facts"]["sections"]]
+    assert "correction" in keys and keys.index("correction") < keys.index("about")
+    correction = next(s for s in draft["facts"]["sections"] if s["key"] == "correction")
+    assert correction["text"][0].startswith("Region: raw ECMWF")
+    assert "<h2>What the Correction Changed</h2>" in text
     assert ("Method: MBC<" in text) is not hybrid
     assert 'class="chip draft"' in text and "IGAD Climate Prediction and Applications" in text
     attachment = client.get(f"/bulletins/{draft['id']}/export").headers["content-disposition"]

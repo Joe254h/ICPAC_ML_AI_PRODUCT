@@ -219,6 +219,7 @@ class BulletinService:
                     "country",
                     "why",
                     "missing_dependency",
+                    "extra",
                 )
                 if k in section
             }
