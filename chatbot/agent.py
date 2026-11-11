@@ -414,6 +414,17 @@ DATA_TOOLS = set(EVIDENCE) - {
 }
 
 
+def version() -> str:
+    """The agent's version: a short checksum of its instructions and tool schemas, kept with
+    every answer so an answer can be traced to the prompt and tools that wrote it."""
+    import hashlib
+
+    spec = json.dumps(
+        {"instructions": SYSTEM + TONE_RULES, "tools": tools()}, sort_keys=True, default=str
+    )
+    return hashlib.sha256(spec.encode()).hexdigest()[:12]
+
+
 def tools() -> list[dict[str, Any]]:
     """The tools offered to the model: the service's own, and the web unless switched off."""
     return TOOLS + (WEB_TOOLS if web.enabled() else [])
@@ -1846,6 +1857,36 @@ def _converse(model: ChatModel, transcript: list[dict[str, Any]], toolbox: ToolB
     return text
 
 
+#: Words that mark a question about the chosen week's rainfall forecast (English, Kiswahili,
+#: French), besides the member states' names.
+FORECAST_WORDS = re.compile(
+    r"\b(rain\w*|forecast\w*|outlook|wet\w*|dr(y|ier|iest)|mm|mvua|utabiri|pluies?|"
+    r"pr[ée]visions?|burundi|djibouti|eritrea|ethiopia|kenya|rwanda|somalia|sudan|"
+    r"tanzania|uganda)\b",
+    re.IGNORECASE,
+)
+
+
+def prefetch(toolbox: ToolBox, message: str) -> str:
+    """The chosen week's forecast, read before the model is asked, for a question about it.
+
+    A slow AI service takes one request to ask for get_forecast and another to answer; with
+    the figures already in the question it answers in one. Other questions are left as they
+    are (LLM_PREFETCH=off switches this off)."""
+    if os.getenv("LLM_PREFETCH") == "off" or not FORECAST_WORDS.search(message):
+        return ""
+    result = toolbox.run("get_forecast", {})
+    if "error" in result:
+        toolbox.trace.pop()  # the model can still ask, and will be told why it failed
+        return ""
+    return (
+        "\n\n(Already read for this question with get_forecast, for the week chosen on the "
+        "page: "
+        + json.dumps(result, default=str)
+        + " Answer from it when it is enough; call tools only for what it does not hold.)"
+    )
+
+
 def answer(
     platform: Any,
     model: ChatModel,
@@ -1875,6 +1916,7 @@ def answer(
     files, images = attached
     if files:
         question += "\n\n" + files
+    question += prefetch(toolbox, message)
     transcript.append({"role": "user", "text": question, "images": images})
     text = _converse(model, transcript, toolbox)
     if toolbox.used_data:
@@ -1897,6 +1939,7 @@ def answer(
         "kind": "forecast" if toolbox.used_data else "general",
         "evidence": toolbox.used,
         "provider": model.label,
+        "agent_version": version(),
         "fallback": None,
         "tool_trace": toolbox.trace,
         "images": toolbox.images,

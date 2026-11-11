@@ -17,6 +17,12 @@ test("the Copilot answers from the issued forecast", async ({ page }) => {
   const answer = page.locator(".chat-message.assistant").last();
   await expect(answer).toContainText("Kenya", { timeout: 60_000 });
   await expect(answer).toContainText("mm");
+  // An answer can be marked unhelpful; the mark is kept with the conversation.
+  const unhelpful = answer.getByRole("button", {
+    name: "This answer did not help",
+  });
+  await unhelpful.click();
+  await expect(unhelpful).toHaveAttribute("aria-pressed", "true");
   // The week list holds the Sunday forecasts only, and the chat fills the page.
   const weeks = page.getByLabel("Forecast week").locator("option");
   await expect(weeks.first()).toContainText("latest");
@@ -37,6 +43,13 @@ test("the Copilot answers from the issued forecast", async ({ page }) => {
   await expect(heading).toBeHidden();
   await page.getByRole("button", { name: "Show conversations" }).click();
   await expect(heading).toBeVisible();
+  await saved.first().click();
+  await expect(
+    page
+      .locator(".chat-message.assistant")
+      .last()
+      .getByRole("button", { name: "This answer did not help" }),
+  ).toHaveAttribute("aria-pressed", "true");
 });
 
 test("continuous chat sends on Enter, restores history and retries failures", async ({

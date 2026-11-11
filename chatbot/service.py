@@ -340,6 +340,7 @@ class Copilot:
             {
                 "tools": [t["tool"] for t in response["tool_trace"]],
                 "provider": response["provider"],
+                "agent_version": response.get("agent_version"),
             },
         )
         return {**response, "session_id": record["id"]}

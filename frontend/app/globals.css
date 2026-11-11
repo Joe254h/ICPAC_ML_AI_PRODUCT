@@ -4076,6 +4076,10 @@ ol.lifecycle li:not(:last-child)::after {
   color: var(--ink);
   background: var(--ground);
 }
+.chat-action.on {
+  color: var(--green-800);
+  background: var(--green-50);
+}
 .chat-action:disabled {
   opacity: 0.45;
   cursor: default;

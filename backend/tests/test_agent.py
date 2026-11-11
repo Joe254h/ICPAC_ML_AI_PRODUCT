@@ -698,3 +698,68 @@ def test_the_chosen_language_is_used_also_for_english_questions():
     text = agent.instructions("lg")
     assert "write your whole answer in Luganda, also when the question is asked in" in text
     assert "answer in English" not in text
+
+
+def test_a_forecast_question_is_answered_in_one_request(env, fast_maps, claude, monkeypatch):
+    """The week's forecast is read before the model is asked, so a slow AI service answers
+    a forecast question without a tool round trip, and its figures are still checked."""
+    monkeypatch.delenv("LLM_PREFETCH")
+    run(env)
+
+    def script(request: dict) -> list[dict]:
+        question = request["messages"][-1]["content"]
+        read = json.loads(
+            question.split("the week chosen on the page: ")[1].split(" Answer from")[0]
+        )
+        wettest = read["countries_wettest_first"][0]
+        return [{"type": "text", "text": f"{wettest['country']}: {wettest['mean_mm']} mm."}]
+
+    fake = claude(script)
+    answer = Copilot(env.platform).answer(ChatRequest(message="Where will it rain most?"))
+    assert len(fake.requests) == 1
+    assert answer["kind"] == "forecast" and answer["evidence"] == ["This week's forecast"]
+    assert answer["fallback"] is None
+
+    # A figure the forecast does not hold is still refused.
+    claude(lambda request: [{"type": "text", "text": "Kenya expects 987.6 mm."}])
+    wrong = Copilot(env.platform).answer(ChatRequest(message="How much rain in Kenya?"))
+    assert "987.6" not in wrong["text"]
+
+
+def test_other_questions_are_not_read_ahead(env, fast_maps, claude, monkeypatch):
+    monkeypatch.delenv("LLM_PREFETCH")
+    run(env)
+    fake = claude(lambda request: [{"type": "text", "text": "ICPAC serves eleven member states."}])
+    answer = Copilot(env.platform).answer(ChatRequest(message="What is ICPAC?"))
+    assert "Already read" not in str(fake.requests[0]["messages"][-1]["content"])
+    assert answer["kind"] == "general" and answer["tool_trace"] == []
+
+
+def test_answers_carry_the_agent_version_and_take_feedback(env, fast_maps, claude):
+    """Each answer names the instructions and tools that wrote it; a person marks it helpful
+    or not, and the System page counts the marks by version with the unhelpful notes."""
+    from chatbot import agent
+
+    run(env)
+    claude(lambda request: [{"type": "text", "text": "ICPAC serves eleven member states."}])
+    reply = env.client.post("/chat", json={"message": "What is ICPAC?"}).json()
+    assert reply["agent_version"] == agent.version() and len(reply["agent_version"]) == 12
+    session = reply["session_id"]
+
+    refused = env.client.post(
+        f"/chat/sessions/{session}/feedback", json={"index": 0, "helpful": True}
+    )
+    assert refused.status_code == 422  # the question is not an answer
+    marked = env.client.post(
+        f"/chat/sessions/{session}/feedback",
+        json={"index": 1, "helpful": False, "note": "Too short"},
+    )
+    assert marked.status_code == 200 and marked.json()["helpful"] is False
+    held = env.client.get(f"/chat/sessions/{session}").json()["messages"][1]
+    assert held["feedback"]["note"] == "Too short"
+
+    summary = env.client.get("/chat/feedback").json()
+    assert summary["versions"][agent.version()] == {"helpful": 0, "unhelpful": 1}
+    assert summary["current"] == agent.version()
+    assert summary["unhelpful"][0]["question"] == "What is ICPAC?"
+    assert summary["unhelpful"][0]["note"] == "Too short"

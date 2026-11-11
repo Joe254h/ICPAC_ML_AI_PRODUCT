@@ -5,6 +5,14 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 
+class AnswerFeedback(BaseModel):
+    """A person's mark on one of the Copilot's answers (its position in the conversation)."""
+
+    index: int = Field(ge=0, le=10_000)
+    helpful: bool
+    note: str = Field(default="", max_length=500)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     session_id: str | None = None

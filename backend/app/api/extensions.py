@@ -17,6 +17,7 @@ from backend.app.api.access import (
 )
 from backend.app.db import now
 from backend.app.schemas import (
+    AnswerFeedback,
     BulletinEditRequest,
     BulletinRequest,
     BulletinTranslateRequest,
@@ -293,6 +294,74 @@ def install(app: FastAPI, dependency):
         owned_session(platform.repo, id, user)
         platform.repo.delete("chat_session", id)
         return Response(status_code=204)
+
+    @app.post("/chat/sessions/{id}/feedback")
+    def answer_feedback(
+        id: str,
+        body: AnswerFeedback,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_chat),
+    ) -> dict:
+        """Mark one of the Copilot's answers helpful or not, with an optional note; the
+        System page counts them so failures are reviewed and the prompts improved."""
+        record = owned_session(platform.repo, id, user)
+        messages = record["messages"]
+        if not 0 <= body.index < len(messages) or messages[body.index]["role"] != "assistant":
+            raise HTTPException(422, "That message is not one of the Copilot's answers")
+        message = messages[body.index]
+        message["feedback"] = {
+            "helpful": body.helpful,
+            "note": body.note.strip(),
+            "by": user.name,
+            "at": now(),
+        }
+        platform.repo.save("chat_session", record, id)
+        platform.repo.audit(
+            "copilot_feedback",
+            "copilot",
+            id,
+            {
+                "index": body.index,
+                "helpful": body.helpful,
+                "provider": message.get("provider"),
+                "agent_version": message.get("agent_version"),
+                "tools": [t.get("tool") for t in message.get("tool_trace") or []],
+            },
+        )
+        return message["feedback"]
+
+    @app.get("/chat/feedback")
+    def feedback_summary(
+        platform=Depends(dependency), user: Principal = Depends(require_admin)
+    ) -> dict:
+        """Answers marked helpful or not, by agent version, and the latest notes on the
+        unhelpful ones (no conversation text beyond the question)."""
+        versions: dict[str, dict[str, int]] = {}
+        unhelpful = []
+        for session in platform.repo.list("chat_session"):
+            messages = session["messages"]
+            for index, message in enumerate(messages):
+                mark = message.get("feedback")
+                if message.get("role") != "assistant" or not mark:
+                    continue
+                key = message.get("agent_version") or "earlier"
+                row = versions.setdefault(key, {"helpful": 0, "unhelpful": 0})
+                row["helpful" if mark["helpful"] else "unhelpful"] += 1
+                if not mark["helpful"]:
+                    asked = messages[index - 1].get("text", "") if index else ""
+                    unhelpful.append(
+                        {
+                            "question": asked[:200],
+                            "note": mark.get("note", ""),
+                            "at": mark.get("at"),
+                            "provider": message.get("provider"),
+                            "agent_version": key,
+                        }
+                    )
+        unhelpful.sort(key=lambda row: str(row["at"]), reverse=True)
+        from chatbot import agent
+
+        return {"current": agent.version(), "versions": versions, "unhelpful": unhelpful[:20]}
 
     @app.get("/references/{id}")
     def reference(id: str) -> dict:

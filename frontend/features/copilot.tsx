@@ -24,6 +24,8 @@ import {
   RefreshCw,
   RotateCcw,
   SquarePen,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   X,
 } from "lucide-react";
@@ -274,8 +276,11 @@ function Message({
   onRetry,
   editable = true,
   language,
+  onFeedback,
 }: {
   message: ChatMessage;
+  /** Mark this answer helpful or not (a saved conversation's answers only). */
+  onFeedback?: (helpful: boolean) => Promise<void>;
   /** The chosen answer language's name, when it is not English. */
   language?: string;
   /** Ask again with changed words (your own questions only). */
@@ -289,6 +294,18 @@ function Message({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.text);
   const [copied, setCopied] = useState(false);
+  const [marked, setMarked] = useState<boolean | null>(
+    message.feedback?.helpful ?? null,
+  );
+  const mark = async (helpful: boolean) => {
+    const before = marked;
+    setMarked(helpful);
+    try {
+      await onFeedback?.(helpful);
+    } catch {
+      setMarked(before); // not saved: show it unmarked again
+    }
+  };
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(message.text);
@@ -340,6 +357,30 @@ function Message({
         >
           <RotateCcw size={13} aria-hidden /> Retry
         </button>
+      )}
+      {!user && onFeedback && (
+        <>
+          <button
+            type="button"
+            className={cx("chat-action", marked === true && "on")}
+            aria-label="This answer helped"
+            aria-pressed={marked === true}
+            title="Helpful"
+            onClick={() => mark(true)}
+          >
+            <ThumbsUp size={13} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className={cx("chat-action", marked === false && "on")}
+            aria-label="This answer did not help"
+            aria-pressed={marked === false}
+            title="Not helpful: it is reviewed to improve the Copilot"
+            onClick={() => mark(false)}
+          >
+            <ThumbsDown size={13} aria-hidden />
+          </button>
+        </>
       )}
     </div>
   );
@@ -1263,6 +1304,18 @@ export default function Copilot() {
                         : undefined
                     }
                     editable={!locked}
+                    onFeedback={
+                      message.role === "assistant" && session && !pending
+                        ? (helpful) =>
+                            request(
+                              `/chat/sessions/${encodeURIComponent(session)}/feedback`,
+                              {
+                                method: "POST",
+                                body: JSON.stringify({ index, helpful }),
+                              },
+                            ).then(() => undefined)
+                        : undefined
+                    }
                     language={
                       language === "en"
                         ? undefined

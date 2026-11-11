@@ -45,6 +45,10 @@ export type ChatMessage = {
   bulletin?: ChatBulletin | null;
   /** An uploaded forecast of another model compared with ICPAC's. */
   comparison?: ChatComparison | null;
+  /** The instructions and tools that wrote the answer (a checksum). */
+  agent_version?: string;
+  /** Whether the person found the answer helpful. */
+  feedback?: { helpful: boolean; note?: string } | null;
 };
 /** Who asked for a draft's changes, and what changed. */
 export type BulletinEdit = {
