@@ -416,8 +416,11 @@ def main() -> None:
     from climate_engine.inputs.ecmwf_opendata import weekly_run
 
     # The ECMWF runs follow the weekly forecast's Sundays; the dekads end before today.
-    observed = args.date or datetime.now(timezone.utc).date() - timedelta(days=1)
-    latest = weekly_run(observed)
+    today = datetime.now(timezone.utc).date()
+    observed = args.date or today - timedelta(days=1)
+    # The service looks for this Sunday's run, then the Sunday before (from today, not
+    # yesterday): on a Sunday the two differ, and every browser test failed that day.
+    latest = weekly_run(args.date or today)
     day = args.date or latest - timedelta(days=7)
     shutil.rmtree(args.root, ignore_errors=True)
     build(args.root, day, args.members, pressure_steps=tuple(args.pressure_steps))
