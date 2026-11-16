@@ -427,7 +427,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     observer.observe(list);
     const utility = head.querySelector(".utility");
     if (utility) observer.observe(utility);
-    return () => observer.disconnect();
+    // A menu added later (the staff's, once the key is checked) overflows the list without
+    // resizing it, so the observer above would not see it.
+    const added = new MutationObserver(check);
+    added.observe(list, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+    return () => {
+      observer.disconnect();
+      added.disconnect();
+    };
   }, [fit, language]);
   useEffect(() => {
     const changed = () => setAccessVersion((v) => v + 1);

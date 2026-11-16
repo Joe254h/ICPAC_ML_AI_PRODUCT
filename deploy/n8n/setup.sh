@@ -16,6 +16,7 @@ cd "$(dirname "$0")/../.."
 : "${N8N_WEBHOOK_SECRET:?set N8N_WEBHOOK_SECRET (the service signs its events with it)}"
 : "${ICPAC_N8N_STAFF_KEY:?set ICPAC_N8N_STAFF_KEY (an operator key from STAFF_CREDENTIALS)}"
 if [ "${#N8N_WEBHOOK_SECRET}" -lt 32 ]; then echo "N8N_WEBHOOK_SECRET needs 32+ characters" >&2; exit 1; fi
+if [ "${#N8N_ENCRYPTION_KEY}" -lt 32 ]; then echo "N8N_ENCRYPTION_KEY needs 32+ characters" >&2; exit 1; fi
 
 compose=(docker compose --profile n8n)
 "${compose[@]}" stop n8n >/dev/null 2>&1 || true

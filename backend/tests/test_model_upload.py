@@ -148,9 +148,18 @@ def test_an_unknown_model_cannot_be_chosen_for_a_forecast(env):
     response = env.client.post(
         "/operations",
         json={"action": "run_forecast", "model_id": "no_such_model", "actor": "Joe N"},
-        headers=VISITOR,
+        headers=STAFF,
     )
     assert response.status_code == 422 and "no_such_model" in response.json()["detail"]
+
+
+def test_a_visitor_cannot_run_a_forecast(env):
+    response = env.client.post(
+        "/operations",
+        json={"action": "run_forecast", "actor": "Joe N"},
+        headers=VISITOR,
+    )
+    assert response.status_code == 403 and "staff access key" in response.json()["detail"]
 
 
 def test_a_large_copilot_file_arrives_in_parts(env):

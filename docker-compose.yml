@@ -50,7 +50,9 @@ services:
     profiles: ["n8n"]
     ports: ["127.0.0.1:5678:5678"]
     environment:
-      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY (32+ random characters)}
+      # deploy/n8n/setup.sh refuses to start n8n without it. Not ":?" here: compose checks
+      # every service's variables, so that would break `docker compose up` without n8n.
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-}
       N8N_WEBHOOK_URL: ${N8N_PUBLIC_URL:-http://localhost:5678/}
       GENERIC_TIMEZONE: Africa/Nairobi
       TZ: Africa/Nairobi

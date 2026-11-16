@@ -1291,6 +1291,8 @@ select.input,
 }
 .site-footer .brand {
   color: #fff;
+  /* the centre's full name wraps on a phone instead of widening the page */
+  flex: 0 1 auto;
 }
 .site-footer .brand img {
   width: 42px;
@@ -4254,6 +4256,9 @@ ol.lifecycle li:not(:last-child)::after {
 }
 .product-bar nav {
   display: flex;
+  /* the tabs scroll on a phone instead of widening the page */
+  min-width: 0;
+  max-width: 100%;
   gap: 2px;
   overflow-x: auto;
   scrollbar-width: none;
