@@ -97,7 +97,7 @@ def test_the_weekly_run_starts_every_monday_just_after_midnight_in_east_africa()
     assert wait["parameters"]["unit"] == "seconds"
 
 
-def run_code(js: str, inputs: dict) -> list:
+def run_code(js: str, inputs: dict) -> dict:
     """Run a Code node's JavaScript with n8n's variables stubbed."""
     harness = r"""
 const fs = require('fs');
@@ -114,7 +114,11 @@ fn.call(ctx, $input, $env, $getWorkflowStaticData, $, require)
   .then((out) => process.stdout.write(JSON.stringify({ out, store: statics })));
 """
     done = subprocess.run(
-        [NODE, "-e", harness], input=json.dumps(inputs), capture_output=True, text=True, timeout=30
+        [str(NODE), "-e", harness],
+        input=json.dumps(inputs),
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert done.returncode == 0, done.stderr
     return json.loads(done.stdout)

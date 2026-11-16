@@ -1,5 +1,6 @@
 "use client";
 /** Verification of issued forecasts against CHIRPS. */
+import StaffOnly from "@/components/staff-only";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
@@ -661,13 +662,15 @@ export default function Verification() {
         <SkillSummary key={`summary-${refresh}`} />
         <ProbabilisticVerification key={`probability-${refresh}`} />
         {runs.data && verified.length < PAST_WEEKS && (
-          <PastWeeks
-            onDone={() => {
-              runs.reload();
-              seasonal.reload();
-              setRefresh((value) => value + 1);
-            }}
-          />
+          <StaffOnly quiet>
+            <PastWeeks
+              onDone={() => {
+                runs.reload();
+                seasonal.reload();
+                setRefresh((value) => value + 1);
+              }}
+            />
+          </StaffOnly>
         )}
         <Disclosure
           title="Seasonal scores"

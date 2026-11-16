@@ -1,6 +1,7 @@
 "use client";
 /** The weekly forecasts (Sunday runs), newest first, with this week's and the latest marked;
  * forecasts of other days' runs and earlier versions on request. */
+import StaffOnly from "@/components/staff-only";
 import Link from "next/link";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { RefreshCw, RotateCcw } from "lucide-react";
@@ -231,38 +232,42 @@ export default function Archive() {
           ]}
           subtitle="Made every Sunday at midnight (EAT) for days 8–14 of that Sunday's ECMWF run; verified about two days after the week ends."
           actions={
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Button
-                variant="amber"
-                disabled={task.running}
-                onClick={() =>
-                  task.start("refresh_archive", actor || "Forecaster", {
-                    weeks: WEEKS,
-                  })
-                }
-                title="Forecast each of the last twelve Sunday runs the model in use has not forecast yet, verifying each week that has ended"
-              >
-                <RefreshCw
-                  size={17}
-                  className={task.running && !restarting ? "spin" : ""}
-                />
-                {task.running && !restarting
-                  ? "Filling the last 12 weeks…"
-                  : "Fill the last 12 weeks"}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={task.running}
-                onClick={startAgain}
-                title="Take every forecast out of the archive, then forecast and verify the last twelve Sunday runs again"
-              >
-                <RotateCcw
-                  size={17}
-                  className={task.running && restarting ? "spin" : ""}
-                />
-                {task.running && restarting ? "Starting again…" : "Start again"}
-              </Button>
-            </div>
+            <StaffOnly quiet>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <Button
+                  variant="amber"
+                  disabled={task.running}
+                  onClick={() =>
+                    task.start("refresh_archive", actor || "Forecaster", {
+                      weeks: WEEKS,
+                    })
+                  }
+                  title="Forecast each of the last twelve Sunday runs the model in use has not forecast yet, verifying each week that has ended"
+                >
+                  <RefreshCw
+                    size={17}
+                    className={task.running && !restarting ? "spin" : ""}
+                  />
+                  {task.running && !restarting
+                    ? "Filling the last 12 weeks…"
+                    : "Fill the last 12 weeks"}
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={task.running}
+                  onClick={startAgain}
+                  title="Take every forecast out of the archive, then forecast and verify the last twelve Sunday runs again"
+                >
+                  <RotateCcw
+                    size={17}
+                    className={task.running && restarting ? "spin" : ""}
+                  />
+                  {task.running && restarting
+                    ? "Starting again…"
+                    : "Start again"}
+                </Button>
+              </div>
+            </StaffOnly>
           }
         />
         {task.operation && (

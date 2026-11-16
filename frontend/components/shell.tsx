@@ -38,12 +38,12 @@ import {
   findRoute,
   href,
   menuGroups,
-  menuRoutes,
 } from "@/features/routes";
 import type { Menu, Route } from "@/features/routes";
 import { SITE_LANGUAGES, translate } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language";
 import { useTheme } from "@/lib/theme";
+import { useStaff } from "@/services/staff";
 import { useApi } from "@/services/hooks";
 import type { Loaded } from "@/services/hooks";
 import type { Config } from "@/types";
@@ -158,6 +158,36 @@ function MenuEntry({
         ))}
       </div>
     </li>
+  );
+}
+
+/** The menus; Operations only for staff signed in with their key (the tools there run
+ * tasks, manage models and reset the archive). */
+function MenuList({
+  active,
+  state,
+  setState,
+  t,
+}: {
+  active?: Route;
+  state: MenuState;
+  setState: (state: MenuState) => void;
+  t: (text: string) => string;
+}) {
+  const { staff } = useStaff();
+  return (
+    <ul>
+      {MENUS.filter((menu) => menu !== STAFF_MENU || staff).map((menu) => (
+        <MenuEntry
+          key={menu}
+          menu={menu}
+          active={active}
+          state={state}
+          setState={setState}
+          t={t}
+        />
+      ))}
+    </ul>
   );
 }
 
@@ -472,18 +502,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             className={cx("mainnav", mobile && "mobile-open")}
             aria-label="Main"
           >
-            <ul>
-              {MENUS.map((menu) => (
-                <MenuEntry
-                  key={menu}
-                  menu={menu}
-                  active={active}
-                  state={menuState}
-                  setState={setMenuState}
-                  t={t}
-                />
-              ))}
-            </ul>
+            <MenuList
+              active={active}
+              state={menuState}
+              setState={setMenuState}
+              t={t}
+            />
             <LanguagePicker language={language} choose={chooseLanguage} />
           </nav>
           <div className="utility">
@@ -553,18 +577,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       </header>
       <ServiceNotice health={health} />
       <BannerSlot.Provider value={slot}>
-        <div className={home ? undefined : "workspace-layout"}>
-          {!home && (
-            <Suspense
-              fallback={<aside className="workspace-rail" aria-hidden />}
-            >
-              <WorkflowNav />
-            </Suspense>
-          )}
-          <main id="content" key={accessVersion} className="workspace-main">
-            {children}
-          </main>
-        </div>
+        {!home && (
+          <Suspense fallback={null}>
+            <WorkflowNav />
+          </Suspense>
+        )}
+        <main id="content" key={accessVersion}>
+          {children}
+        </main>
       </BannerSlot.Provider>
       <footer className="site-footer">
         <div className="wrap footer-main">
@@ -586,20 +606,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
         </div>
-        <nav className="wrap sitemap" aria-label="Site map">
-          {MENUS.map((menu) => (
-            <div key={menu}>
-              <h2>{t(menu)}</h2>
-              <ul>
-                {menuRoutes(menu).map((route) => (
-                  <li key={route.path}>
-                    <Link href={href(route)}>{t(route.title)}</Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </nav>
         <div className="wrap legal">
           <span>
             © ICPAC {new Date().getUTCFullYear()} ·{" "}

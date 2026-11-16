@@ -29,13 +29,14 @@
   --red: #b42318;
   --red-50: #fdf2f1;
   --blue: #1f62a8;
-  --shadow-card: 0 1px 2px rgba(23, 33, 27, 0.05);
+  --shadow-card: none;
   --shadow-pop: 0 18px 44px rgba(23, 33, 27, 0.16);
-  --radius-card: 12px;
+  --radius-card: 6px;
   --radius: 6px;
-  --font-heading:
-    Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
-  --font-body: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  /* Serif headings as in ICPAC's printed bulletins; a plain sans with tabular figures. */
+  --font-heading: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-body:
+    "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
   --page: 1280px;
   --series-raw: #2a78d6;
   --series-mbc: #e0802f;
@@ -1270,44 +1271,9 @@ select.input,
 }
 
 /* ------------------------------------------------------------------ footer */
-.sitemap {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 18px;
-  padding-top: 22px;
-  padding-bottom: 22px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-.sitemap h2 {
-  margin: 0 0 8px;
-  font: 600 12px var(--font-body);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.92);
-}
-.sitemap ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 5px;
-}
-.sitemap a {
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 13.5px;
-}
-.sitemap a:hover {
-  color: #fff;
-}
 @media (max-width: 1000px) {
-  .sitemap {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 @media (max-width: 560px) {
-  .sitemap {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 .site-footer {
   background: var(--green-950);
@@ -4259,174 +4225,69 @@ ol.lifecycle li:not(:last-child)::after {
   line-height: 1.4;
 }
 
-/* Inset workspace adapted from shadcn/ui dashboard-01 using ICPAC's tokens. */
-.workspace-layout {
-  display: grid;
-  grid-template-columns: 216px minmax(0, 1fr);
-  max-width: 1600px;
-  margin: 0 auto;
+/* ------------------------------------------------------------------ product bar */
+/* The forecast pages' bar: the week shown, and tabs to the same week's products. */
+.product-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
 }
-.workspace-main {
-  min-width: 0;
-}
-.workspace-rail {
-  padding: 28px 16px;
-  border-inline-end: 1px solid var(--line);
-  background: var(--surface-2);
-  font-size: 13px;
-}
-.workspace-identity {
+.product-bar-inner {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 28px;
+  justify-content: space-between;
+  gap: 4px 24px;
+  min-height: 48px;
 }
-.workspace-symbol {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius);
-  background: var(--green-50);
-  color: var(--green-800);
-  border: 1px solid var(--green-line);
-}
-.workspace-identity b {
-  display: block;
-  font-size: 15px;
-  letter-spacing: 0.08em;
-}
-.workspace-identity small {
-  display: block;
-  color: var(--muted);
-  max-width: 140px;
-  font-size: 11px;
-  line-height: 1.5;
-}
-.workspace-label {
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  margin: 0 10px 10px;
-}
-.workspace-rail ol {
+.product-week {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
   margin: 0;
-  padding: 0;
-  list-style: none;
+  color: var(--muted);
+  font-size: 14px;
 }
-.workspace-rail nav a {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border-radius: var(--radius);
-  color: var(--text);
-  min-height: 40px;
-  line-height: 1.4;
-  text-decoration: none;
-}
-.workspace-rail nav a:hover {
-  background: var(--green-50);
+.product-week b {
   color: var(--ink);
+  font: 600 15px var(--font-body);
 }
-.workspace-rail nav a[aria-current="page"] {
-  background: var(--green-50);
+.product-bar nav {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.product-bar nav a {
+  padding: 13px 12px 11px;
+  border-bottom: 2px solid transparent;
+  color: var(--text);
+  font: 500 14.5px var(--font-body);
+  white-space: nowrap;
+}
+.product-bar nav a:hover {
   color: var(--green-800);
-  box-shadow: inset 3px 0 var(--green-600);
+}
+.product-bar nav a[aria-current="page"] {
+  border-bottom-color: var(--green-700);
+  color: var(--green-800);
   font-weight: 600;
 }
-.workspace-rail[dir="rtl"] nav a[aria-current="page"] {
-  box-shadow: inset -3px 0 var(--green-600);
+
+/* ------------------------------------------------------------------ plain labels */
+/* Labels read as words, not as shouted tags above every heading. */
+.eyebrow,
+.kicker-text,
+.outlook-eyebrow,
+.dropdown-label,
+.workspace-label {
+  text-transform: none;
+  letter-spacing: 0;
 }
-.workspace-number {
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  color: var(--muted);
-}
-.workspace-tools {
-  margin-top: 28px;
-  padding-top: 24px;
-  border-top: 1px solid var(--line);
-}
-.workspace-tools a {
-  justify-content: space-between;
-}
-.workspace-context {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-card);
-  background: var(--surface);
-  padding: 14px;
-  margin-top: 28px;
-}
-.workspace-context .workspace-label {
-  margin: 0;
-  line-height: 1.6;
-}
-.workspace-context b {
-  color: var(--ink);
-  font-size: 13px;
-}
-.workspace-context > span:last-child {
-  color: var(--muted);
-  font-size: 11px;
-}
-.workspace-help {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 24px 10px 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-.site-footer .brand {
-  min-width: 0;
-  max-width: 100%;
-}
-.site-footer .brand-name {
-  min-width: 0;
-}
-.site-footer .brand-name small {
-  white-space: normal;
-}
-@media (max-width: 1199px) {
-  .workspace-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .workspace-rail {
-    padding: 12px 24px;
-    border-inline-end: 0;
-    border-bottom: 1px solid var(--line);
-    min-width: 0;
-  }
-  .workspace-identity,
-  .workspace-tools,
-  .workspace-context,
-  .workspace-help,
-  .workspace-rail .workspace-label {
-    display: none;
-  }
-  .workspace-rail nav {
-    overflow-x: auto;
-  }
-  .workspace-rail ol {
-    display: flex;
-    width: max-content;
-    gap: 6px;
-  }
-  .workspace-rail nav a {
-    white-space: nowrap;
-    padding: 8px 10px;
-    min-height: 40px;
-  }
-}
-@media (max-width: 767px) {
-  .workspace-rail {
-    padding: 8px 16px;
-  }
+h1,
+h2,
+.section-title,
+.card-title {
+  font-family: var(--font-heading);
+  letter-spacing: 0;
 }

@@ -1,5 +1,6 @@
 "use client";
 /** Operations: run the weekly cycle (or one step) and follow every task. */
+import StaffOnly from "@/components/staff-only";
 import Link from "next/link";
 import { Fragment, useEffect, useState } from "react";
 import {
@@ -284,19 +285,21 @@ export default function Operations() {
               </Notice>
             )}
             <div style={{ marginTop: 22 }}>
-              <Button
-                variant="amber"
-                disabled={running || name.length < 2}
-                onClick={() => launch("cycle")}
-                title={name.length < 2 ? "Enter your name first" : undefined}
-              >
-                {running ? (
-                  <Loader2 size={18} className="spin" />
-                ) : (
-                  <Play size={18} />
-                )}
-                {running ? "Running…" : "Run the weekly cycle"}
-              </Button>
+              <StaffOnly label="Staff access to run it">
+                <Button
+                  variant="amber"
+                  disabled={running || name.length < 2}
+                  onClick={() => launch("cycle")}
+                  title={name.length < 2 ? "Enter your name first" : undefined}
+                >
+                  {running ? (
+                    <Loader2 size={18} className="spin" />
+                  ) : (
+                    <Play size={18} />
+                  )}
+                  {running ? "Running…" : "Run the weekly cycle"}
+                </Button>
+              </StaffOnly>
               {running && (
                 <Button
                   variant="outline"

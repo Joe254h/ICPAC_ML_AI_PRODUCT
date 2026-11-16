@@ -1,27 +1,11 @@
 "use client";
 /**
  * Home: this week's outlook first. A full-width live map of the Week-2 forecast with its
- * headline, the key figures, why the forecast can be trusted (its independent test, its
- * reach and its verification), every member state at a glance, the weekly bulletin and how
- * each week's forecast is made, with the live state of each step.
+ * headline, the key figures, every member state at a glance and the weekly bulletin.
  */
 import Link from "next/link";
 import { useState } from "react";
-import {
-  ArrowRight,
-  BarChart3,
-  CheckCircle2,
-  CircleDashed,
-  Clock3,
-  CloudRain,
-  Cpu,
-  FileText,
-  Gauge,
-  Play,
-  Satellite,
-  Target,
-  UserCheck,
-} from "lucide-react";
+import { ArrowRight, FileText, Play } from "lucide-react";
 import RainMap, { LegendBar } from "@/components/rain-map";
 import {
   FORECAST_CREDIT,
@@ -32,19 +16,14 @@ import {
 import CountryCards from "@/components/country-cards";
 import { useApp } from "@/components/shell";
 import { LinkButton, Skeleton } from "@/components/ui";
-import { day, num, period, runTime, weekPeriod } from "@/lib/format";
+import { day, num, runTime, weekPeriod } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type { Loaded } from "@/services/hooks";
 import type {
   BulletinStatus,
-  DataSource,
-  Dekad,
-  ExperimentalEvidence,
   ForecastDetail,
-  ForecastRun,
   Variant,
 } from "@/types/operational";
-import type { Bulletin } from "@/types/workflows";
 import { laterModel, layersOf, primaryOf } from "@/features/operational/shared";
 
 function Lead({ text, lead }: { text: string; lead?: string }) {
@@ -323,7 +302,10 @@ function BulletinPreview({
         <div>
           <p className="kicker-text">Weekly bulletin</p>
           <h2 className="section-title left">
-            {bulletin.data?.title ?? "This week's bulletin"}
+            {/* The site's own calendar days: the bulletin's title follows ICPAC's template,
+                which counts to the closing 00 UTC (15-22 for days 15 to 21). */}
+            Weekly bulletin for{" "}
+            {weekPeriod(detail.valid_start, detail.valid_end)}
           </h2>
           {bulletin.loading && <Skeleton height={160} />}
           {rainfall && (
@@ -363,235 +345,6 @@ function BulletinPreview({
   );
 }
 
-// ------------------------------------------------------------------ trust
-
-/** Why the forecast can be trusted: it is corrected, checked and reviewed, each claim
- * with its evidence. */
-function Trust({ detail }: { detail: ForecastDetail }) {
-  const evidence = useApi<ExperimentalEvidence>("/verification/experimental");
-  const runs = useApi<ForecastRun[]>("/forecasts");
-  // The correction the service issues: MBC + CatBoost, else MBC alone; only when the
-  // evidence describes the model in use.
-  const scores = evidence.data?.describes_model_in_use
-    ? evidence.data.regional
-    : [];
-  const best =
-    scores.find((s) => s.model === "CatBoost") ??
-    scores.find((s) => s.model === "MBC");
-  const cases = evidence.data?.scope.cases;
-  const refit = evidence.data?.scope.kind === "retrospective";
-  // Each forecast week counts once, as the archive and Verification list it.
-  const verified =
-    runs.data?.filter(
-      (r) => r.of_record !== false && r.verification_status === "available",
-    ).length ?? 0;
-  const end = new Date(new Date(detail.valid_end).getTime() + 2 * 86_400_000);
-  return (
-    <section className="section trust" aria-labelledby="trust-title">
-      <div className="wrap trust-grid">
-        <div className="trust-intro">
-          <p className="kicker-text">Why it can be trusted</p>
-          <h2 id="trust-title" className="section-title left">
-            Corrected, checked and reviewed every week
-          </h2>
-          <p className="section-sub left">
-            The service corrects the ECMWF ensemble for its known errors over
-            the region, checks each forecast against the rain that fell, and
-            leaves the release of every bulletin to a forecaster.
-          </p>
-        </div>
-        <ul className="trust-list">
-          <li>
-            <span className="trust-icon" aria-hidden>
-              <Gauge size={20} />
-            </span>
-            <strong>
-              {best?.skill_vs_raw != null ? (
-                <>
-                  <em>{Math.round(best.skill_vs_raw * 100)}%</em> lower error
-                  than raw ECMWF
-                </>
-              ) : (
-                "Corrected for the region"
-              )}
-            </strong>
-            <span className="trust-text">
-              {best?.skill_vs_raw != null
-                ? refit
-                  ? `The ${best.model === "MBC" ? "MBC" : "MBC + CatBoost"} correction, refitted on 2005–2021 and measured against CHIRPS on ${cases ?? "the"} forecast cases from 2022 to 2024 it was not trained on.`
-                  : `The ${best.model === "MBC" ? "MBC" : "MBC + CatBoost"} correction, measured against CHIRPS on ${cases ?? "the"} independent forecast cases from 2022 to 2024.`
-                : "A bias correction and a machine-learning correction learned from past ECMWF reforecasts and CHIRPS."}
-            </span>
-            <Link href="/verification/experimental">
-              The evidence <ArrowRight size={14} />
-            </Link>
-          </li>
-          <li>
-            <span className="trust-icon" aria-hidden>
-              <Target size={20} />
-            </span>
-            <strong>
-              {verified > 0 ? (
-                <>
-                  <em>{verified}</em>{" "}
-                  {verified === 1 ? "forecast" : "forecasts"} checked against
-                  observed rain
-                </>
-              ) : (
-                "Checked against observed rain"
-              )}
-            </strong>
-            <span className="trust-text">
-              Each forecast is scored against CHIRPS once its week has been
-              observed.{" "}
-              {detail.verification_status === "available"
-                ? "This week's forecast has been scored."
-                : `This week's forecast is scored from ${day(end.toISOString())}.`}
-            </span>
-            <Link href="/verification">
-              Verification <ArrowRight size={14} />
-            </Link>
-          </li>
-          <li>
-            <span className="trust-icon" aria-hidden>
-              <UserCheck size={20} />
-            </span>
-            <strong>Released only after review</strong>
-            <span className="trust-text">
-              The bulletin is drafted in ICPAC&apos;s wording. A forecaster
-              reviews it, can change it with the Copilot, and approves it before
-              it is published.
-            </span>
-            <Link href="/bulletins">
-              Drafts and review <ArrowRight size={14} />
-            </Link>
-          </li>
-        </ul>
-      </div>
-    </section>
-  );
-}
-
-// ------------------------------------------------------------------ pipeline
-
-type StepState = "done" | "waiting" | "progress";
-
-function Pipeline({ detail }: { detail?: ForecastDetail }) {
-  const sources = useApi<DataSource[]>("/data/sources");
-  const drafts = useApi<Bulletin[]>("/bulletins");
-  const dekad = useApi<Dekad>("/monitoring/dekads/latest");
-  const ecmwf = sources.data?.find((s) => s.id === "ecmwf")?.latest as
-    | { initialization: string; members: number }
-    | null
-    | undefined;
-  const draft = drafts.data?.find((d) => d.forecast_id === detail?.forecast_id);
-  const draftText: Record<string, string> = {
-    draft: "Draft ready for review",
-    under_review: "Under review",
-    approved: "Approved",
-    published: "Published",
-    rejected: "Rejected; a revision is needed",
-  };
-  const steps: {
-    title: string;
-    text: string;
-    state: StepState;
-    href: string;
-    icon: typeof Satellite;
-  }[] = [
-    {
-      title: "ECMWF ensemble",
-      text: ecmwf
-        ? `Run of ${day(ecmwf.initialization)} · ${ecmwf.members} members`
-        : "Not downloaded yet",
-      state: ecmwf ? "done" : "waiting",
-      href: "/data/ecmwf",
-      icon: Satellite,
-    },
-    {
-      title: "Week-2 forecast",
-      text: detail ? `Issued ${day(detail.generation_time)}` : "Not issued yet",
-      state: detail ? "done" : "waiting",
-      href: "/forecasts",
-      icon: CloudRain,
-    },
-    {
-      title: "Weekly bulletin",
-      text: draft ? draftText[draft.status] : "Not drafted yet",
-      state:
-        draft?.status === "published" ? "done" : draft ? "progress" : "waiting",
-      href: "/bulletins",
-      icon: FileText,
-    },
-    {
-      title: "Observed rainfall",
-      text: dekad.data
-        ? `CHIRPS dekad ${period(dekad.data.start, dekad.data.end)}`
-        : "No dekad yet",
-      state: dekad.data ? "done" : "waiting",
-      href: "/monitoring",
-      icon: BarChart3,
-    },
-    {
-      title: "Verification",
-      text:
-        detail?.verification_status === "available"
-          ? "Verified against CHIRPS"
-          : "Waits for the week to be observed",
-      state: detail?.verification_status === "available" ? "done" : "waiting",
-      href: "/verification",
-      icon: Target,
-    },
-    {
-      title: "AI/ML layer",
-      text: "In progress: needs upper-air inputs",
-      state: "progress",
-      href: "/forecasts/hybrid",
-      icon: Cpu,
-    },
-  ];
-  const Icon = { done: CheckCircle2, waiting: Clock3, progress: CircleDashed };
-  return (
-    <section className="section tinted" id="how">
-      <div className="wrap">
-        <p className="kicker-text">How it works</p>
-        <h2 className="section-title left">
-          How each week&apos;s forecast is made
-        </h2>
-        <p className="section-sub left">
-          Each step runs on a schedule and is recorded. A forecaster reviews and
-          approves the bulletin before it is released. The state of each step is
-          live.
-        </p>
-        <ol className="pipeline">
-          {steps.map((step, index) => {
-            const State = Icon[step.state];
-            return (
-              <li key={step.title} className={step.state}>
-                <Link href={step.href}>
-                  <span className="pipe-step">
-                    <step.icon size={16} aria-hidden /> Step {index + 1}
-                  </span>
-                  <strong>{step.title}</strong>
-                  <span className="pipe-text">{step.text}</span>
-                  <span className="pipe-state">
-                    <State size={14} aria-hidden />
-                    {step.state === "done"
-                      ? "Done"
-                      : step.state === "progress"
-                        ? "In progress"
-                        : "Waiting"}
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ol>
-      </div>
-    </section>
-  );
-}
-
 export default function Home() {
   const latest = useApi<ForecastDetail>("/forecasts/latest");
   const bulletin = useBulletin(latest.data);
@@ -599,12 +352,10 @@ export default function Home() {
     <>
       <OutlookHero latest={latest} bulletin={bulletin} />
       {latest.data && <KeyFigures detail={latest.data} />}
-      {latest.data && <Trust detail={latest.data} />}
       {latest.data && <CountryOutlook detail={latest.data} />}
       {latest.data && (
         <BulletinPreview detail={latest.data} bulletin={bulletin} />
       )}
-      <Pipeline detail={latest.data} />
     </>
   );
 }

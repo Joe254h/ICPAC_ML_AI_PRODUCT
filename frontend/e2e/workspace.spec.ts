@@ -27,7 +27,7 @@ test("workspace and country links retain a chosen forecast week", async ({
   const query = `?id=${chosen.forecast_id}`;
   await page.goto("/forecasts" + query);
   const workflow = page.getByRole("navigation", { name: "Forecast workflow" });
-  await workflow.getByRole("link", { name: "All member states" }).click();
+  await workflow.getByRole("link", { name: "Countries", exact: true }).click();
   await expect(page).toHaveURL(
     new RegExp(`/countries\\?id=${chosen.forecast_id}$`),
   );
@@ -40,14 +40,14 @@ test("workspace and country links retain a chosen forecast week", async ({
   await expect(page).toHaveURL(
     new RegExp(`/countries/[^?]+\\?id=${chosen.forecast_id}$`),
   );
-  await workflow.getByRole("link", { name: "Rainfall maps" }).click();
+  await workflow.getByRole("link", { name: "Maps", exact: true }).click();
   await expect(page).toHaveURL(
     new RegExp(`/maps/rainfall\\?id=${chosen.forecast_id}$`),
   );
   await expect(
     page.getByRole("heading", { name: "Rainfall Maps", level: 1 }),
   ).toBeVisible();
-  await workflow.getByRole("link", { name: "Weekly bulletin" }).click();
+  await workflow.getByRole("link", { name: "Bulletin", exact: true }).click();
   await expect(page).toHaveURL(
     new RegExp(`/bulletin\\?id=${chosen.forecast_id}$`),
   );

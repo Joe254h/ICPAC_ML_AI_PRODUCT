@@ -69,7 +69,7 @@ test("working pages fit phones, tablets and desktop with readable Arabic and dar
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/verification");
   await page.locator(".utility .language-picker select").selectOption("ar");
-  await expect(page.locator(".workspace-rail")).toHaveAttribute("dir", "rtl");
+  await expect(page.locator(".product-bar")).toHaveAttribute("dir", "rtl");
   const dark = page.getByRole("button", { name: "Switch to dark mode" });
   if (await dark.isVisible()) await dark.click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");

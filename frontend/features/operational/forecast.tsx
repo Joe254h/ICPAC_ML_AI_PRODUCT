@@ -32,7 +32,6 @@ import type {
   Variant,
 } from "@/types/operational";
 import {
-  CountryChart,
   CountryTable,
   Downloads,
   EarlierModelNotice,
@@ -231,6 +230,7 @@ function Body({
   const { current } = useApp();
   // A forecast from the earlier model: what it was waiting for no longer applies.
   const earlier = laterModel(detail, current.data) !== null;
+  const { admin } = useStaff();
   return (
     <>
       <PageBanner
@@ -262,7 +262,8 @@ function Body({
       />
       {earlier ? (
         <EarlierModelNotice detail={detail} />
-      ) : awaitingConfirmation(detail) ? (
+      ) : awaitingConfirmation(detail) && admin ? (
+        // An administrator's task: confirming the real-time input for the AI/ML layer.
         <RealtimeConfirm detail={detail} onIssued={onIssued} />
       ) : (
         hybrid?.status === "in_progress" && (
@@ -324,9 +325,6 @@ function Body({
           layers={layers}
           forecastId={detail.forecast_id}
         />
-        <div style={{ marginTop: 28 }}>
-          <CountryChart rows={detail.countries} layers={layers} />
-        </div>
       </Card>
       <Card title="Verification">
         <VerificationSummary detail={detail} />

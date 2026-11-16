@@ -43,19 +43,8 @@ test("the home page leads with this week's outlook", async ({ page }) => {
   ).toBeDisabled();
   await expect(page.locator(".country-card")).toHaveCount(11);
   await expect(page.getByText("Wettest country").first()).toBeVisible();
-  // Why it can be trusted: the independent test's figure, from the verification data.
-  const trust = page.locator("section.trust");
-  await expect(
-    trust.getByRole("heading", {
-      name: "Corrected, checked and reviewed every week",
-    }),
-  ).toBeVisible();
-  await expect(trust).toContainText(/\d+% lower error than raw ECMWF/);
-  // The final refit is in use: its 2022–2024 cases are said to be unseen, not independent.
-  await expect(trust).toContainText("551 forecast cases from 2022 to 2024");
-  await expect(
-    page.getByRole("heading", { name: "How each week's forecast is made" }),
-  ).toBeVisible();
+  // No marketing blocks: the forecast, the countries and the bulletin.
+  await expect(page.locator("section.trust")).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await noHorizontalScroll(page);
 });

@@ -1,14 +1,15 @@
 # Weekly operations
 
-For the connected 20-capability workspace, weekly scheduler, provider adapters, HPC bridge
-and supplementary products, see [Automation workspace](automation-workspace.md).
-Public evaluation access is supported; the staff credential instructions below apply
-when `ACCESS_MODE=staff`.
+For the automation page, provider adapters, HPC bridge and supplementary products, see
+[Automation workspace](automation-workspace.md); for n8n coordinating the week, see
+[deploy/n8n](../deploy/n8n/README.md). On the public evaluation site visitors use the
+Copilot, the bulletin review and the verification of finished weeks; downloads, forecast
+runs, the archive and models need a staff key there too.
 
 The service issues the Week-2 (days 8–14) rainfall forecast from data it downloads itself,
 and verifies each forecast once its week has been observed. Everything below runs from the
-**Operations** page (Data & Tools › Operations) or, unattended, from
-`python -m scripts.operational_cycle`.
+**Operations** page (Operations › Run the weekly cycle) or, unattended, from the service's
+own schedule or n8n.
 
 Connect through **Staff access** with a personal `operator` or `admin` credential first.
 API writes require `Authorization: Bearer <personal-key>`; audit identity comes from that
@@ -24,7 +25,7 @@ request available for another worker after lease expiry.
 ## The weekly cycle
 
 The weekly forecast is made from each Sunday's ECMWF run (00 UTC, 03:00 EAT) for days 8
-to 14: Sunday to Saturday of the week after next. With the schedule on, it runs every
+to 14: Sunday to Saturday of the next week. With the schedule on, it runs every
 Sunday at midnight (00:00 EAT on Monday); a forecaster can run the cycle at any time, for
 the latest Sunday (no date) or for a chosen day. The website, the bulletin and the Copilot
 show the latest weekly forecast; forecasts of other days' runs are kept in the archive
@@ -55,7 +56,7 @@ data provider can see who is asking. Times on the website are in EAT.
 | Step | What happens | Recorded as |
 |---|---|---|
 | 1. Download ECMWF | The latest Sunday's ensemble run (or a chosen date) is fetched from ECMWF Open Data. | an ECMWF input record, with its mirror and SHA-256 |
-| 2. Run the forecast | Raw ECMWF and MBC are computed on the 0.05° ICPAC grid and the product package is written (NetCDF, maps, country statistics, bulletin inputs, provenance). | a forecast record and its package |
+| 2. Run the forecast | Raw ECMWF and MBC are computed on the 0.05° ICPAC grid, and MBC + AI/ML when the upper-air fields and an approved model are present; the product package is written (NetCDF, maps, country statistics, bulletin inputs, provenance). | a forecast record and its package |
 | 3. Verify | Every earlier forecast whose week CHIRPS now covers is scored against CHIRPS. | a CHIRPS week record and the forecast's verification |
 | 4. Update monitoring | The newest CHIRPS dekad, if one is published that the service does not have yet, is downloaded for the Rainfall Monitoring page. A failure here is recorded with the cycle and never stops the forecast. | a CHIRPS dekad record |
 
@@ -81,20 +82,22 @@ already issued is reused, and the newest week waits if CHIRPS does not cover it 
 
 ### Unattended runs
 
-```bash
-python -m scripts.operational_cycle --actor "scheduled cycle"          # weekly cycle
-python -m scripts.operational_cycle --task daily --actor "daily task"  # monitoring + verification
-```
+Use one scheduler, not both:
 
-run the same tasks from cron, an Azure Container Apps job or the HPC, with the same
-environment as the API (`DATABASE_URL`, `RUN_ROOT`, `FORECAST_INPUT_ROOT`, `DATA_ROOT`,
-`PACKAGE_STORE_CONNECTION`). The daily task follows ICPAC's climate monitoring framework,
-which checks CHIRPS every morning: it downloads a new dekad when one is published (nothing
-otherwise) and verifies the forecasts CHIRPS now covers. A crontab (UTC):
+* **The service's own schedule** (`AUTOMATION_SCHEDULER_ENABLED=true`, `backend.ps1
+  -EnableAutomation`): the weekly run at 00:00 EAT on Monday for that Sunday's run, and
+  the finished weeks verified every three hours.
+* **n8n** ([deploy/n8n](../deploy/n8n/README.md), `backend.ps1 -N8nWebhookUrl …
+  -SetN8nSecret`, which switches the service's schedule off): the weekly run on Monday at
+  00:05 EAT, followed until it ends; verification every three hours and the monitoring
+  every morning; messages to the forecasters from the service's signed events.
+
+On a host without either, the same tasks run from cron with the API's environment
+(`DATABASE_URL`, `RUN_ROOT`, `FORECAST_INPUT_ROOT`, `DATA_ROOT`, `PACKAGE_STORE_CONNECTION`):
 
 ```cron
-0 7 * * *  cd /app && python -m scripts.operational_cycle --task daily
-30 9 * * 1 cd /app && python -m scripts.operational_cycle
+1 21 * * 0  cd /app && python -m scripts.operational_cycle --actor "scheduled cycle"   # 00:01 EAT Monday
+0 */3 * * * cd /app && python -m scripts.operational_cycle --task daily             # monitoring + verification
 ```
 
 ## Data sources
@@ -142,6 +145,14 @@ The downloads follow ICPAC's
 * Cells CHIRPS marks as no data are left out of the scores, never filled.
 * `CHIRPS_BASE_URL` points every request at another server laid out like the CHC one (a
   mirror, or the test server below).
+* When CHC's web server refuses the service (it answered 403 to the Azure address from late
+  October 2026), the same daily files are read from **CHC's anonymous FTP server**
+  (`ftp.chc.ucsb.edu`; its folder is spelled `chc` or `chg` in CHC's pages, both are tried),
+  final before preliminary; then the final product from **NOAA's ERDDAP copy**, whose
+  holdings end weeks behind CHC. `CHIRPS_FTP_HOST` and `CHIRPS_MIRROR_URL` replace them,
+  `off` switches either off. FTP needs outbound TCP 21 and the passive data ports.
+* CHC retires CHIRPS v2 after its December 2026 release; CHIRPS v3 replaces it. Moving the
+  verification to v3 is a scientific decision (a different product) to make before 2027.
 
 ## Rainfall monitoring (CHIRPS and TAMSAT dekads)
 
@@ -305,8 +316,10 @@ changes.
 
 The API needs outbound HTTPS to `data.ecmwf.int`, `ecmwf-forecasts.s3.eu-central-1.amazonaws.com`
 (the AWS mirror), `data.chc.ucsb.edu`, `gws-access.jasmin.ac.uk` (TAMSAT), the mail
-server when bulletin email is set up, and the Copilot's model (`api.anthropic.com` or
-`generativelanguage.googleapis.com`). Azure Container Apps allows this by default.
+server when bulletin email is set up, the Copilot's model service (for example
+`api.anthropic.com`, `api.openai.com`, `integrate.api.nvidia.com` or `openrouter.ai`),
+`ftp.chc.ucsb.edu` (FTP), `coastwatch.pfeg.noaa.gov` and n8n's webhook when it coordinates.
+Azure Container Apps allows this by default.
 
 ## Testing without the internet
 

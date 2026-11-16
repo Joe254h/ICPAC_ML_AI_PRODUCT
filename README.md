@@ -20,12 +20,19 @@ It also monitors observed rainfall dekad by dekad from CHIRPS and four further e
 way ICPAC's
 [climate monitoring framework](https://github.com/misianihabat/ICPAC-Climate-Monitoring-operational-framework)
 does, and its Forecaster Copilot answers questions about the forecast from the service's
-own results (checked number by number) and general climate questions, with Claude or the
-free Gemini API ([Copilot](docs/chatbot.md)).
+own results (checked number by number) and general climate questions, with any
+tool-calling model: Claude, OpenAI, or a free hosted model such as Gemma 4 on NVIDIA NIM
+or OpenRouter ([Copilot](docs/chatbot.md)).
 
 Rainfall monitoring shows five observed estimates (CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and
 GPM IMERG), and each verified forecast is also scored against ARC 2.0, RFE 2.0 and GPM
 IMERG next to CHIRPS, the reference ([operations](docs/operations.md#arc-20-rfe-20-and-gpm-imerg)).
+CHIRPS is read from CHC's web server, then its FTP server, then NOAA's copy of the final
+product. CHC retires CHIRPS v2 after its December 2026 release; CHIRPS v3 is the successor.
+
+[n8n](deploy/n8n/README.md) can coordinate the week: it starts the weekly run and the
+verification on schedule, follows them, and tells the forecasters (email, chat) from the
+service's signed events.
 
 The recorded evaluation decision uses **candidate** `icpac_week2_catboost_refit_v1`
 (300 trees, 24 inputs, fitted on 2005–2021). Its 2022–2024 comparison is retrospective:
@@ -40,6 +47,7 @@ see the [model lifecycle and evidence](docs/operational_models.md).
 | Science: grid, Week-2 processing, MBC, Atmos37 features, inference, verification | `climate_engine/` |
 | ECMWF Open Data, CHIRPS, TAMSAT, ARC 2.0, RFE 2.0 and GPM IMERG downloads, rainfall monitoring | `climate_engine/inputs/`, `config/data_sources.yaml`, `backend/app/services/monitoring.py` |
 | Bulletin approval by email | `backend/app/services/mail.py`, `backend/app/services/bulletin_mail.py` |
+| Signed events for n8n, and the n8n workflows | `backend/app/services/events.py`, `deploy/n8n/` |
 | Forecaster Copilot (tool-using assistant, fixed-sentence fallback) | `chatbot/` |
 | ICPAC map standard | `climate_engine/cartography/icpac_maps.py` |
 | Product packages and bulletin interface | `climate_engine/products/` |
@@ -94,8 +102,9 @@ python -m scripts.register_model \
 
 ## Issue this week's forecast
 
-Connect through **Staff access** with a personal operator/admin key, then open Data & Tools
-› Operations and run the weekly cycle: it downloads the
+Connect through **Staff access** with a personal operator/admin key (also on the public
+evaluation site, where visitors cannot start these tasks), then open Operations › Run the
+weekly cycle: it downloads the
 newest 00 UTC ECMWF ensemble, issues the forecast, verifies every earlier forecast that
 CHIRPS now covers and downloads the newest CHIRPS dekad for rainfall monitoring. The same through the API:
 
@@ -105,9 +114,9 @@ curl -X POST http://localhost:8000/operations -H 'Content-Type: application/json
   -d '{"action": "cycle", "actor": "Joe254h"}'
 ```
 
-or unattended: `python -m scripts.operational_cycle --actor "scheduled cycle"` weekly and
-`python -m scripts.operational_cycle --task daily` every morning (monitoring and
-verification). The API
+Unattended, either the service's own schedule (`AUTOMATION_SCHEDULER_ENABLED=true`: the
+weekly run at 00:00 EAT on Monday, verification every three hours) or
+[n8n](deploy/n8n/README.md) starts these tasks; use one of the two. The API
 needs outbound HTTPS to ECMWF Open Data and the CHIRPS server; see
 [weekly operations](docs/operations.md).
 
@@ -122,15 +131,16 @@ candidate with the refitted model is described in
 |---|---|
 | Models, model in use, registration | `GET /models`, `GET /models/current`, `POST /models/register` |
 | Independent test, promotion | `POST /models/{id}/independent-test`, `POST /models/{id}/promote` |
-| Weekly cycle and its steps | `POST /operations` (`cycle`, `fetch_ecmwf`, `run_forecast`, `verify_due`, `verify_forecast`, `update_chirps`), `GET /operations`, `GET /operations/{id}` |
+| Weekly cycle and its steps | `POST /operations` (`end_to_end`, `cycle`, `fetch_ecmwf`, `run_forecast`, `verify_due`, `verify_forecast`, `update_chirps`, `observations`, `past_weeks`, `refresh_archive`, `restart_archive`; a `request_id` makes a retry return the same task), `GET /operations`, `GET /operations/{id}`, `POST /operations/{id}/stop` |
 | Rainfall monitoring (CHIRPS, TAMSAT, ARC 2.0, RFE 2.0, GPM IMERG dekads) | `GET /monitoring/estimates`, `GET /monitoring/dekads`, `GET /monitoring/dekads/latest`, `GET /monitoring/dekads/{dekad}`, `/overlay?product=total\|percent`; each takes `?source=chirps\|tamsat\|arc2\|rfe2\|imerg` |
 | Further comparisons of a verified forecast | `GET /forecasts/{id}/references` (ARC 2.0, RFE 2.0, GPM IMERG) |
 | Other models' forecasts | `POST /external-forecasts?name=&valid_start=` (NetCDF body), `GET /external-forecasts`, `GET`/`DELETE /external-forecasts/{id}` |
-| Forecaster Copilot | `POST /chat`, `GET /chat/sessions`, `GET /chat/sessions/{id}` |
+| Forecaster Copilot | `POST /chat`, `GET /chat/sessions`, `GET /chat/sessions/{id}`, `POST /chat/sessions/{id}/feedback`, `GET /chat/feedback` |
+| Coordination (n8n) | `GET /automations`, `GET /automations/integrations`, `POST /automations/coordinator/test` |
 | Data sources | `GET /data/sources`, `GET /data/ecmwf`, `GET /data/chirps` |
 | Forecasts | `GET /forecasts`, `GET /forecasts/latest`, `POST /forecasts/run`, `POST /forecasts/import` |
 | One forecast | `GET /forecasts/{id}`, `/map?layer=mbc\|raw`, `/overlay?layer=`, `/countries`, `/verification`, `/bulletin`, `/package/{file}` |
-| Weekly bulletin drafts | `GET /bulletins`, `POST /bulletins/generate`, `POST /bulletins/{id}/submit\|approve\|reject\|publish`, `GET /bulletins/{id}/export` |
+| Weekly bulletin drafts | `GET /bulletins`, `POST /bulletins/generate`, `POST /bulletins/{id}/edit`, `POST /bulletins/{id}/translations` (`GET /bulletins/translations/{job}`), `POST /bulletins/{id}/submit\|approve\|reject\|publish`, `GET /bulletins/{id}/export` |
 | Bulletin approval by email | `GET /bulletins/email-status`, `GET\|POST /bulletins/email-action` (the emailed links), `POST /bulletins/{id}/resend` |
 | Verification | `POST /forecasts/{id}/verification`, `GET /verification/seasonal`, `GET /verification/maps/{metric}` |
 | System health | `GET /health` |
@@ -138,8 +148,8 @@ candidate with the refitted model is described in
 ## Development and tests
 
 ```bash
-ruff format --check backend climate_engine chatbot scripts
-ruff check backend climate_engine chatbot scripts
+ruff format --check backend climate_engine chatbot scripts training/copilot
+ruff check backend climate_engine chatbot scripts training/copilot
 mypy backend climate_engine chatbot
 pytest -q                      # science, artifacts, inputs, maps, API, end-to-end runs
 cd frontend
@@ -160,21 +170,11 @@ deployed versions and external scientific inputs. For Copilot instruction tuning
 Kaggle, use the [multilingual notebook and data guide](training/copilot/README.md).
 The existing [translation kit](docs/language_training.md) remains separate.
 
-![Connected verification workspace](docs/screenshots/review-2026-11-09-verification.png)
+![Home page: this week's outlook](docs/screenshots/home-2026-11-16.png)
 
-[New mobile Copilot](docs/screenshots/review-2026-11-09-copilot-mobile.png) ·
-[Arabic and dark mode](docs/screenshots/review-2026-11-09-arabic-dark.png).
-These review screenshots use local QA fixture data, not operational weather.
+[Forecast page](docs/screenshots/forecast-2026-11-16.png). The screenshots use the test
+mirror's made-up rainfall, not operational weather.
 
-[Forecast](docs/screenshots/forecast.png) · [Maps](docs/screenshots/maps.png) ·
-[Member states](docs/screenshots/countries.png) · [Country](docs/screenshots/country.png) ·
-[Rainfall monitoring](docs/screenshots/monitoring.png) · [Weekly bulletin](docs/screenshots/bulletin.png) ·
-[Verification](docs/screenshots/verification.png) · [Models](docs/screenshots/models.png) ·
-[Data sources](docs/screenshots/data.png) · [Operations](docs/screenshots/operations.png) ·
-[System status](docs/screenshots/system.png) · [Copilot](docs/screenshots/copilot.png) ·
-[Mobile](docs/screenshots/mobile.png). They were taken against the test mirror, whose
-rainfall is a made-up pattern (not weather), with the map basemap blocked by the capture
-environment's network.
 
 ## Scientific scope
 

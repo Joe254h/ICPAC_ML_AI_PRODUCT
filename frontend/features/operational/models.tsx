@@ -1,5 +1,6 @@
 "use client";
 /** The operational model registry: versions, evidence and reviewed transitions. */
+import StaffOnly from "@/components/staff-only";
 import { useState } from "react";
 import { ShieldCheck, Upload } from "lucide-react";
 import ReviewDialog from "@/components/review-dialog";
@@ -115,11 +116,20 @@ function RealtimeReview({
   );
 }
 
-function TestStatus({ status }: { status?: string }) {
+function TestStatus({
+  status,
+  reported,
+}: {
+  status?: string;
+  /** The HPC ran the independent test; a reviewer has not recorded a decision yet. */
+  reported?: boolean;
+}) {
   if (status === "passed")
     return <Status tone="ok">Independent test passed</Status>;
   if (status === "failed")
     return <Status tone="bad">Independent test failed</Status>;
+  if (reported)
+    return <Status tone="info">Independent test run · decision pending</Status>;
   return <Status tone="progress">Independent test pending</Status>;
 }
 
@@ -304,7 +314,7 @@ function ModelCard({
           }}
         >
           <ModelStatus status={model.status} />
-          <TestStatus status={model.test_status} />
+          <TestStatus status={model.test_status} reported={Boolean(report)} />
         </div>
       }
     >
@@ -343,9 +353,11 @@ function ModelCard({
         items={[
           [
             "Method",
-            model.family === "hybrid7_pc17"
-              ? "CatBoost residual correction of MBC from 24 inputs: ensemble rainfall, location, season, MBC and 17 atmospheric components"
-              : `${NAMES[model.family ?? ""] ?? model.family ?? ""} ${NAMES[model.algorithm ?? ""] ?? model.algorithm ?? ""} residual correction on the ${model.baseline ?? "MBC"} baseline`,
+            model.policy === "mbc_only"
+              ? "Monthly multiplicative bias correction (MBC) of the ECMWF ensemble mean, without the AI/ML correction"
+              : model.family === "hybrid7_pc17"
+                ? "CatBoost residual correction of MBC from 24 inputs: ensemble rainfall, location, season, MBC and 17 atmospheric components"
+                : `${NAMES[model.family ?? ""] ?? model.family ?? ""} ${NAMES[model.algorithm ?? ""] ?? model.algorithm ?? ""} residual correction on the ${model.baseline ?? "MBC"} baseline`,
           ],
           ...(model.policy
             ? ([["Policy", POLICY[model.policy] ?? model.policy]] as [
@@ -369,7 +381,9 @@ function ModelCard({
             "Independent test",
             retrospective
               ? `${model.test_period ?? "—"} · none new for the refit`
-              : `${model.test_period ?? "—"} · ${model.test_status ?? "untested"}`,
+              : report && (model.test_status ?? "untested") === "untested"
+                ? `${model.test_period ?? "—"} · run on the HPC (report below); a reviewer records the decision`
+                : `${model.test_period ?? "—"} · ${model.test_status ?? "untested"}`,
           ],
           ...(retrospective
             ? ([
@@ -428,103 +442,105 @@ function ModelCard({
           <Notice tone="green">{checked}</Notice>
         </div>
       )}
-      <div
-        style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 22 }}
-      >
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={checking}
-          onClick={async () => {
-            setChecking(true);
-            try {
-              await mutate(`/models/${model.model_id}/validate`, {});
-              setChecked(
-                "The model files were checked again and a test prediction succeeded.",
-              );
-              changed();
-            } catch (e) {
-              setChecked(null);
-              alert((e as Error).message);
-            } finally {
-              setChecking(false);
-            }
-          }}
+      <StaffOnly admin quiet>
+        <div
+          style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 22 }}
         >
-          <ShieldCheck size={15} />{" "}
-          {checking ? "Checking…" : "Re-check the model files"}
-        </Button>
-        {model.test_status === "untested" && (
-          <Button variant="outline" size="sm" onClick={() => setTest(true)}>
-            Record independent test
-          </Button>
-        )}
-        {model.status === "experimental" && (
-          <Button
-            variant="green"
-            size="sm"
-            onClick={() => setAction("candidate")}
-          >
-            Approve for operational use
-          </Button>
-        )}
-        {states?.operationally_approved && !inUse && (
-          <Button
-            variant="green"
-            size="sm"
-            onClick={() => setAction("activate")}
-          >
-            Make this the model in use
-          </Button>
-        )}
-        {model.status === "candidate" && (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setAction("promote")}
+            disabled={checking}
+            onClick={async () => {
+              setChecking(true);
+              try {
+                await mutate(`/models/${model.model_id}/validate`, {});
+                setChecked(
+                  "The model files were checked again and a test prediction succeeded.",
+                );
+                changed();
+              } catch (e) {
+                setChecked(null);
+                alert((e as Error).message);
+              } finally {
+                setChecking(false);
+              }
+            }}
           >
-            Promote to production
+            <ShieldCheck size={15} />{" "}
+            {checking ? "Checking…" : "Re-check the model files"}
           </Button>
-        )}
-        {gated && !confirmation && evidence && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setReview("confirm")}
-          >
-            Confirm the real-time input
-          </Button>
-        )}
-        {gated && confirmation && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setReview("withdraw")}
-          >
-            Withdraw the real-time confirmation
-          </Button>
-        )}
-        {model.status !== "production" &&
-          model.status !== "retired" &&
-          !inUse && (
+          {model.test_status === "untested" && (
+            <Button variant="outline" size="sm" onClick={() => setTest(true)}>
+              Record independent test
+            </Button>
+          )}
+          {model.status === "experimental" && (
+            <Button
+              variant="green"
+              size="sm"
+              onClick={() => setAction("candidate")}
+            >
+              Approve for operational use
+            </Button>
+          )}
+          {states?.operationally_approved && !inUse && (
+            <Button
+              variant="green"
+              size="sm"
+              onClick={() => setAction("activate")}
+            >
+              Make this the model in use
+            </Button>
+          )}
+          {model.status === "candidate" && (
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setAction("retire")}
+              onClick={() => setAction("promote")}
             >
-              Retire
+              Promote to production
             </Button>
           )}
-        {model.status === "retired" && model.deployment_date && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setAction("rollback")}
-          >
-            Roll back to this version
-          </Button>
-        )}
-      </div>
+          {gated && !confirmation && evidence && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setReview("confirm")}
+            >
+              Confirm the real-time input
+            </Button>
+          )}
+          {gated && confirmation && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setReview("withdraw")}
+            >
+              Withdraw the real-time confirmation
+            </Button>
+          )}
+          {model.status !== "production" &&
+            model.status !== "retired" &&
+            !inUse && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setAction("retire")}
+              >
+                Retire
+              </Button>
+            )}
+          {model.status === "retired" && model.deployment_date && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAction("rollback")}
+            >
+              Roll back to this version
+            </Button>
+          )}
+        </div>
+      </StaffOnly>
       {test && (
         <IndependentTest
           model={model}
@@ -746,7 +762,9 @@ export default function Models() {
           </Notice>
         )}
         {models.data && <ActivationHistory models={models.data} />}
-        <UploadModel changed={changed} />
+        <StaffOnly admin quiet>
+          <UploadModel changed={changed} />
+        </StaffOnly>
         {models.loading && <Skeleton height={420} />}
         {models.error && (
           <ErrorState message={models.error} retry={models.reload} />

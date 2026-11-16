@@ -1,35 +1,44 @@
 "use client";
-/** Inset workspace navigation adapted from shadcn/ui's free dashboard pattern. */
+/**
+ * The product bar of the forecast pages: which week is shown (and the ECMWF run it comes
+ * from), and tabs to the same week's forecast, countries, maps, bulletin and verification.
+ * A week chosen in the archive stays chosen from tab to tab (``?id=``).
+ */
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { ArrowUpRight, CircleHelp, Workflow } from "lucide-react";
 import { translate } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language";
-import { validDays } from "@/lib/format";
+import { day, weekPeriod } from "@/lib/format";
 import { useApi } from "@/services/hooks";
 import type { ForecastDetail } from "@/types/operational";
 
-const STEPS = [
-  { title: "Data sources", path: "/data", number: "01" },
-  { title: "Forecasts", path: "/forecasts", number: "02", context: true },
-  { title: "Verification", path: "/verification", number: "03" },
-  {
-    title: "Rainfall maps",
-    path: "/maps/rainfall",
-    number: "04",
-    context: true,
-  },
-  {
-    title: "All member states",
-    path: "/countries",
-    number: "05",
-    context: true,
-  },
-  { title: "Weekly bulletin", path: "/bulletin", number: "06", context: true },
+const TABS = [
+  { title: "Forecast", path: "/forecasts", context: true },
+  { title: "Countries", path: "/countries", context: true },
+  { title: "Maps", path: "/maps/rainfall", context: true },
+  { title: "Bulletin", path: "/bulletin", context: true },
+  { title: "Verification", path: "/verification", context: false },
 ];
 
+/** The pages the bar belongs to: the forecast products, not the tools. */
+export function showsProductBar(pathname: string): boolean {
+  return (
+    pathname.startsWith("/forecasts") ||
+    pathname.startsWith("/countries") ||
+    pathname === "/maps/rainfall" ||
+    pathname === "/bulletin" ||
+    pathname === "/verification"
+  );
+}
+
+function current(pathname: string, path: string): boolean {
+  if (path === "/forecasts") return pathname.startsWith("/forecasts");
+  if (path === "/countries") return pathname.startsWith("/countries");
+  return pathname === path;
+}
+
 export default function WorkflowNav() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "/";
   const search = useSearchParams();
   const requested = search.get("id");
   const selected =
@@ -40,86 +49,51 @@ export default function WorkflowNav() {
   const id = selected ?? forecast.data?.forecast_id;
   const [language] = useLanguage();
   const t = (text: string) => translate(text, language);
+  if (!showsProductBar(pathname)) return null;
+  const detail = forecast.data;
   return (
-    <aside
-      className="workspace-rail"
+    <div
+      className="product-bar"
       lang={language}
       dir={language === "ar" ? "rtl" : "ltr"}
     >
-      <div className="workspace-identity">
-        <span className="workspace-symbol">
-          <Workflow size={20} aria-hidden />
-        </span>
-        <div>
-          <b>ICPAC</b>
-          <small>{t("Week-2 Rainfall Outlook")}</small>
-        </div>
-      </div>
-      <nav aria-label="Forecast workflow">
-        <p className="workspace-label">{t("Forecasts")}</p>
-        <ol>
-          {STEPS.map((step) => (
-            <li key={step.path}>
-              <Link
-                href={
-                  step.path +
-                  (step.context && id ? `?id=${encodeURIComponent(id)}` : "")
-                }
-                aria-current={pathname === step.path ? "page" : undefined}
-              >
-                <span className="workspace-number" aria-hidden>
-                  {step.number}
-                </span>
-                {t(step.title)}
-              </Link>
-            </li>
+      <div className="wrap product-bar-inner">
+        <p className="product-week" aria-live="polite">
+          {/* The forecast page's own title names the week; the bar names it elsewhere. */}
+          {pathname === "/forecasts" ? null : detail ? (
+            <>
+              <b>{weekPeriod(detail.valid_start, detail.valid_end)}</b>
+              <span>
+                ECMWF run {day(detail.initialization)}
+                {selected && (
+                  <>
+                    {" · "}
+                    <Link href={pathname}>{t("Latest forecast")}</Link>
+                  </>
+                )}
+              </span>
+            </>
+          ) : (
+            <span>{forecast.loading ? "…" : t("Latest forecast")}</span>
+          )}
+        </p>
+        <nav aria-label="Forecast workflow">
+          {TABS.map((tab) => (
+            <Link
+              key={tab.path}
+              href={
+                tab.path +
+                (tab.context && selected && id
+                  ? `?id=${encodeURIComponent(id)}`
+                  : "")
+              }
+              aria-current={current(pathname, tab.path) ? "page" : undefined}
+            >
+              {t(tab.title)}
+            </Link>
           ))}
-        </ol>
-      </nav>
-      <nav className="workspace-tools" aria-label="Workspace tools">
-        <p className="workspace-label">{t("Operations")}</p>
-        {[
-          ["Automation", "/automations"],
-          ["Run the weekly cycle", "/data/runs"],
-          ["Model registry", "/models"],
-          ["Forecaster Copilot", "/copilot"],
-          ["System status", "/system"],
-        ].map(([label, path]) => (
-          <Link
-            key={path}
-            href={path}
-            aria-current={pathname === path ? "page" : undefined}
-          >
-            {t(label)}
-            <ArrowUpRight size={14} aria-hidden />
-          </Link>
-        ))}
-      </nav>
-      <div className="workspace-context" aria-live="polite">
-        <span className="workspace-label">{t("Week-2 Rainfall Outlook")}</span>
-        {forecast.data ? (
-          <>
-            <b>
-              {validDays(forecast.data.valid_start, forecast.data.valid_end)}
-            </b>
-            <span>
-              {forecast.data.layers
-                ? forecast.data.layers.includes("hybrid")
-                  ? "Raw ECMWF · MBC · AI/ML"
-                  : "Raw ECMWF · MBC; AI/ML unavailable"
-                : "See forecast for product availability"}
-            </span>
-          </>
-        ) : (
-          <span>
-            {forecast.loading ? "…" : t("Latest forecast") + " · unavailable"}
-          </span>
-        )}
+        </nav>
       </div>
-      <Link href="/about" className="workspace-help">
-        <CircleHelp size={16} aria-hidden />
-        Service guide
-      </Link>
-    </aside>
+    </div>
   );
 }

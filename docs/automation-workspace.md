@@ -1,8 +1,11 @@
-# Connected ICPAC automation workspace
+# Automation
 
-`/automations` connects the 20 capabilities to recorded evidence, actionable missing
-dependencies, the weekly schedule, operation progress and external integration status.
-A green software test does not make a missing dataset or an untested model operational.
+`/automations` (Operations › Automation) runs the connected workflow, shows the schedule,
+the connection with n8n (deploy/n8n/README.md) with its newest event deliveries and a test
+button, and what needs attention. The readiness of the 20 capabilities stays in the API
+(`GET /automations`) and in [the review](review-2026-11-09.md); it is no longer shown on
+the page. A green software test does not make a missing dataset or an untested model
+operational.
 
 ## Connected workflow
 

@@ -468,8 +468,7 @@ Notes on the local run:
   `main` is untouched at `300915b`; the work merges through
   [PR #2](https://github.com/Joe254h/ICPAC_ML_AI_PRODUCT/pull/2) after review, which is
   the checkpoint.
-* **Commits.** 23 commits above `main`, including this report, all authored by Joe254h
-  (`sangura.j.nyongesa@aims-senegal.org`).
+* **Commits.** 23 commits above `main`, including this report, all authored by Joe254h.
 * **Review.** The 13 automated review findings on the PR (6 rated P1, 7 rated P2) were
   checked against the code. Twelve were fixed in `751f788` and `4845161`, with a test
   each; one was already fixed in `c77f14f`. All 13 threads are answered and resolved.

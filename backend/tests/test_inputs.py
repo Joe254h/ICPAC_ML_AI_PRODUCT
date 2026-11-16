@@ -398,7 +398,8 @@ class FakeFTP:
     """CHC's anonymous FTP server holding ``files`` ({path: bytes}); records what is asked."""
 
     def __init__(self, files: dict[str, bytes], refuse: bool = False):
-        self.files, self.refuse, self.asked = files, refuse, []
+        self.files, self.refuse = files, refuse
+        self.asked: list[tuple[str, str]] = []
 
     def __call__(self, host: str):
         self.asked.append(("connect", host))

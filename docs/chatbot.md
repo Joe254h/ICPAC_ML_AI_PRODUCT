@@ -44,9 +44,29 @@ The Copilot calls Claude through Anthropic's official Python SDK (`anthropic`). 
 
 On Azure, `ANTHROPIC_API_KEY=... bash deploy/azure/backend.sh` stores the key as a Container Apps secret and sets the rest (`CLAUDE_MODEL` picks another model). Claude is the default because it calls tools reliably and answers general climate questions well; the grounding check above holds whichever model is used. Questions and tool results are sent to Anthropic's API; nothing else is.
 
-### Free: Google Gemini
+### Free hosted models: NVIDIA NIM or OpenRouter
 
-The Gemini API has a free tier (Flash models; key from https://aistudio.google.com/apikey, no card). On Azure (Cloud Shell in PowerShell):
+The evaluation service runs on **Gemma 4 31B through NVIDIA NIM** (free developer key from
+build.nvidia.com): about 16 s per request, so give it time with
+`-LlmRequestSeconds 90 -LlmAnswerSeconds 180`:
+
+```powershell
+& $Script -ExpectedCommit $Commit -LlmProvider openai_compatible `
+  -LlmBaseUrl 'https://integrate.api.nvidia.com/v1' -LlmModel 'google/gemma-4-31b-it' `
+  -SetLlmKey -LlmRequestSeconds 90 -LlmAnswerSeconds 180
+```
+
+**OpenRouter** works the same way (`-LlmBaseUrl 'https://openrouter.ai/api/v1'`, a model
+that supports tools, its key entered with `-SetLlmKey`, which keeps it as a Container App
+secret). Never paste a key into a chat, an issue or a file in this repository: a key seen
+anywhere else should be revoked and replaced. Free models are slower and call tools less
+reliably than paid ones; the figure check below holds whichever answers.
+
+### Google Gemini
+
+Gemini's API was the earlier free option. Google's free tier has narrowed during 2026
+(Pro models left it in April; some keys are refused every model, as this project's key
+was in November): check your key's models before using it. On Azure (Cloud Shell in PowerShell):
 
 ```powershell
 $env:GEMINI_API_KEY = Read-Host "Gemini key" -MaskInput   # GEMINI_MODEL picks another model
@@ -64,6 +84,19 @@ When an answer falls back, the chat says why in words (for example, the free lim
 Without the language model, forecast questions still get checked answers: the bulletin's rainfall classes for the country or the region (where heavy, moderate and light rainfall are expected), its ranking among the member states, the median and range, and any country's map. A question outside the forecast ("what is love?") is answered with a plain statement that it needs the AI assistant, and with examples of what still works.
 
 Gemini is strict about tool definitions: it refuses the whole request when a tool's parameter schema is an object with no properties, or uses JSON Schema keywords it does not support. Each tool is therefore sent with only the keywords Gemini accepts (`type`, `description`, `properties`, `required`, `enum`, `items`), and a tool without inputs is sent without parameters. Gemini's thinking models also attach a signature to each tool call that must come back unchanged with the tool's result; the Copilot returns the calls exactly as Gemini sent them. When Gemini refuses a request, the server log says why (`Copilot model ... answered 400: ...`). On the free tier Google may use what is sent to improve its products: the Copilot sends the question and the forecast figures, which are public, but forecasters should not type anything confidential. Check the current limits in Google AI Studio.
+
+### Faster answers, answer marks and versions
+
+* A question about the week's rainfall (rain, forecast, wet or dry, mm, a member state; in
+  English, Kiswahili or French) has the chosen week's forecast read before the model is
+  asked, so a slow model answers in one request instead of asking for it first.
+  `LLM_PREFETCH=off` switches this off. Other questions are sent as they are.
+* Each answer records the **agent version**, a short checksum of the instructions and tool
+  schemas that wrote it, also in the audit log.
+* Under each answer, **helpful / not helpful** buttons save the person's mark
+  (`POST /chat/sessions/{id}/feedback`). The System page counts the marks for the current
+  and earlier versions and lists the latest unhelpful questions, for the prompts and tools
+  to be improved (`GET /chat/feedback`, administrators).
 
 ### OpenAI (including a ChatGPT Pro subscription's API credits)
 

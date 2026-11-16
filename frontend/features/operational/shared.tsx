@@ -515,7 +515,6 @@ const COLOURS: Record<Variant, string> = {
   hybrid: "#1baf7a",
 };
 
-/** Country means (mm/week) as grouped horizontal bars. */
 export function CountryChart({
   rows,
   layers,

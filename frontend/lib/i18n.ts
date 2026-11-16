@@ -76,6 +76,7 @@ const WORDS: Record<string, Record<string, string>> = {
     Decision: "Uamuzi",
     About: "Kuhusu",
     "ECMWF Ensemble (ENS)": "Mkusanyiko wa ECMWF (ENS)",
+    Forecast: "Utabiri",
   },
   fr: {
     Home: "Accueil",
@@ -135,6 +136,7 @@ const WORDS: Record<string, Record<string, string>> = {
     Decision: "Décision",
     About: "À propos",
     "ECMWF Ensemble (ENS)": "Ensemble du CEPMMT (ENS)",
+    Forecast: "Prévision",
   },
   ar: {
     Home: "الرئيسية",
@@ -194,6 +196,7 @@ const WORDS: Record<string, Record<string, string>> = {
     Decision: "القرار",
     About: "حول",
     "ECMWF Ensemble (ENS)": "مجموعة ECMWF (ENS)",
+    Forecast: "التنبؤ",
   },
   am: {
     Home: "መነሻ",
@@ -253,6 +256,7 @@ const WORDS: Record<string, Record<string, string>> = {
     Decision: "ውሳኔ",
     About: "ስለ",
     "ECMWF Ensemble (ENS)": "የECMWF ስብስብ (ENS)",
+    Forecast: "ትንበያ",
   },
   so: {
     Home: "Bogga hore",
@@ -312,6 +316,7 @@ const WORDS: Record<string, Record<string, string>> = {
     Decision: "Go'aan",
     About: "Ku saabsan",
     "ECMWF Ensemble (ENS)": "Kooxda ECMWF (ENS)",
+    Forecast: "Saadaal",
   },
 };
 

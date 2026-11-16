@@ -211,8 +211,8 @@ export const ROUTES: Route[] = [
     menu: "Verification",
     page: "maps",
     param: "rmse",
-    sub: true,
-    group: "Maps by measure",
+    // A tab of "Error and skill maps", not a menu entry of its own.
+    nav: false,
   },
   {
     path: "maps/correlation",
@@ -220,8 +220,8 @@ export const ROUTES: Route[] = [
     menu: "Verification",
     page: "maps",
     param: "correlation",
-    sub: true,
-    group: "Maps by measure",
+    // A tab of "Error and skill maps", not a menu entry of its own.
+    nav: false,
   },
   {
     path: "maps/skill",
@@ -229,8 +229,8 @@ export const ROUTES: Route[] = [
     menu: "Verification",
     page: "maps",
     param: "skill",
-    sub: true,
-    group: "Maps by measure",
+    // A tab of "Error and skill maps", not a menu entry of its own.
+    nav: false,
   },
   {
     path: "monitoring",

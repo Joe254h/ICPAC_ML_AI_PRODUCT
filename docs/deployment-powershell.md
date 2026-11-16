@@ -110,8 +110,13 @@ per-person quotas. Public mode requires an evaluation release.
 Without `-AccessMode`, a deployment or `-VerifyOnly` keeps the access mode the app already
 has (staff for a new app), so updating the code never opens or closes the site by itself.
 Give `-AccessMode staff` to restore staff access, or `-AccessMode public` to open it again.
-Saved staff credentials are preserved when public mode is enabled and become usable again in
-staff mode.
+Saved staff credentials are preserved when public mode is enabled and keep working there:
+on the public site visitors use the Copilot, the bulletin review and the verification of
+finished weeks, while downloads, forecast runs, the archive, models and the audit log need
+a staff key (Staff access, at the top of the page). Give n8n its own key with the
+`operator` role only (deploy/n8n/README.md), and point the service at n8n with
+`-N8nWebhookUrl 'https://<n8n>/webhook/icpac-events' -SetN8nSecret`, which also switches the
+service's own weekly schedule off.
 
 `STAFF_CREDENTIALS` is a backend-only JSON array. Each person gets a distinct random key
 and stable name; never share Joe254h's key. Roles are `operator` (forecast/data work and
