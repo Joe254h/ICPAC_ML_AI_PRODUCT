@@ -238,25 +238,35 @@ def test_public_evaluation_needs_no_staff_key_and_can_be_switched_back(client, m
     assert me.status_code == 200
     assert me.json()["name"] == visitor_name("a" * 32)
     assert "a" * 32 not in me.json()["name"]
-    assert me.json()["roles"] == ["admin"]
-    operation = client.post(
-        "/operations", json={"action": "past_weeks", "weeks": 2, "actor": "Visitor"}
-    )
+    assert me.json()["roles"] == ["chat", "operator", "publisher", "reviewer"]
+    # Verifying finished weeks is open to visitors, recorded under the name typed,
+    # marked unverified, never the visitor identity.
+    operation = client.post("/operations", json={"action": "verify_due", "actor": "Visitor"})
     assert operation.status_code == 202
-    # Recorded under the name typed, marked unverified, never the visitor identity.
     assert operation.json()["created_by"] == "Visitor (public access)"
     assert "visitor:" not in operation.text
-    audit = client.get("/audit")
-    assert audit.status_code == 200
-    assert "a" * 32 not in audit.text
-    for path in (
-        "/models/missing/validate",
-        "/models/missing/promote",
-        "/bulletins/missing/approve",
-        "/bulletins/missing/publish",
-    ):
+    # Tasks that download, run or reset forecasts, models and the audit log need a key.
+    for action in ("past_weeks", "cycle", "end_to_end", "restart_archive", "refresh_archive"):
+        refused = client.post("/operations", json={"action": action, "actor": "Visitor"})
+        assert refused.status_code == 403, action
+        assert "staff access key" in refused.json()["detail"]
+    assert client.get("/audit").status_code == 403
+    for path in ("/models/missing/validate", "/models/missing/promote"):
+        assert client.post(path, json={"actor": "Visitor"}).status_code == 403, path
+    for path in ("/bulletins/missing/approve", "/bulletins/missing/publish"):
         response = client.post(path, json={"actor": "Visitor"})
         assert response.status_code in {404, 422}, (path, response.text)
+    # A staff key names its holder on the public site too; a wrong key is refused.
+    staff = {"Authorization": f"Bearer {ALICE}"}
+    assert client.get("/access/me", headers=staff).json()["name"] == "Alice"
+    past = client.post(
+        "/operations", json={"action": "past_weeks", "weeks": 2, "actor": "Alice"}, headers=staff
+    )
+    assert past.status_code == 202 and past.json()["created_by"] == "Alice"
+    # Alice is an operator, not an admin: the audit log stays closed to her.
+    assert client.get("/audit", headers=staff).status_code == 403
+    wrong = client.get("/access/me", headers={"Authorization": "Bearer " + "z" * 40})
+    assert wrong.status_code == 401
     health = client.get("/health").json()
     assert health["access_mode"] == "public"
     assert health["access_configured"] is True

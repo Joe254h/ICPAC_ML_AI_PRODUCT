@@ -394,6 +394,90 @@ def test_chirps_days_come_from_the_open_mirror_when_chc_cannot_give_them(
         chirps.week_total(start, env.grid, chirps.Server(chc({})))
 
 
+class FakeFTP:
+    """CHC's anonymous FTP server holding ``files`` ({path: bytes}); records what is asked."""
+
+    def __init__(self, files: dict[str, bytes], refuse: bool = False):
+        self.files, self.refuse, self.asked = files, refuse, []
+
+    def __call__(self, host: str):
+        self.asked.append(("connect", host))
+        if self.refuse:
+            raise OSError("Connection refused")
+        return self
+
+    def login(self, user, password):
+        assert user == "anonymous"
+
+    def set_pasv(self, on):
+        assert on is True
+
+    def nlst(self, folder):
+        import ftplib
+
+        self.asked.append(("list", folder))
+        names = [p for p in self.files if p.startswith(folder)]
+        if not names:
+            raise ftplib.error_perm("550 No such directory")
+        return names
+
+    def retrbinary(self, command, callback):
+        self.asked.append(("get", command))
+        callback(self.files[command.removeprefix("RETR ")])
+
+    def quit(self):
+        pass
+
+
+def test_chirps_days_come_over_ftp_when_chc_web_server_refuses(env, tmp_path, monkeypatch):
+    """CHC's web server refused the service: the same files are read from its anonymous
+    FTP server (the folder under either spelling), final before preliminary, before the
+    open mirror is asked."""
+    monkeypatch.setenv("CHIRPS_FTP_HOST", "ftp.chc.example")
+    monkeypatch.setenv("CHIRPS_MIRROR_URL", "https://mirror.example/erddap/griddap/chirps")
+    start = date(2026, 8, 16)
+    final = "/pub/org/chg/products/CHIRPS-2.0/africa_daily/tifs/p05/2026/"
+    prelim = "/pub/org/chc/products/CHIRPS-2.0/prelim/global_daily/tifs/p05/2026/"
+    files = {}
+    for offset in range(7):
+        day = start + timedelta(days=offset)
+        name = chirps.day_names(day)[0]
+        if offset < 5:
+            files[final + name] = chirps_tile(3.0)
+        else:  # the last days only in the preliminary product
+            files[prelim + name] = chirps_tile(1.0)
+    ftp = FakeFTP(files)
+    web: list[str] = []
+
+    def refused(url: str) -> bytes | None:
+        web.append(url)
+        return None  # no listing, no file: as when CHC refuses the service
+
+    server = chirps.Server(refused)
+    server.ftp = chirps.FTPSource(ftp)
+    result = chirps.week_total(start, env.grid, server, tmp_path)
+    assert [d.product for d in result.days] == ["final"] * 5 + ["prelim"] * 2
+    assert result.days[0].url == f"ftp://ftp.chc.example{final}{chirps.day_names(start)[0]}"
+    cells = env.grid.to_cells(result.values)
+    assert np.allclose(cells[np.isfinite(cells)], 5 * 3.0 + 2 * 1.0)
+    assert not any(u.startswith("https://mirror.example/") for u in web)
+    # One connection for the week; each folder listed once.
+    assert [a for a in ftp.asked if a[0] == "connect"] == [("connect", "ftp.chc.example")]
+    listed = [a[1] for a in ftp.asked if a[0] == "list"]
+    assert len(listed) == len(set(listed))
+    # An FTP server that cannot be reached is asked once in a pass; the mirror follows.
+    down = FakeFTP({}, refuse=True)
+    server = chirps.Server(refused)
+    server.ftp = chirps.FTPSource(down)
+    monkeypatch.setenv("CHIRPS_MIRROR_URL", "off")
+    with pytest.raises(chirps.CHIRPSUnavailable):
+        chirps.week_total(start, env.grid, server)
+    assert [a for a in down.asked if a[0] == "connect"] == [("connect", "ftp.chc.example")]
+    # Switched off, FTP is not tried.
+    monkeypatch.setenv("CHIRPS_FTP_HOST", "off")
+    assert chirps.FTPSource(FakeFTP(files)).fetch(start) is None
+
+
 @pytest.mark.parametrize("wrong", ["day", "units", "multiple_days"])
 def test_chirps_mirror_rejects_a_wrong_day_units_or_window(env, monkeypatch, wrong):
     monkeypatch.setenv("CHIRPS_MIRROR_URL", "https://mirror.example/erddap/griddap/chirps")

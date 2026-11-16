@@ -1,0 +1,229 @@
+{
+  "id": "IcpacVerify00002",
+  "name": "ICPAC 2 · Verification and monitoring",
+  "active": false,
+  "nodes": [
+    {
+      "id": "1db89793-d159-5442-b219-727f87fc8da0",
+      "name": "Every 3 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 3,
+              "triggerAtMinute": 20
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "87756997-01d0-57a3-a6de-05e8253fce7f",
+      "name": "Every morning 08:30 EAT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 8 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "4582fe4b-4f1c-5301-8c19-0ac077082036",
+      "name": "Start by hand",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        400
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "f1ddf707-291e-566f-acf2-2e4f40610b3d",
+      "name": "Verify finished weeks",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "action",
+              "value": "verify_due",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "12bf14fa-2013-565f-a507-8582d4909d11",
+      "name": "Update the monitoring",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        200
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a2",
+              "name": "action",
+              "value": "observations",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b77816a6-c0a2-5300-a935-88b977f773e7",
+      "name": "Request identity",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// One request identity per three-hour slot (or per day for the monitoring), so a retried\n// trigger does not queue the same task twice.\nconst crypto = require('crypto');\nconst action = $input.first().json.action;\nconst now = new Date();\nconst slot = action === 'verify_due'\n  ? `${now.toISOString().slice(0, 10)}T${String(Math.floor(now.getUTCHours() / 3) * 3).padStart(2, '0')}`\n  : now.toISOString().slice(0, 10);\nreturn [{ json: {\n  action,\n  actor: 'n8n schedule',\n  request_id: crypto.createHash('md5').update(`n8n:${action}:${slot}`).digest('hex'),\n} }];\n"
+      }
+    },
+    {
+      "id": "e80350a8-c5dd-5976-8f46-2e58f27c48a7",
+      "name": "Start the task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ICPAC_API_URL.replace(/\\/$/, '') }}/operations",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ action: $json.action, actor: $json.actor, request_id: $json.request_id }) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IcpacStaffKey001",
+          "name": "ICPAC staff key"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 3 hours": {
+      "main": [
+        [
+          {
+            "node": "Verify finished weeks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start by hand": {
+      "main": [
+        [
+          {
+            "node": "Verify finished weeks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every morning 08:30 EAT": {
+      "main": [
+        [
+          {
+            "node": "Update the monitoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify finished weeks": {
+      "main": [
+        [
+          {
+            "node": "Request identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update the monitoring": {
+      "main": [
+        [
+          {
+            "node": "Request identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request identity": {
+      "main": [
+        [
+          {
+            "node": "Start the task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Nairobi",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "IcpacErrors00006"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

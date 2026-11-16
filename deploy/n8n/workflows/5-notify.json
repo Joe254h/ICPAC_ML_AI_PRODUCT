@@ -1,0 +1,143 @@
+{
+  "id": "IcpacNotify00005",
+  "name": "ICPAC 5 · Notify",
+  "active": false,
+  "nodes": [
+    {
+      "id": "d5802296-25bf-56ce-8673-1f8df23c61c3",
+      "name": "Message from another workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "4453092f-01e9-508d-8646-9cb848859f05",
+      "name": "Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        260,
+        -100
+      ],
+      "parameters": {
+        "fromEmail": "={{ $env.ICPAC_NOTIFY_FROM || 'icpac-week2@localhost' }}",
+        "toEmail": "={{ $env.ICPAC_NOTIFY_EMAIL }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}\n\n-- Sent by n8n for the ICPAC Week-2 Rainfall Outlook",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "IcpacSmtp0000001",
+          "name": "ICPAC SMTP"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "ae6a6daf-3fad-518b-9491-e7c40fd57f35",
+      "name": "Chat webhook set?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        260,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cd624e2e-2b3c-5dd4-af83-55d1aa421eaf",
+              "leftValue": "={{ $env.ICPAC_NOTIFY_WEBHOOK || '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "5ec9dd89-b83b-5507-9405-f62ae98d35ee",
+      "name": "Chat message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ICPAC_NOTIFY_WEBHOOK }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: `*${$json.subject}*\\n${$json.text}` }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Message from another workflow": {
+      "main": [
+        [
+          {
+            "node": "Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Chat webhook set?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat webhook set?": {
+      "main": [
+        [
+          {
+            "node": "Chat message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Nairobi",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

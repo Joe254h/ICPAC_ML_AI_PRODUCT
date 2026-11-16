@@ -12,6 +12,9 @@ change the Copilot's AI service; leave them out to keep the current one. -LlmRea
 sets the reasoning effort sent with each question (off removes it); a new -LlmBaseUrl
 removes the previous service's reasoning effort and fallback models.
 Use -SetEarthdataToken to enter a NASA Earthdata token privately for the GPM IMERG downloads.
+Use -N8nWebhookUrl with -SetN8nSecret to let n8n coordinate the weekly cycle
+(deploy/n8n/README.md): the service then sends it signed events and its own weekly
+schedule is switched off, so the week is not run twice; -N8nWebhookUrl off removes it.
 Without -AccessMode the app keeps its current access mode (staff for a new app); give
 -AccessMode staff or -AccessMode public to change it.
 #>
@@ -37,6 +40,9 @@ param(
     [ValidateRange(10, 180)][int]$LlmRequestSeconds,
     [ValidateRange(30, 180)][int]$LlmAnswerSeconds,
     [switch]$SetEarthdataToken,
+    # n8n's "ICPAC 3 · Service events" webhook (https://.../webhook/icpac-events), or off.
+    [ValidatePattern('^(off|https://\S+)$')][string]$N8nWebhookUrl,
+    [switch]$SetN8nSecret,
     [switch]$PlanOnly,
     [switch]$VerifyOnly
 )
@@ -44,9 +50,10 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($PlanOnly -and $VerifyOnly) { throw 'Choose either -PlanOnly or -VerifyOnly.' }
 if ($EnableAutomation -and $DisableAutomation) { throw 'Choose either -EnableAutomation or -DisableAutomation.' }
+if ($EnableAutomation -and $N8nWebhookUrl -and $N8nWebhookUrl -ne 'off') { throw 'Choose either -EnableAutomation (the service schedules the week) or -N8nWebhookUrl (n8n schedules it).' }
 if ($VerifyOnly -and ($EnableAutomation -or $DisableAutomation)) { throw 'Verification cannot change the automation schedule.' }
 if ($AccessMode -eq 'public' -and $ReleaseMode -ne 'evaluation') { throw 'Public access requires an evaluation release.' }
-if ($VerifyOnly -and ($LlmProvider -or $LlmBaseUrl -or $LlmModel -or $SetLlmKey -or $LlmReasoningEffort -or $LlmFallbackModels -or $LlmRequestSeconds -or $LlmAnswerSeconds -or $SetEarthdataToken)) { throw 'Verification cannot change settings.' }
+if ($VerifyOnly -and ($LlmProvider -or $LlmBaseUrl -or $LlmModel -or $SetLlmKey -or $LlmReasoningEffort -or $LlmFallbackModels -or $LlmRequestSeconds -or $LlmAnswerSeconds -or $SetEarthdataToken -or $N8nWebhookUrl -or $SetN8nSecret)) { throw 'Verification cannot change settings.' }
 
 function Invoke-Azure([string[]]$Arguments) {
     $result = & az @Arguments --only-show-errors --output json
@@ -284,6 +291,22 @@ if ($SetEarthdataToken) {
     $earthdata = Read-Private 'Paste your NASA Earthdata token (urs.earthdata.nasa.gov, Generate Token; hidden)'
     if ($earthdata.Length -lt 40) { throw 'That does not look like an Earthdata token; nothing was changed.' }
     Set-Private 'EARTHDATA_TOKEN' 'earthdata-token' $earthdata
+}
+if ($N8nWebhookUrl -eq 'off') {
+    $variables.Remove('N8N_WEBHOOK_URL')
+} elseif ($N8nWebhookUrl) {
+    Set-Value 'N8N_WEBHOOK_URL' $N8nWebhookUrl
+    # n8n starts the weekly cycle: the service's own schedule would run the week twice.
+    Set-Value 'AUTOMATION_SCHEDULER_ENABLED' 'false'
+}
+if ($SetN8nSecret) {
+    if ($PlanOnly) { throw '-SetN8nSecret asks for the secret; run it without -PlanOnly.' }
+    $n8nSecret = Read-Private 'Paste the n8n signing secret (ICPAC_WEBHOOK_SECRET in n8n, 32+ characters; hidden)'
+    if ($n8nSecret.Length -lt 32) { throw 'The n8n signing secret needs at least 32 characters; nothing was changed.' }
+    Set-Private 'N8N_WEBHOOK_SECRET' 'n8n-webhook-secret' $n8nSecret
+}
+if ((Get-Setting 'N8N_WEBHOOK_URL') -and -not (Get-Setting 'N8N_WEBHOOK_SECRET') -and -not $PlanOnly) {
+    throw 'N8N_WEBHOOK_URL needs its signing secret: rerun with -SetN8nSecret.'
 }
 $container = $app.properties.template.containers[0]
 $container.image = if ($container.image -ne $commitImage -and $container.image -like "*@$digest") { $commitImage } else { $image }

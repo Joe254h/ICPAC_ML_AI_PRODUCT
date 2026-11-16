@@ -8,7 +8,14 @@ from typing import Literal
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import Response
 
-from backend.app.api.access import Principal, acting_name, require_operator
+from backend.app.api.access import (
+    STAFF_ACTIONS,
+    Principal,
+    acting_name,
+    is_visitor,
+    require_operator,
+    require_staff_operator,
+)
 from backend.app.schemas import (
     FORECAST_ID,
     ForecastRunRequest,
@@ -93,7 +100,7 @@ def install(app: FastAPI, dependency) -> None:
     def delete_external_forecast(
         identifier: str = Path(pattern=r"^[0-9a-f-]{36}$"),
         platform=Depends(dependency),
-        user: Principal = Depends(require_operator),
+        user: Principal = Depends(require_staff_operator),
     ) -> Response:
         from backend.app.services.external import ExternalForecasts
 
@@ -112,10 +119,28 @@ def install(app: FastAPI, dependency) -> None:
 
     @app.get("/automations/integrations")
     def integrations(platform=Depends(dependency)) -> dict:
+        from backend.app.services import events
         from backend.app.services.external_feeds import ExternalFeeds
         from backend.app.services.hpc import HPCService
 
-        return {"feeds": ExternalFeeds(platform).status(), "hpc": HPCService(platform).status()}
+        return {
+            "feeds": ExternalFeeds(platform).status(),
+            "hpc": HPCService(platform).status(),
+            "coordinator": events.status(),
+        }
+
+    @app.post("/automations/coordinator/test")
+    def test_coordinator(user: Principal = Depends(require_staff_operator)) -> dict:
+        """Send a signed ``coordinator.test`` event to n8n now and say whether it arrived."""
+        from backend.app.services import events
+
+        if not events.configured():
+            raise HTTPException(
+                409, "No coordinator: set N8N_WEBHOOK_URL and N8N_WEBHOOK_SECRET (32+ characters)"
+            )
+        event = events.emit("coordinator.test", {"by": user.name}, wait=True)
+        delivered = [d for d in events.deliveries() if event and d["id"] == event["id"]]
+        return {"event": event, "deliveries": delivered}
 
     @app.get("/forecasts/{forecast_id}/supplemental")
     def supplemental_products(forecast_id: str = ForecastId, platform=Depends(dependency)) -> dict:
@@ -230,6 +255,12 @@ def install(app: FastAPI, dependency) -> None:
         user: Principal = Depends(require_operator),
     ) -> dict:
         """Start a background task (download, run, verify or the weekly cycle)."""
+        if body.action in STAFF_ACTIONS and is_visitor(user):
+            raise HTTPException(
+                403,
+                "Downloading, running or resetting forecasts needs a staff access key "
+                "(Staff access, at the top of the page).",
+            )
         return OperationService(platform).start(
             body.model_copy(update={"actor": acting_name(user, body.actor)})
         )
@@ -248,7 +279,7 @@ def install(app: FastAPI, dependency) -> None:
         operation_id: str,
         body: StopRequest | None = None,
         platform=Depends(dependency),
-        user: Principal = Depends(require_operator),
+        user: Principal = Depends(require_staff_operator),
     ) -> dict:
         """Stop a queued task now, or a running one at its next step."""
         try:
@@ -280,7 +311,7 @@ def install(app: FastAPI, dependency) -> None:
     def run(
         body: ForecastRunRequest,
         platform=Depends(dependency),
-        user: Principal = Depends(require_operator),
+        user: Principal = Depends(require_staff_operator),
     ) -> dict:
         return ForecastService(platform).run(
             body.model_copy(update={"actor": acting_name(user, body.actor)})
@@ -290,7 +321,7 @@ def install(app: FastAPI, dependency) -> None:
     def import_package(
         body: PackageImportRequest,
         platform=Depends(dependency),
-        user: Principal = Depends(require_operator),
+        user: Principal = Depends(require_staff_operator),
     ) -> dict:
         return ForecastService(platform).import_package(
             body.model_copy(update={"actor": acting_name(user, body.actor)})

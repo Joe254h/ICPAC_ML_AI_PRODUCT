@@ -23,6 +23,12 @@ services:
       BULLETIN_OPERATOR_KEY: ${BULLETIN_OPERATOR_KEY:-}
       STAFF_CREDENTIALS: ${STAFF_CREDENTIALS:-}
       RELEASE_MODE: ${RELEASE_MODE:-evaluation}
+      PUBLIC_SITE_URL: ${PUBLIC_SITE_URL:-http://localhost:3000}
+      # With n8n coordinating (docker compose --profile n8n up), the service sends it
+      # signed events and n8n starts the weekly cycle instead of the built-in schedule.
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
+      N8N_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET:-}
+      AUTOMATION_SCHEDULER_ENABLED: ${AUTOMATION_SCHEDULER_ENABLED:-false}
     volumes:
       - climate-data:/app/data
       - ./artifacts:/app/artifacts:ro
@@ -37,5 +43,33 @@ services:
     environment: {API_URL: "http://backend:8000"}
     depends_on:
       backend: {condition: service_healthy}
+  # The coordinator (deploy/n8n/README.md): docker compose --profile n8n up -d, after
+  # deploy/n8n/setup.sh has imported the workflows and credentials.
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.47.7
+    profiles: ["n8n"]
+    ports: ["127.0.0.1:5678:5678"]
+    environment:
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY (32+ random characters)}
+      N8N_WEBHOOK_URL: ${N8N_PUBLIC_URL:-http://localhost:5678/}
+      GENERIC_TIMEZONE: Africa/Nairobi
+      TZ: Africa/Nairobi
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      # The workflows read their settings from the environment and check signatures.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+      ICPAC_API_URL: http://backend:8000
+      ICPAC_SITE_URL: ${PUBLIC_SITE_URL:-http://localhost:3000}
+      ICPAC_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET:-}
+      ICPAC_NOTIFY_EMAIL: ${ICPAC_NOTIFY_EMAIL:-}
+      ICPAC_NOTIFY_FROM: ${ICPAC_NOTIFY_FROM:-}
+      ICPAC_NOTIFY_WEBHOOK: ${ICPAC_NOTIFY_WEBHOOK:-}
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./deploy/n8n/workflows:/workflows:ro
+    depends_on:
+      backend: {condition: service_healthy}
 volumes:
   climate-data:
+  n8n-data:

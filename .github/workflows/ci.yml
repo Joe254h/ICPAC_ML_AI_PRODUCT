@@ -54,6 +54,7 @@ jobs:
         run: |
           ./deploy/azure/tests/backend.Tests.ps1
           ./deploy/azure/tests/operate.Tests.ps1
+          ./deploy/azure/tests/n8n.Tests.ps1
       - uses: pnpm/action-setup@v4
         with: {version: '11.19.0'}
       - uses: actions/setup-node@v4

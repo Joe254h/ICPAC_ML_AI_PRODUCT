@@ -43,9 +43,12 @@ def _no_startup_registration(monkeypatch):
         "HPC_WORKFLOW_SCRIPT",
         "HPC_WORKFLOW_SHA256",
         "HPC_RECEIPT_ROOT",
+        "N8N_WEBHOOK_URL",
+        "N8N_WEBHOOK_SECRET",
     ):
         monkeypatch.delenv(name, raising=False)
     # The open CHIRPS mirror is never asked from a test unless it sets one.
     monkeypatch.setenv("CHIRPS_MIRROR_URL", "off")
+    monkeypatch.setenv("CHIRPS_FTP_HOST", "off")
     # The Copilot tests script each tool call; the read-ahead has its own tests.
     monkeypatch.setenv("LLM_PREFETCH", "off")

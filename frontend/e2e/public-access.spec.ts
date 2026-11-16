@@ -13,7 +13,9 @@ test("public visitors can chat immediately, reload, and keep separate histories"
   await page.goto("/copilot");
   const health = await page.request.get("/api/health");
   expect((await health.json()).access_mode).toBe("public");
-  await expect(page.getByText("Staff access", { exact: true })).toHaveCount(0);
+  // Staff sign in on the public site too (for the weekly cycle, models and the archive);
+  // visitors use the Copilot without it.
+  await expect(page.getByRole("button", { name: "Staff access" })).toBeVisible();
   await page
     .getByLabel("Ask Forecaster Copilot", { exact: true })
     .fill("Hello");

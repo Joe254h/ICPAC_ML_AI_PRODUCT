@@ -5,18 +5,27 @@ import type { StaffUser } from "@/services/api";
 import { useApi } from "@/services/hooks";
 
 export function useStaff(): {
-  /** Staff actions will be accepted (signed in, or the service is public). */
+  /** The visitor's own actions will be accepted (signed in, or the service is public):
+   * the Copilot, bulletin drafts and review, verifying finished weeks. */
   signedIn: boolean;
   /** The service asks for a staff key that this visitor has not given. */
   needsSignIn: boolean;
+  /** A named staff member signed in with their key: the weekly cycle, downloads, forecast
+   * runs, the archive and models need one, also on the public evaluation site. */
+  staff: boolean;
+  /** An administrator: models, the audit log and the Copilot's answer marks. */
+  admin: boolean;
   user?: StaffUser;
 } {
   const { health } = useApp();
   const mode = health.data?.access_mode;
-  const me = useApi<StaffUser>(mode === "staff" ? "/access/me" : null);
+  const me = useApi<StaffUser>(mode ? "/access/me" : null);
+  const named = Boolean(me.data && !me.data.name.startsWith("visitor:"));
   return {
     signedIn: mode === "public" || Boolean(me.data),
     needsSignIn: mode === "staff" && (me.status === 401 || me.status === 403),
-    user: me.data,
+    staff: named,
+    admin: named && Boolean(me.data?.roles.includes("admin")),
+    user: named ? me.data : undefined,
   };
 }

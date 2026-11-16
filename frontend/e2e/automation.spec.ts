@@ -71,7 +71,7 @@ test("a restored source retry is followed to completion without another submissi
   expect(polls).toBeGreaterThanOrEqual(3);
 });
 
-test("the 20-capability workspace runs a connected workflow without publishing", async ({
+test("the automation page runs the connected workflow without publishing", async ({
   page,
 }) => {
   test.setTimeout(180_000);
@@ -83,15 +83,13 @@ test("the 20-capability workspace runs a connected workflow without publishing",
     .map((item: { id: string }) => item.id)
     .sort();
   await page.goto("/automations");
+  // The coordinator's state is shown; these tests run without n8n.
   await expect(
-    page.getByRole("heading", { name: "All 20 capabilities", exact: true }),
+    page.getByRole("heading", { name: "Coordination with n8n", exact: true }),
   ).toBeVisible();
-  await expect(page.locator("tbody tr")).toHaveCount(20);
-  await expect(
-    page
-      .getByText("Awaiting an approved request profile", { exact: false })
-      .first(),
-  ).toBeVisible();
+  await expect(page.getByText("Not connected", { exact: true })).toBeVisible();
+  // The developer checklist and the unconfigured feeds are no longer on the page.
+  await expect(page.getByText("All 20 capabilities")).toHaveCount(0);
   await page
     .getByRole("button", { name: "Prepare forecast and bulletin", exact: true })
     .click();

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.db import Record, now
 from backend.app.schemas import ReviewRequest
+from backend.app.services import events
 from climate_engine.core import ROOT, checksum
 from climate_engine.products import weekly_bulletin as weekly
 from climate_engine.products.bulletin import (
@@ -138,6 +139,23 @@ TRANSLATION_KIND = "bulletin_translation"
 
 class TranslationBusy(RuntimeError):
     """The translation worker has no free capacity."""
+
+
+def bulletin_event(bulletin: dict, actor: str, comment: str = "") -> dict:
+    """What a coordinator needs to tell people about a bulletin: no document content."""
+    site = events.site()
+    identifier = bulletin.get("id", "")
+    return {
+        "bulletin_id": identifier,
+        "forecast_id": bulletin.get("forecast_id"),
+        "status": bulletin.get("status"),
+        "language": bulletin.get("language") or "en",
+        "title": bulletin.get("title"),
+        "by": actor,
+        "comment": comment,
+        "link": f"{site}/bulletins?id={identifier}" if site else None,
+        "document": f"{site}/api/bulletins/{identifier}/export" if site else None,
+    }
 
 
 class BulletinService:
@@ -305,6 +323,7 @@ class BulletinService:
             raise ValueError("Draft consistency check failed")
         record = self.repo.save("bulletin", bulletin, identifier)
         self.repo.audit("generate_bulletin_draft", actor, identifier, {"forecast": forecast_id})
+        events.emit("bulletin.drafted", bulletin_event(record, actor))
         return record
 
     def latest_in(self, forecast_id: str, language: str | None) -> dict | None:
@@ -685,6 +704,7 @@ class BulletinService:
             bulletin["notification"] = notify(self.platform, bulletin)
         except Exception as exc:  # reported with the decision, never raised
             bulletin["notification"] = {"skipped": f"Email failed ({type(exc).__name__})."}
+        events.emit(f"bulletin.{after}", bulletin_event(bulletin, review.actor, review.comment))
         return bulletin
 
     def map(self, bulletin: dict) -> bytes:

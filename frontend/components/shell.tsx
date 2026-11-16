@@ -526,9 +526,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             >
               <span aria-hidden className={cx("status-dot", status.tone)} />
             </Link>
-            {health.data && health.data.access_mode !== "public" && (
-              <StaffAccess />
-            )}
+            {/* Also on the public site: the weekly cycle, models and the archive need a
+                staff key there too. */}
+            {health.data && <StaffAccess />}
             <button
               type="button"
               className="menu-toggle"

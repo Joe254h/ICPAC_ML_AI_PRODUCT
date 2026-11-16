@@ -25,7 +25,7 @@ test("working pages fit phones, tablets and desktop with readable Arabic and dar
       if (path === "/automations")
         await expect(
           page.getByRole("heading", {
-            name: "All 20 capabilities",
+            name: "Coordination with n8n",
             exact: true,
           }),
         ).toBeVisible();

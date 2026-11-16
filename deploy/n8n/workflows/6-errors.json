@@ -1,0 +1,86 @@
+{
+  "id": "IcpacErrors00006",
+  "name": "ICPAC 6 · Errors",
+  "active": false,
+  "nodes": [
+    {
+      "id": "3693fdce-91bf-5c09-94d9-cbd91debf110",
+      "name": "When a workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "5189bc08-4447-5e53-960b-7b1e252ff03a",
+      "name": "Describe the failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// A coordinating workflow stopped with an error: which one, where, and why.\nconst e = $input.first().json;\nconst wf = (e.workflow || {}).name || 'an ICPAC workflow';\nconst ex = e.execution || {};\nconst err = ex.error || (e.trigger || {}).error || {};\nreturn [{ json: {\n  severity: 'alert',\n  subject: `ICPAC Week-2: n8n workflow failed (${wf})`,\n  text: `The n8n workflow \"${wf}\" stopped at \"${ex.lastNodeExecuted || 'its trigger'}\": `\n    + `${err.message || 'no message'}.`\n    + (ex.url ? `\\nExecution: ${ex.url}` : '')\n    + '\\nA refused key (401/403) means the \"ICPAC staff key\" credential needs an operator key; '\n    + 'a connection error means the API did not answer.',\n} }];\n"
+      }
+    },
+    {
+      "id": "1dd0bb10-479f-53fc-bca2-92c420652ca0",
+      "name": "Notify",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "IcpacNotify00005",
+          "mode": "id"
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When a workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Describe the failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe the failure": {
+      "main": [
+        [
+          {
+            "node": "Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Nairobi",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

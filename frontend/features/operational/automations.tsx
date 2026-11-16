@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { openStaffAccess } from "@/components/bulletin-access";
 import {
   Button,
   Card,
@@ -10,20 +11,15 @@ import {
   Skeleton,
   Status,
 } from "@/components/ui";
+import { request } from "@/services/api";
 import { useApi } from "@/services/hooks";
+import { useStaff } from "@/services/staff";
 import { useOperation } from "@/services/operations";
 import { operationActive, operationLabel } from "@/services/operation-state";
 import { dateTime } from "@/lib/format";
 import type { Operation } from "@/types/operational";
 
 type Workspace = {
-  capabilities: {
-    id: number;
-    name: string;
-    href: string;
-    status: string;
-    detail: string;
-  }[];
   schedule: {
     enabled: boolean;
     when: string;
@@ -40,36 +36,125 @@ type Workspace = {
   release_mode: string;
 };
 
+type Coordinator = {
+  configured: boolean;
+  destinations: string[];
+  secret_set: boolean;
+  recent: {
+    id: string;
+    kind: string;
+    time: string;
+    status: string;
+    detail: string;
+  }[];
+};
+
+/** n8n: whether the service tells it what happens, the newest deliveries, and a test. */
+function Coordination({
+  coordinator,
+  staff,
+  scheduled,
+  onSent,
+}: {
+  coordinator?: Coordinator;
+  staff: boolean;
+  scheduled: boolean;
+  onSent: () => void;
+}) {
+  const [sending, setSending] = useState(false);
+  const [answer, setAnswer] = useState("");
+  if (!coordinator) return null;
+  const send = async () => {
+    setSending(true);
+    setAnswer("");
+    try {
+      const result = await request<{
+        deliveries: { status: string; detail: string }[];
+      }>("/automations/coordinator/test", { method: "POST" });
+      const delivery = result.deliveries[0];
+      setAnswer(
+        delivery?.status === "delivered"
+          ? "n8n received the test event; its message should arrive shortly."
+          : `n8n did not accept it (${delivery?.detail ?? "no answer"}).`,
+      );
+      onSent();
+    } catch (failure) {
+      setAnswer((failure as Error).message);
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <Card
+      title="Coordination with n8n"
+      subtitle="n8n starts the weekly run and the verification on schedule, and tells the forecasters what happened."
+    >
+      {coordinator.configured ? (
+        <p>
+          <Status tone="ok">Connected</Status> Signed events go to{" "}
+          {coordinator.destinations.join(", ")}.
+          {scheduled &&
+            " The service's own weekly schedule is also on: switch one off so the week is not started twice."}
+        </p>
+      ) : (
+        <p>
+          <Status tone="planned">Not connected</Status> Set N8N_WEBHOOK_URL and
+          N8N_WEBHOOK_SECRET on the service (deploy/n8n/README.md).
+        </p>
+      )}
+      {coordinator.configured && (
+        <div className="row">
+          {staff ? (
+            <Button variant="outline" disabled={sending} onClick={send}>
+              {sending ? "Sending…" : "Send a test event"}
+            </Button>
+          ) : (
+            <Button variant="outline" onClick={openStaffAccess}>
+              Staff access to test
+            </Button>
+          )}
+          {answer && <span role="status">{answer}</span>}
+        </div>
+      )}
+      {coordinator.recent.length > 0 && (
+        <table className="table">
+          <thead>
+            <tr>
+              <th scope="col">Sent</th>
+              <th scope="col">Event</th>
+              <th scope="col">Delivery</th>
+            </tr>
+          </thead>
+          <tbody>
+            {coordinator.recent.map((item) => (
+              <tr key={item.id}>
+                <td>{dateTime(item.time)}</td>
+                <td>{item.kind}</td>
+                <td>
+                  <Status tone={item.status === "delivered" ? "ok" : "bad"}>
+                    {item.status}
+                  </Status>{" "}
+                  {item.detail}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
+  );
+}
+
 export default function Automations() {
   const workspace = useApi<Workspace>("/automations");
   const integrations = useApi<{
-    feeds: {
-      id: string;
-      configured: boolean;
-      enabled: boolean;
-      fetched: number;
-      note: string;
-    }[];
-    hpc: {
-      enabled: boolean;
-      script_approved: boolean;
-      connection_verified: boolean;
-      note: string;
-      jobs: { id: string; job_id?: string; status: string }[];
-    };
+    coordinator?: Coordinator;
   }>("/automations/integrations");
-  const latest = useApi<{ forecast_id: string }>("/forecasts/latest");
-  const products = useApi<{
-    available: string[];
-    pending: Record<string, string>;
-    summary?: Record<string, { units: string; mean: number }>;
-  }>(latest.data ? `/forecasts/${latest.data.forecast_id}/supplemental` : null);
+  const { staff } = useStaff();
   const reload = useCallback(() => {
     workspace.reload();
     integrations.reload();
-    latest.reload();
-    products.reload();
-  }, [workspace.reload, integrations.reload, latest.reload, products.reload]);
+  }, [workspace.reload, integrations.reload]);
   const task = useOperation(reload, "automations");
   useEffect(() => {
     const current = workspace.data?.last_cycle;
@@ -131,14 +216,20 @@ export default function Automations() {
           title="Run the connected workflow"
           subtitle="Newest ensemble, forecast layers, verification, monitoring, maps, bulletin draft."
         >
-          <Button
-            disabled={task.running}
-            onClick={() => task.start("end_to_end", "website automation")}
-          >
-            {task.running
-              ? "Workflow running…"
-              : "Prepare forecast and bulletin"}
-          </Button>
+          {staff || task.running ? (
+            <Button
+              disabled={task.running}
+              onClick={() => task.start("end_to_end", "website automation")}
+            >
+              {task.running
+                ? "Workflow running…"
+                : "Prepare forecast and bulletin"}
+            </Button>
+          ) : (
+            <Button variant="outline" onClick={openStaffAccess}>
+              Staff access to run it
+            </Button>
+          )}
           {task.running && (
             <Button
               variant="outline"
@@ -180,87 +271,12 @@ export default function Automations() {
             </div>
           )}
         </Card>
-        <Card
-          title="External source integrations"
-          subtitle="Provider requests and credentials are set by the operator; acquired data never silently replaces model inputs."
-        >
-          <p>
-            The built-in ECMWF ensemble connector runs the baseline forecast.
-            The profiles below configure additional datasets and do not block
-            that connector.
-          </p>
-          {integrations.error && (
-            <Notice tone="red">{integrations.error}</Notice>
-          )}
-          {integrations.data?.feeds.map((feed) => (
-            <p key={feed.id}>
-              <strong>{feed.id.toUpperCase()}</strong> ·{" "}
-              {feed.enabled
-                ? "Enabled"
-                : feed.configured
-                  ? "Profile approved; acquisition disabled"
-                  : "Awaiting an approved request profile"}{" "}
-              · {feed.fetched} datasets held
-            </p>
-          ))}
-          {integrations.data && (
-            <>
-              <h3>HPC / SLURM</h3>
-              <p>
-                {integrations.data.hpc.enabled
-                  ? integrations.data.hpc.script_approved
-                    ? "Job script approved"
-                    : "Awaiting approved job script"
-                  : "Execution disabled"}{" "}
-                ·{" "}
-                {integrations.data.hpc.connection_verified
-                  ? "Connection checked"
-                  : "Live connection not yet verified"}
-              </p>
-              <p>{integrations.data.hpc.note}</p>
-              <ul>
-                {integrations.data.hpc.jobs.map((job) => (
-                  <li key={job.id}>
-                    Job {job.job_id ?? "awaiting reconciliation"}: {job.status}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </Card>
-        <Card
-          title="Additional forecast products"
-          subtitle="These need reviewed data for the forecast window; definitions are never guessed."
-        >
-          {products.error && <Notice tone="red">{products.error}</Notice>}
-          {products.data?.available.map((name) => (
-            <figure key={name}>
-              <figcaption>
-                {name.replaceAll("_", " ")}
-                {products.data?.summary?.[name] &&
-                  ` · domain mean ${products.data.summary[name].mean.toFixed(2)} ${products.data.summary[name].units}`}
-              </figcaption>
-              <img
-                loading="lazy"
-                src={`/api/forecasts/${latest.data?.forecast_id}/supplemental/${name}/map`}
-                alt={name.replaceAll("_", " ")}
-                style={{ width: "100%", maxWidth: 800 }}
-              />
-            </figure>
-          ))}
-          <ul>
-            {Object.entries(products.data?.pending ?? {}).map(
-              ([name, reason]) => (
-                <li key={name}>
-                  <strong>{name.replaceAll("_", " ")}</strong>: {reason}
-                </li>
-              ),
-            )}
-          </ul>
-          {!latest.data && (
-            <p>A forecast is required before preparing additional products.</p>
-          )}
-        </Card>
+        <Coordination
+          coordinator={integrations.data?.coordinator}
+          staff={staff}
+          scheduled={data.schedule.enabled}
+          onSent={integrations.reload}
+        />
         <Card
           title="Weekly schedule"
           subtitle="Scheduling is enabled in the server deployment settings, rather than by public visitors."
@@ -268,7 +284,9 @@ export default function Automations() {
           <p>
             {data.schedule.enabled
               ? `Enabled: ${data.schedule.when}, from that Sunday's ECMWF run.`
-              : "Disabled — enable the reviewed schedule in the backend deployment."}
+              : integrations.data?.coordinator?.configured
+                ? "Started by n8n (above); the service's own schedule is off."
+                : "Off: connect n8n (above), or switch the service's schedule on in the backend deployment."}
           </p>
           {data.schedule.next_due && (
             <p>Next weekly run: {dateTime(data.schedule.next_due)}</p>
@@ -304,48 +322,6 @@ export default function Automations() {
             </ul>
           </Card>
         )}
-        <Card
-          title="All 20 capabilities"
-          subtitle="Available: shown by held products. Ready: built, awaiting a run. Partial or blocked: the missing dependency is named."
-        >
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ minWidth: 760, width: "100%" }}>
-              <thead>
-                <tr>
-                  <th scope="col">#</th>
-                  <th scope="col">Capability</th>
-                  <th scope="col">State</th>
-                  <th scope="col">Evidence and next step</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.capabilities.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.id}</td>
-                    <th scope="row">
-                      <Link href={item.href}>{item.name}</Link>
-                    </th>
-                    <td>
-                      <Status
-                        tone={
-                          item.status === "available" ||
-                          item.status === "enabled"
-                            ? "ok"
-                            : item.status === "blocked"
-                              ? "bad"
-                              : "planned"
-                        }
-                      >
-                        {item.status.replaceAll("_", " ")}
-                      </Status>
-                    </td>
-                    <td>{item.detail}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
       </div>
     </div>
   );

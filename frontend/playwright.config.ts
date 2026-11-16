@@ -48,6 +48,7 @@ export default defineConfig({
         ECMWF_OPENDATA_MIRRORS: mirror,
         CHIRPS_BASE_URL: mirror + "/chc",
         CHIRPS_MIRROR_URL: "off",
+        CHIRPS_FTP_HOST: "off",
         TAMSAT_BASE_URL: mirror + "/tamsat",
         ARC2_BASE_URL: mirror + "/arc2",
         RFE2_BASE_URL: mirror + "/rfe2",

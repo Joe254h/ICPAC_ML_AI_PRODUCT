@@ -1,0 +1,190 @@
+{
+  "id": "IcpacWatch000004",
+  "name": "ICPAC 4 · Watchdog",
+  "active": false,
+  "nodes": [
+    {
+      "id": "3d322d14-debf-534f-96e0-7c00063a1402",
+      "name": "Every 30 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fe474444-3a2c-5a50-b68f-52c1973ca7cc",
+      "name": "Start by hand",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "ba816de7-36b6-5e73-83b2-94a5ccc03c91",
+      "name": "Read the health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        100
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.ICPAC_API_URL.replace(/\\/$/, '') }}/health",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "1d7ae2b1-a191-5991-a920-91761128336b",
+      "name": "Read the latest forecast",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        100
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.ICPAC_API_URL.replace(/\\/$/, '') }}/forecasts/latest",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "8cb1e0f6-85ac-5271-98fd-5758c0e6585c",
+      "name": "Find problems",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Problems now: the service not answering, an unavailable component, or no forecast for\n// more than 8 days. Alert when the set of problems changes, not every 30 minutes.\nconst health = $('Read the health').first().json;\nconst latest = $('Read the latest forecast').first().json;\nconst problems = [];\nif (health.statusCode !== 200) problems.push(`The service does not answer (HTTP ${health.statusCode || 'none'}).`);\nelse {\n  const body = health.body || {};\n  for (const [name, value] of Object.entries(body.components || {})) {\n    if (String(value).startsWith('Unavailable')) problems.push(`${name}: ${value}`);\n  }\n}\nif (latest.statusCode === 200) {\n  const made = Date.parse((latest.body || {}).generation_time || 0);\n  const days = (Date.now() - made) / 864e5;\n  if (days > 8) problems.push(`The latest forecast was made ${Math.floor(days)} days ago.`);\n} else if (health.statusCode === 200) {\n  problems.push('No forecast is held yet.');\n}\nconst state = $getWorkflowStaticData('global');\nconst before = state.problems || [];\nconst changed = JSON.stringify(before) !== JSON.stringify(problems);\nstate.problems = problems;\nif (!changed) return [];\nconst site = ($env.ICPAC_SITE_URL || '').replace(/\\/$/, '');\nif (problems.length === 0) {\n  return [{ json: { severity: 'info', subject: 'ICPAC Week-2: the service is back to normal',\n    text: `All checks pass again.\\n${site}/system` } }];\n}\nreturn [{ json: { severity: 'alert', subject: 'ICPAC Week-2: the service needs attention',\n  text: problems.map((p) => `- ${p}`).join('\\n') + `\\n\\n${site}/system` } }];\n"
+      }
+    },
+    {
+      "id": "a2997473-10f1-5a0c-b391-e76d3d9cafa8",
+      "name": "Notify",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        100
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "IcpacNotify00005",
+          "mode": "id"
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 30 minutes": {
+      "main": [
+        [
+          {
+            "node": "Read the health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start by hand": {
+      "main": [
+        [
+          {
+            "node": "Read the health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the health": {
+      "main": [
+        [
+          {
+            "node": "Read the latest forecast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the latest forecast": {
+      "main": [
+        [
+          {
+            "node": "Find problems",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find problems": {
+      "main": [
+        [
+          {
+            "node": "Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Nairobi",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "IcpacErrors00006"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

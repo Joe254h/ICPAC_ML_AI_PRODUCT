@@ -258,3 +258,23 @@ if (@($envs | Where-Object name -EQ LLM_TIMEOUT_SECONDS)[0].value -ne '90') { th
 if (@($envs | Where-Object name -EQ LLM_TOTAL_SECONDS)[0].value -ne '180') { throw 'The answer time was not kept' }
 Write-Host 'Copilot service switch tests passed (offline).'
 
+# n8n coordination: the webhook address is set and removed, the service's own weekly
+# schedule is switched off with it, and both schedulers cannot be chosen at once.
+Reset-DeploymentFixture
+$global:DeployTestapp.properties.template.containers[0].env += @{name = 'N8N_WEBHOOK_SECRET'; secretRef = 'llm'}
+& $deployment -ExpectedCommit $global:DeployTestcommit -N8nWebhookUrl 'https://n8n.example/webhook/icpac-events'
+$envs = $global:DeployTestapp.properties.template.containers[0].env
+if (@($envs | Where-Object name -EQ N8N_WEBHOOK_URL)[0].value -ne 'https://n8n.example/webhook/icpac-events') { throw 'The n8n webhook was not set' }
+if (@($envs | Where-Object name -EQ AUTOMATION_SCHEDULER_ENABLED)[0].value -ne 'false') { throw 'The service would schedule the week as well as n8n' }
+& $deployment -ExpectedCommit $global:DeployTestcommit -N8nWebhookUrl off
+if (@($global:DeployTestapp.properties.template.containers[0].env | Where-Object name -EQ N8N_WEBHOOK_URL).Count -ne 0) { throw 'The n8n webhook was not removed' }
+Reset-DeploymentFixture
+try { & $deployment -ExpectedCommit $global:DeployTestcommit -EnableAutomation -N8nWebhookUrl 'https://n8n.example/webhook/icpac-events'; throw 'Two schedulers accepted' }
+catch { if ($_.Exception.Message -notlike 'Choose either -EnableAutomation*') { throw } }
+if ($global:DeployTestwrites) { throw 'Conflicting schedulers changed Azure' }
+# A webhook without its signing secret is refused before anything changes.
+Reset-DeploymentFixture
+try { & $deployment -ExpectedCommit $global:DeployTestcommit -N8nWebhookUrl 'https://n8n.example/webhook/icpac-events'; throw 'Unsigned webhook accepted' }
+catch { if ($_.Exception.Message -notlike '*needs its signing secret*') { throw } }
+if ($global:DeployTestwrites) { throw 'An unsigned webhook changed Azure' }
+Write-Host 'n8n coordination tests passed (offline).'

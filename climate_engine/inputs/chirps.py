@@ -17,6 +17,7 @@ georeferencing tags are read; nothing about its extent is assumed. Cells without
 (CHIRPS marks them -9999) stay missing and are left out of the verification.
 """
 
+import ftplib
 import gzip
 import hashlib
 import io
@@ -313,6 +314,8 @@ class Server:
         #: Years whose files were not at their usual address either: not asked again in
         #: this pass.
         self.unaddressed: set[int] = set()
+        #: CHC's anonymous FTP, the second way to its files (FTPSource).
+        self.ftp = FTPSource()
 
     def fetch(self, url: str) -> bytes | None:
         cfg = settings()
@@ -384,6 +387,82 @@ class Server:
             if name in listed:
                 return folder + name
         return None
+
+
+#: What a failing FTP connection raises.
+FTP_ERRORS: tuple[type[BaseException], ...] = (*ftplib.all_errors, EOFError)
+
+
+def ftp_settings() -> dict[str, Any] | None:
+    """CHC's FTP server and its folders, or None when switched off (CHIRPS_FTP_HOST=off)."""
+    cfg = dict(settings().get("ftp") or {})
+    host = os.getenv("CHIRPS_FTP_HOST", cfg.get("host") or "")
+    if not host or host == "off":
+        return None
+    return {**cfg, "host": host}
+
+
+class FTPSource:
+    """CHC's anonymous FTP server, which holds the same daily files as its web server: used
+    when the web server refuses this service (403/429). Each folder is listed once per
+    pass; a server that cannot be reached is not asked again in the pass. ``connect``
+    replaces ftplib (tests)."""
+
+    def __init__(self, connect: Callable[[str], Any] | None = None):
+        self.connect = connect or (lambda host: ftplib.FTP(host, timeout=30))
+        self.session: Any = None
+        self.unreachable: str | None = None
+        self.listings: dict[str, set[str]] = {}
+
+    def _session(self, host: str) -> Any:
+        if self.session is None:
+            session = self.connect(host)
+            session.login("anonymous", "icpac-week2-verification@")
+            session.set_pasv(True)
+            self.session = session
+        return self.session
+
+    def _names(self, host: str, folder: str) -> set[str]:
+        if folder not in self.listings:
+            try:
+                names = self._session(host).nlst(folder)
+            except ftplib.error_perm:  # no such folder (550): the other spelling may hold it
+                names = []
+            self.listings[folder] = {name.rsplit("/", 1)[-1] for name in names}
+        return self.listings[folder]
+
+    def fetch(self, day: date) -> tuple[str, str, bytes] | None:
+        """(product, ftp:// address, file) of the day, final before preliminary, or None."""
+        cfg = ftp_settings()
+        if cfg is None or self.unreachable:
+            return None
+        host = cfg["host"]
+        try:
+            for product in PRODUCTS:
+                for template in cfg.get(f"{product}_dirs", []):
+                    folder = template.format(year=day.year)
+                    names = self._names(host, folder)
+                    for name in day_names(day):
+                        if name not in names:
+                            continue
+                        chunks: list[bytes] = []
+                        self._session(host).retrbinary(f"RETR {folder}{name}", chunks.append)
+                        data = b"".join(chunks)
+                        # Kept only if it is a raster (gzip or TIFF), as for the web server.
+                        if data[:2] == GZIP_MAGIC or data[:4] in TIFF_MAGIC:
+                            return product, f"ftp://{host}{folder}{name}", data
+        except FTP_ERRORS as exc:
+            self.unreachable = f"{type(exc).__name__}: {exc}"[:200]
+            self.close()
+        return None
+
+    def close(self) -> None:
+        if self.session is not None:
+            try:
+                self.session.quit()
+            except FTP_ERRORS:
+                pass
+            self.session = None
 
 
 def crop(
@@ -510,6 +589,17 @@ def fetch_day(
     def from_chc() -> tuple[np.ndarray, Day]:
         return _from_chc(day, server, held, keep, from_held)
 
+    def from_ftp() -> tuple[np.ndarray, Day] | None:
+        """The day from CHC's FTP server, when its web server cannot give it."""
+        found = server.ftp.fetch(day)
+        if found is None:
+            return None
+        product, url, data = found
+        try:
+            return keep(product, url, data)
+        except (ValueError, KeyError, OSError):
+            return None  # An unreadable file never becomes an observation.
+
     def from_mirror() -> tuple[np.ndarray, Day] | None:
         """The final product from the open mirror, asked once, when CHC cannot give it."""
         url = mirror_url(day)
@@ -540,10 +630,12 @@ def fetch_day(
     try:
         return from_chc()
     except CHIRPSUnavailable:
-        mirrored = from_mirror()
-        if mirrored is None:
+        # CHC's FTP server first (the same files, both products), then the open mirror
+        # (final product only).
+        fallback = from_ftp() or from_mirror()
+        if fallback is None:
             raise
-        return mirrored
+        return fallback
 
 
 def _from_chc(

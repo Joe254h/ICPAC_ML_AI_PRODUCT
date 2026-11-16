@@ -64,11 +64,41 @@ def credentials() -> list[dict]:
         raise HTTPException(503, "Staff access is not configured correctly.") from None
 
 
+#: What a public evaluation visitor may do: chat, draft, edit, translate, review and
+#: publish bulletins, and verify finished weeks. Not admin: models, the audit log and the
+#: archive need a staff key, as do the tasks in STAFF_ACTIONS.
+VISITOR_ROLES = frozenset({"chat", "operator", "reviewer", "publisher"})
+
+#: Tasks that download, run or reset forecasts: they cost compute and change what the site
+#: shows, so on the public site they need a named staff key (an operator or n8n's key).
+STAFF_ACTIONS = frozenset(
+    {
+        "fetch_ecmwf",
+        "run_forecast",
+        "update_chirps",
+        "cycle",
+        "end_to_end",
+        "past_weeks",
+        "observations",
+        "refresh_archive",
+        "restart_archive",
+    }
+)
+
+
+def is_visitor(user: "Principal") -> bool:
+    return user.name.startswith("visitor:")
+
+
 def principal(
     authorization: str | None = Header(default=None),
     x_visitor_id: str | None = Header(default=None),
 ) -> Principal:
     if access_mode() == "public":
+        # A staff key still names its holder on the public site: the weekly cycle, model
+        # management and the archive need one (require_staff).
+        if authorization:
+            return _staff(authorization, credentials())
         # No login in the evaluation app. A random browser capability keeps chat
         # histories separate; never map a visitor to a named staff member.
         visitor = x_visitor_id or secrets.token_hex(16)
@@ -76,10 +106,15 @@ def principal(
             raise HTTPException(400, "Invalid browser session; reload the page.")
         # Audit entries are visible in the public app. Store a one-way identity,
         # so seeing an actor in the audit cannot grant their conversation access.
-        return Principal(f"visitor:{sha256(visitor.encode()).hexdigest()}", frozenset({"admin"}))
+        return Principal(f"visitor:{sha256(visitor.encode()).hexdigest()}", VISITOR_ROLES)
     records = credentials()
     if not records:
         raise HTTPException(503, "Staff access is not configured; contact the operator.")
+    return _staff(authorization, records)
+
+
+def _staff(authorization: str | None, records: list[dict]) -> Principal:
+    """The staff member whose key is sent, or 401."""
     scheme, _, supplied = (authorization or "").partition(" ")
     for record in records:
         if scheme.lower() == "bearer" and secrets.compare_digest(
@@ -130,7 +165,21 @@ def require_role(role: str):
     return allowed
 
 
+def require_staff(role: str):
+    """A named staff member with ``role`` (or admin), also on the public site."""
+
+    def allowed(user: Principal = Depends(require_role(role))) -> Principal:
+        if is_visitor(user):
+            raise HTTPException(
+                403, "This needs a staff access key (Staff access, at the top of the page)."
+            )
+        return user
+
+    return allowed
+
+
 require_operator = require_role("operator")
+require_staff_operator = require_staff("operator")
 require_reviewer = require_role("reviewer")
 require_publisher = require_role("publisher")
 require_admin = require_role("admin")

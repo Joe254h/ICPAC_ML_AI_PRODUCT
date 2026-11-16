@@ -11,6 +11,7 @@ marked interrupted. Azure must keep one replica running to drain the queue when 
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 import time
@@ -22,6 +23,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from backend.app.db import now
 from backend.app.schemas import ForecastRunRequest, OperationRequest
+from backend.app.services import events
 from backend.app.services.forecasts import ForecastService, RunInProgress, Unavailable
 from backend.app.services.registry import ModelRegistry
 
@@ -340,6 +342,7 @@ class OperationService:
             result = getattr(self, f"_{body.action}")(operation_id, body)
             self._log(operation_id, "Finished", status="complete", finished_at=now(), result=result)
             self.repo.audit(f"operation_{body.action}", body.actor, operation_id, {})
+            self._event("operation.completed", operation_id)
         except OperationCancelled:
             who = self.repo.get(STOP_KIND, f"stop-{operation_id}").get(
                 "requested_by", "a forecaster"
@@ -352,6 +355,7 @@ class OperationService:
                 retry_at=None,
                 retryable=False,
             )
+            self._event("operation.cancelled", operation_id)
         except Exception as exc:
             if getattr(self, "_lease_lost", threading.Event()).is_set():
                 return
@@ -374,6 +378,37 @@ class OperationService:
                 else None,
                 retryable=retry,
             )
+            self._event("operation.failed", operation_id)
+
+    def _event(self, kind: str, operation_id: str) -> None:
+        """Tell the coordinator (n8n) how a task ended; never raises."""
+        try:
+            record = self.get(operation_id)
+            result = record.get("result") if isinstance(record.get("result"), dict) else {}
+            site = events.site()
+            forecast = (result or {}).get("forecast_id")
+            events.emit(
+                kind,
+                {
+                    "operation_id": operation_id,
+                    "action": record.get("action") or (record.get("request") or {}).get("action"),
+                    "status": record.get("status"),
+                    "initialization": record.get("initialization"),
+                    "created_by": record.get("created_by"),
+                    "started_at": record.get("started_at"),
+                    "finished_at": record.get("finished_at"),
+                    "error": record.get("error"),
+                    "retry_at": record.get("retry_at"),
+                    "forecast_id": forecast,
+                    "bulletin_id": (result or {}).get("bulletin_id"),
+                    "link": f"{site}/data/runs?operation={operation_id}" if site else None,
+                    "forecast_link": f"{site}/forecasts?id={forecast}"
+                    if site and forecast
+                    else None,
+                },
+            )
+        except Exception:  # a coordinator never stops the service
+            logging.getLogger("icpac.events").exception("Operation event not sent")
 
     def _forecasts(self) -> ForecastService:
         return ForecastService(self.platform)

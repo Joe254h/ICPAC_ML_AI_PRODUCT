@@ -44,6 +44,17 @@ chirps:
   # CHC's daily 0.05 degree files and cuts out the region. CHIRPS_MIRROR_URL replaces it
   # ("off" switches it off). The mirror holds the final product only (weeks later).
   mirror: "https://coastwatch.pfeg.noaa.gov/erddap/griddap/chirps20GlobalDailyP05"
+  # CHC also serves the same daily files over anonymous FTP, tried before the mirror when
+  # its web server refuses the service (both products). CHC's pages spell the folder
+  # chc and chg; both are tried. CHIRPS_FTP_HOST replaces the host ("off" switches it off).
+  ftp:
+    host: ftp.chc.ucsb.edu
+    final_dirs:
+      - "/pub/org/chc/products/CHIRPS-2.0/africa_daily/tifs/p05/{year}/"
+      - "/pub/org/chg/products/CHIRPS-2.0/africa_daily/tifs/p05/{year}/"
+    prelim_dirs:
+      - "/pub/org/chc/products/CHIRPS-2.0/prelim/global_daily/tifs/p05/{year}/"
+      - "/pub/org/chg/products/CHIRPS-2.0/prelim/global_daily/tifs/p05/{year}/"
   prelim_dir: "https://data.chc.ucsb.edu/products/CHIRPS/v2.0/prelim/global_daily/tifs/p05/{year}/"
   # Preliminary dekadal NetCDF (variable precip), the monitoring framework's own source.
   dekad_dir: "https://data.chc.ucsb.edu/products/CHIRPS/v2.0/prelim/global_dekad/netcdf/"

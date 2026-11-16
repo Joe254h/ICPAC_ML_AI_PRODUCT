@@ -1,0 +1,287 @@
+{
+  "id": "IcpacEvents00003",
+  "name": "ICPAC 3 · Service events",
+  "active": false,
+  "nodes": [
+    {
+      "id": "8a8647b0-7957-5412-b231-a2b46bd36d88",
+      "name": "Service events",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "icpac-events",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "webhookId": "6c1e5b7a-icpac-events-0000-000000000003"
+    },
+    {
+      "id": "0100ea45-0200-5d80-a4e5-3554822e98f2",
+      "name": "Check the signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Accept only what the service signed: HMAC-SHA256 of the exact body with the shared\n// secret, an event under 15 minutes old, and a delivery not seen before.\nconst crypto = require('crypto');\nconst item = $input.first();\nconst headers = item.json.headers || {};\nconst secret = $env.ICPAC_WEBHOOK_SECRET || '';\nlet raw = Buffer.alloc(0);\nif (item.binary && item.binary.data) {\n  raw = await this.helpers.getBinaryDataBuffer(0, 'data');\n}\nconst expected = 'sha256=' + crypto.createHmac('sha256', secret).update(raw).digest('hex');\nconst given = String(headers['x-icpac-signature'] || '');\nconst signed = secret.length >= 32 && given.length === expected.length\n  && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));\nlet event = {};\ntry { event = JSON.parse(raw.toString('utf8')); } catch (e) { event = {}; }\nconst fresh = Math.abs(Date.now() - Date.parse(event.time || 0)) < 15 * 60 * 1000;\nconst seen = $getWorkflowStaticData('global');\nseen.ids = (seen.ids || []).slice(-500);\nconst repeated = seen.ids.includes(event.id);\nconst valid = signed && fresh && Boolean(event.kind);\nif (valid && !repeated) seen.ids.push(event.id);\nreturn [{ json: { valid, repeated, reason: !signed ? 'bad signature' : !fresh ? 'stale' : '', event } }];\n"
+      }
+    },
+    {
+      "id": "b05a5d67-073a-53cc-bb73-a0f287def5b2",
+      "name": "Signed by the service?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "15ba3608-20ed-5971-9707-5ad97cdca87d",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "93b472d6-b593-55d7-8db9-b3bc9984c080",
+      "name": "Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        -100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": true } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "7bc93fa2-d577-5bcf-b20f-a52bab91141d",
+      "name": "Refused",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": false, \"reason\": $json.reason } }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "33147370-f406-5d79-a58a-61d960897e77",
+      "name": "First delivery?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "06876519-0332-570f-8ec3-f319ee2ad302",
+              "leftValue": "={{ $('Check the signature').first().json.repeated }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "377d0e52-96ff-5264-9cbf-cb5b1b33c65a",
+      "name": "Restore the event",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1100,
+        -100
+      ],
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ JSON.stringify({ event: $('Check the signature').first().json.event }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "c6446882-8ca5-5b05-804d-ffd425cfee18",
+      "name": "Compose the message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "// What to tell the forecasters about an event; nothing for the routine ones.\nconst e = $input.first().json.event;\nconst d = e.data || {};\nconst site = (e.site || $env.ICPAC_SITE_URL || '').replace(/\\/$/, '');\nconst messages = {\n  'bulletin.drafted': ['ICPAC Week-2: a bulletin draft is ready for review',\n    `The weekly bulletin draft${d.title ? ' \"' + d.title + '\"' : ''} is ready. Check, edit or translate it, then submit it for review:\\n${d.link || site + '/bulletins'}\\nWord document: ${d.document || ''}`],\n  'bulletin.under_review': ['ICPAC Week-2: a bulletin is waiting for approval',\n    `${d.by || 'A forecaster'} submitted the bulletin for review${d.comment ? ': ' + d.comment : ''}.\\n${d.link || ''}`],\n  'bulletin.approved': ['ICPAC Week-2: bulletin approved',\n    `${d.by || 'A reviewer'} approved the bulletin; it can now be published.\\n${d.link || ''}`],\n  'bulletin.rejected': ['ICPAC Week-2: bulletin sent back',\n    `${d.by || 'A reviewer'} sent the bulletin back${d.comment ? ': ' + d.comment : ''}.\\n${d.link || ''}`],\n  'bulletin.published': ['ICPAC Week-2: bulletin published',\n    `The weekly bulletin is published.\\n${d.link || ''}\\nWord document: ${d.document || ''}`],\n  'operation.failed': ['ICPAC Week-2: a task failed',\n    `The task \"${d.action}\" (${d.operation_id}) failed: ${d.error || 'no reason given'}.`\n    + (d.retry_at ? `\\nThe service tries again at ${d.retry_at}.` : '\\nIt is not retried automatically.')\n    + `\\n${d.link || ''}`],\n  'coordinator.test': ['ICPAC Week-2: n8n connection check',\n    `n8n received a signed test event from the service (sent by ${d.by || 'staff'}).`],\n};\nlet pick = messages[e.kind];\nif (e.kind === 'operation.completed' && ['end_to_end', 'cycle'].includes(d.action)) {\n  pick = ['ICPAC Week-2: this week\\'s forecast is issued',\n    `The weekly forecast is issued${d.forecast_link ? ':\\n' + d.forecast_link : '.'}`\n    + (d.bulletin_id ? `\\nIts bulletin draft: ${site}/bulletins?id=${d.bulletin_id}` : '')];\n}\nif (!pick) return [];\nreturn [{ json: {\n  severity: e.kind === 'operation.failed' ? 'alert' : 'info',\n  subject: pick[0], text: pick[1], kind: e.kind, delivery: e.id,\n} }];\n"
+      }
+    },
+    {
+      "id": "8845abad-17af-5b03-baa4-f356afbc9e15",
+      "name": "Notify",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        -100
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "IcpacNotify00005",
+          "mode": "id"
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Service events": {
+      "main": [
+        [
+          {
+            "node": "Check the signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check the signature": {
+      "main": [
+        [
+          {
+            "node": "Signed by the service?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signed by the service?": {
+      "main": [
+        [
+          {
+            "node": "Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refused",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accepted": {
+      "main": [
+        [
+          {
+            "node": "First delivery?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "First delivery?": {
+      "main": [
+        [
+          {
+            "node": "Restore the event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore the event": {
+      "main": [
+        [
+          {
+            "node": "Compose the message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose the message": {
+      "main": [
+        [
+          {
+            "node": "Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Nairobi",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "IcpacErrors00006"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

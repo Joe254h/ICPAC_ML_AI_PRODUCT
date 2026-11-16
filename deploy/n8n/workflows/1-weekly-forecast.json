@@ -1,0 +1,412 @@
+{
+  "id": "IcpacWeekly00001",
+  "name": "ICPAC 1 · Weekly forecast and bulletin",
+  "active": false,
+  "nodes": [
+    {
+      "id": "c7660b32-bd02-5590-a274-cc1f35c0bd72",
+      "name": "Every Monday 00:05 EAT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "5 0 * * 1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "e4b4cc7c-e0d3-5087-a5a6-f7fad395a5a0",
+      "name": "Start by hand",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "d93af993-dffa-53c2-9db2-2526c9944332",
+      "name": "Fresh request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Started by hand: a new request identity, so a failed week can be run again.\nreturn [{ json: { fresh: true } }];\n"
+      }
+    },
+    {
+      "id": "41c3a7d0-a036-5aaa-aa6d-be2ddf8c37d3",
+      "name": "Week and request identity",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// The week this run is for: its Sunday (East Africa Time). The same week always gets the\n// same request identity, so starting again returns the week's task instead of a second run.\nconst crypto = require('crypto');\nconst eat = new Date(Date.now() + 3 * 3600 * 1000);\nconst sunday = new Date(Date.UTC(eat.getUTCFullYear(), eat.getUTCMonth(), eat.getUTCDate() - eat.getUTCDay()));\nconst week = sunday.toISOString().slice(0, 10);\nconst action = 'end_to_end';\nconst fresh = $input.first().json.fresh === true;\nconst key = fresh ? `n8n:${action}:${week}:${Date.now()}` : `n8n:${action}:${week}`;\nreturn [{ json: {\n  action, week,\n  actor: fresh ? 'n8n (started by hand)' : 'n8n weekly schedule',\n  request_id: crypto.createHash('md5').update(key).digest('hex'),\n} }];\n"
+      }
+    },
+    {
+      "id": "5c56e170-d8d9-57fa-bb75-8a8279ba0ba1",
+      "name": "Start the weekly run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ICPAC_API_URL.replace(/\\/$/, '') }}/operations",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ action: $json.action, actor: $json.actor, request_id: $json.request_id }) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IcpacStaffKey001",
+          "name": "ICPAC staff key"
+        }
+      }
+    },
+    {
+      "id": "ee4867e7-3124-5bc2-a7f4-972a1f53edaa",
+      "name": "Wait before checking",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "amount": "={{ Number($env.ICPAC_POLL_SECONDS || 120) }}",
+        "unit": "seconds"
+      },
+      "webhookId": "b5a0c1f2-weekly-wait-0000-000000000001"
+    },
+    {
+      "id": "c1f57716-ac46-5846-92f6-a5472faf6fe0",
+      "name": "Read the task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.ICPAC_API_URL.replace(/\\/$/, '') }}/operations/{{ $('Start the weekly run').first().json.id }}",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IcpacStaffKey001",
+          "name": "ICPAC staff key"
+        }
+      }
+    },
+    {
+      "id": "898e87be-daa6-5717-a240-30c5467ca146",
+      "name": "Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// waiting: queued, running, or failed with a retry the service has scheduled;\n// done; failed; timeout (still not finished after ICPAC_RUN_TIMEOUT_HOURS).\nconst op = $input.first().json;\nconst hours = (Date.now() - Date.parse(op.created_at)) / 3.6e6;\nlet state = 'waiting';\nif (op.status === 'complete') state = 'done';\nelse if (op.status === 'failed' && !op.retry_at) state = 'failed';\nelse if (['cancelled', 'interrupted'].includes(op.status)) state = 'failed';\nconst limit = Number($env.ICPAC_RUN_TIMEOUT_HOURS || 6);\nif (state === 'waiting' && hours > limit) state = 'timeout';\nreturn [{ json: {\n  id: op.id, action: op.action, status: op.status, state,\n  hours: Math.round(hours * 10) / 10, error: op.error || null, retry_at: op.retry_at || null,\n  result: op.result || null,\n} }];\n"
+      }
+    },
+    {
+      "id": "3817a769-10b7-56e3-9b2f-4f6d53580ceb",
+      "name": "Still running?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "82eda3f4-1c46-51ee-8152-34d2a3a3f3ac",
+              "leftValue": "={{ $json.state }}",
+              "rightValue": "waiting",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "031b3015-aaeb-515c-b5d0-0bb192272d63",
+      "name": "Finished?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "01fb505c-072f-5dcf-8e90-3e6a1b29046b",
+              "leftValue": "={{ $json.state }}",
+              "rightValue": "done",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "645ec2a6-b381-50be-b8fb-9949d56c479f",
+      "name": "Weekly run complete",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "cc622c0e-f088-5984-b9e1-caaba8c893e5",
+      "name": "Describe the problem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// The weekly run did not finish: say what happened and where to look.\nconst op = $input.first().json;\nconst site = ($env.ICPAC_SITE_URL || '').replace(/\\/$/, '');\nconst why = op.state === 'timeout'\n  ? `It is still running after ${op.hours} hours.`\n  : `It ended with status \"${op.status}\": ${op.error || 'no reason given'}.`;\nreturn [{ json: {\n  severity: 'alert',\n  subject: 'ICPAC Week-2: the weekly forecast run needs attention',\n  text: `The weekly forecast and bulletin run (task ${op.id}) did not complete. ${why}\\n\\n`\n    + `Open the task: ${site}/data/runs?operation=${op.id}\\n`\n    + 'Start it again from n8n (workflow \"ICPAC 1\", Test workflow) or from the website\\'s Operations page.',\n} }];\n"
+      }
+    },
+    {
+      "id": "45f569fb-e11f-54aa-8e62-2a5fa50a34f2",
+      "name": "Notify",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2200,
+        200
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "IcpacNotify00005",
+          "mode": "id"
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Monday 00:05 EAT": {
+      "main": [
+        [
+          {
+            "node": "Week and request identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start by hand": {
+      "main": [
+        [
+          {
+            "node": "Fresh request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fresh request": {
+      "main": [
+        [
+          {
+            "node": "Week and request identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Week and request identity": {
+      "main": [
+        [
+          {
+            "node": "Start the weekly run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start the weekly run": {
+      "main": [
+        [
+          {
+            "node": "Wait before checking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait before checking": {
+      "main": [
+        [
+          {
+            "node": "Read the task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the task": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide": {
+      "main": [
+        [
+          {
+            "node": "Still running?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still running?": {
+      "main": [
+        [
+          {
+            "node": "Wait before checking",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Finished?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finished?": {
+      "main": [
+        [
+          {
+            "node": "Weekly run complete",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe the problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe the problem": {
+      "main": [
+        [
+          {
+            "node": "Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Nairobi",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "IcpacErrors00006"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
