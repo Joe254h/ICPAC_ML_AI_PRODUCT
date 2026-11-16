@@ -69,8 +69,9 @@ give them. Say which period and which forecast layer the numbers are for.
 - The forecast has up to three layers: raw ECMWF, MBC (the bias-corrected ECMWF \
 forecast) and MBC + AI/ML (MBC with a machine-learning residual correction). The tools say \
 which layers a forecast holds and which one is issued; if MBC + AI/ML is missing, say it \
-waits for its inputs. The model in use is a candidate, not yet approved for production, \
-when the tools say so.
+waits for its inputs. When the tools call the model in use a candidate, say a reviewer \
+approved it for operational use and that it is not yet in production (that needs an \
+independent test).
 - For general questions (what El Nino is, how monsoons work, what a forecast skill score \
 means, farming or preparedness advice), answer from your own knowledge, clearly and \
 briefly. The region's seasons: equatorial East Africa (most of Kenya, Uganda, Rwanda, \

@@ -23,7 +23,7 @@ DEFINITIONS = {
     "correlation": "Spatial correlation describes whether rainfall patterns vary together across the verified grid. It does not establish temporal forecasting skill or guarantee accurate rainfall amounts.",
     "mbc": "MBC (multiplicative bias correction) multiplies the ECMWF ensemble-mean rainfall by the ratio of observed (CHIRPS) to forecast rainfall for the same month and grid cell, fitted on the model's training years (2005-2021 for the final refit now in use and for the Atmos37 candidate, 2005-2019 for the earlier pre-refit model). The MBC + AI/ML hybrid then adds a learned residual correction to the MBC field when its inputs are available.",
     "anomaly": "A rainfall anomaly compares a forecast with the climatology for the same location and forecast window. A rainfall total alone cannot establish whether rainfall is above or below normal.",
-    "candidate": "A candidate model is available for evaluation and has not been approved for production. Its independent test and human review must be completed before promotion.",
+    "candidate": "A candidate model has passed its integrity checks and a named reviewer has approved it for operational use, so forecasts can use it. It is not yet in production: promotion needs an independent test on data the model has never seen, and a reviewer's decision.",
     "heat stress": "Heat stress depends on temperature, humidity and the approved index used. A rainfall forecast cannot supply a heat-stress category.",
 }
 
@@ -332,7 +332,10 @@ class OperationalConversation:
                     f"The forecast comes from {(detail.get('model') or {}).get('model_name') or 'the registered model'}"
                     f" ({detail['model_status']})."
                     + (
-                        " It has not been approved for production."
+                        " A named reviewer approved it for operational use; it is not yet in"
+                        " production, which needs an independent test on data it has never seen."
+                        if detail["model_status"] == "candidate"
+                        else " It has not been approved for operational use."
                         if detail["model_status"] != "production"
                         else ""
                     )
