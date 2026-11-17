@@ -24,9 +24,11 @@ from chatbot import agent
 log = logging.getLogger(__name__)
 
 RETRY = (
-    "That reply could not be read as JSON. Answer again with the JSON array only, no other "
-    'text and no code fence: [{"key": ..., "title": ..., "paragraphs": [...], "why": ...}] '
-    "with the same key and the same number of paragraphs."
+    "That reply was refused: {problem} Answer again with the JSON array only, no other text "
+    'and no code fence: [{{"key": ..., "title": ..., "paragraphs": [...], "why": ...}}] with '
+    "the same key, exactly {count} paragraph(s) in the same order as the English (one "
+    "translated paragraph for each English one, never merged or split) and every number "
+    "written exactly as in the English."
 )
 
 NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
@@ -171,23 +173,30 @@ def translate(
                     "Nothing was saved; try again."
                 ) from exc
             try:
-                translated.extend(parse(reply.text))
+                parts = parse(reply.text)
+                check([section], parts)  # this section's paragraphs and figures, now
+                translated.extend(parts)
                 break
-            except TranslationRefused:
-                # What the model sent, for the logs: an unreadable reply is otherwise a guess.
+            except TranslationRefused as exc:
+                # What the model sent, for the logs: a refused reply is otherwise a guess.
                 log.warning(
-                    "Unreadable translation of %s into %s (attempt %d): %r",
+                    "Translation of %s into %s refused (attempt %d: %s): %r",
                     section["key"],
                     language,
                     attempt + 1,
+                    exc,
                     (reply.text or "")[:400],
                 )
                 if attempt:
                     raise
                 # Once more, saying exactly what came back wrong and what is wanted.
+                count = len(section.get("text") or [])
                 prompt = prompt + [
                     {"role": "assistant", "text": reply.text or ""},
-                    {"role": "user", "text": RETRY},
+                    {
+                        "role": "user",
+                        "text": RETRY.format(count=count, problem=exc),
+                    },
                 ]
     check(source, translated)
     return translated

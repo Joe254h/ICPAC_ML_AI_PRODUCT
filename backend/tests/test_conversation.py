@@ -276,3 +276,18 @@ def test_standard_answers_say_where_rain_falls_and_show_any_countrys_map(env, fa
     assert "over Kenya" in shown["images"][0]["alt"]
     assert {"label": "Open the Kenya page", "url": "/countries/kenya"} in shown["links"]
     assert env.client.get(shown["images"][0]["url"].removeprefix("/api")).status_code == 200
+
+
+def test_questions_about_how_the_model_did_are_verification_questions():
+    """Live, "did the AI/ML model perform well?" got a rainfall summary from the fixed
+    sentences instead of the week's verification."""
+    from chatbot.conversation import intent_for
+
+    for question in (
+        "did the AI/ML model perform well?",
+        "How well did the forecast do last week?",
+        "how accurate was the MBC forecast",
+        "did the model do well in Kenya",
+    ):
+        assert intent_for(question, {}) == "verification", question
+    assert intent_for("Explain the forecast for Kenya.", {}) != "verification"

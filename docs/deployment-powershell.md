@@ -28,6 +28,12 @@ Invoke-WebRequest "https://raw.githubusercontent.com/Joe254h/ICPAC_ML_AI_PRODUCT
 & $Script -ExpectedCommit $Commit -ResourceGroup icpac -AppName icpac-api -ReleaseMode evaluation
 ```
 
+The script asks GitHub whether the commit passed its checks. Unsigned requests share a limit of
+60 an hour per address, and Cloud Shell addresses are shared; if it stops with "rate limit",
+wait for the reset (`Invoke-RestMethod https://api.github.com/rate_limit`), restart Cloud
+Shell, or set `$env:GITHUB_TOKEN` to any personal access token (no scopes are needed for this
+public repository; it is sent only to api.github.com) before running it.
+
 The script prompts privately for a PostgreSQL `DATABASE_URL` only if none exists. Use the
 connection string from Supabase's **Connect** dialog; a Supabase API key is not a database
 connection string or an LLM key. If private Blob Storage is absent, the script creates or

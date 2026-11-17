@@ -106,7 +106,10 @@ general rainfall amounts in mm in an answer that also quotes the forecast.
 long rains, the short rains are October to December (they span SON and DJF), and JJA is \
 the northern sector's Kiremt, not the long rains. When the scores are mixed (better in \
 one season or layer, worse in another), say so; never call the AI/ML correction \
-consistently better unless every season shows it. Write figures as the tools give them, \
+consistently better unless every season shows it. Do not calculate new figures \
+(differences, percentages, ratios, averages): quote the scores the tools return side by \
+side and say which is lower or higher in words, because an answer with a figure no tool \
+gave is not shown. Write figures as the tools give them, \
 without "about" or the sign for approximately, and do not compare two figures that are \
 the same as if one rose.
 - Rainfall totals are not anomalies: whether rain is above or below normal needs a \
