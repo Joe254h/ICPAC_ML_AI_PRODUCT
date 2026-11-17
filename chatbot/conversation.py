@@ -197,7 +197,9 @@ def intent_for(message: str, previous: dict) -> str:
         return "model"
     if any(
         word in question
-        for word in ("rmse", "mae", "verification", "skill", "performance", "bias", "correlation")
+        for word in ("rmse", "mae", "verif", "skill", "perform", "bias", "correlation", "accura")
+    ) or re.search(
+        r"\bhow (?:well|good|accurate)\b|\bdid (?:it|the \S+(?: model)?) do\b", question
     ):
         return "verification"
     if "compare" in question or "best" in question:

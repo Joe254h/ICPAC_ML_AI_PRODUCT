@@ -219,4 +219,33 @@ def test_an_unreadable_translation_is_asked_for_once_more(env, fast_maps, monkey
     made = env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "fr"})
     assert made.status_code == 200, made.text
     assert made.json()["edited"]["language"] == "French"
-    assert "Unreadable translation" in caplog.text and "sans JSON" in caplog.text
+    assert "refused (attempt 1" in caplog.text and "sans JSON" in caplog.text
+
+
+def test_a_translation_with_merged_paragraphs_is_asked_for_again(env, fast_maps, monkeypatch):
+    """Live, the AI merged the three rainfall statements into fewer paragraphs ("Total
+    Rainfall: paragraphs missing"): the section is asked for again with exactly that
+    problem and the paragraph count, and the second answer is used."""
+    from backend.tests.test_bulletin_editing import Translator
+
+    class Merger(Translator):
+        def __init__(self):
+            super().__init__()
+            self.asked: list[list[dict]] = []
+
+        def respond(self, system, transcript, tools):
+            self.asked.append(transcript)
+            reply = super().respond(system, transcript[:1], tools)
+            items = json.loads(reply.text)
+            if len(transcript) == 1 and len(items[0]["paragraphs"]) > 1:
+                items[0]["paragraphs"] = [" ".join(items[0]["paragraphs"])]
+            return SimpleNamespace(text=json.dumps(items), calls=[])
+
+    first = draft(env)
+    merger = Merger()
+    monkeypatch.setattr(agent, "chat_model", lambda: merger)
+    made = env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "sw"})
+    assert made.status_code == 200, made.text
+    retries = [t[-1]["text"] for t in merger.asked if len(t) > 1]
+    assert retries and "paragraphs missing" in retries[0] and "never merged" in retries[0]
+    assert len(section(made.json(), "rainfall")["text"]) == len(section(first, "rainfall")["text"])

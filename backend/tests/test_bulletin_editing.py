@@ -67,7 +67,7 @@ class Translator:
 
     def respond(self, system, transcript, tools):
         self.requests.append((system, transcript, tools))
-        text = transcript[-1]["text"]
+        text = transcript[0]["text"]  # the request itself, also when it is asked again
         payload = json.loads(text.rsplit("\n\n", 1)[1])
         out = []
         for item in payload:
