@@ -138,7 +138,19 @@ function Confirm-Deployment([switch]$Once) {
 
 # A success from another revision, a skipped job, or a pending check is insufficient.
 $repoApi = 'https://api.github.com/repos/Joe254h/ICPAC_ML_AI_PRODUCT'
-$runs = Invoke-RestMethod "$repoApi/actions/runs?head_sha=$ExpectedCommit&per_page=100"
+# Unsigned requests share a 60-an-hour limit per address, and Cloud Shell addresses are shared:
+# with $env:GITHUB_TOKEN set (any personal token; no scopes are needed for this public
+# repository) the limit is 5,000 an hour. The token is sent only to api.github.com.
+$githubHeaders = @{ Accept = 'application/vnd.github+json' }
+if ($env:GITHUB_TOKEN) { $githubHeaders['Authorization'] = "Bearer $($env:GITHUB_TOKEN)" }
+try {
+    $runs = Invoke-RestMethod "$repoApi/actions/runs?head_sha=$ExpectedCommit&per_page=100" -Headers $githubHeaders
+} catch {
+    if ("$_" -match 'rate limit') {
+        throw "GitHub's limit for unsigned requests from this address is used up. Wait for it to reset (Invoke-RestMethod https://api.github.com/rate_limit), restart Cloud Shell, or set `$env:GITHUB_TOKEN and run again. Nothing was changed."
+    }
+    throw
+}
 foreach ($workflow in @('CI', 'Container build', 'Publish backend image')) {
     $latest = @($runs.workflow_runs | Where-Object name -EQ $workflow | Sort-Object run_number -Descending)
     if (-not $latest.Count -or $latest[0].conclusion -ne 'success' -or $latest[0].status -ne 'completed') {

@@ -65,7 +65,7 @@ function Reset-DeploymentFixture {
     }
 }
 function Invoke-RestMethod {
-    param([string]$Uri, [int]$TimeoutSec)
+    param([string]$Uri, [int]$TimeoutSec, [hashtable]$Headers)
     if ($Uri -like '*actions/runs*') {
         return @{ workflow_runs = @('CI', 'Container build', 'Publish backend image') | ForEach-Object {
             [pscustomobject]@{name = $_; run_number = 1; status = 'completed'; conclusion = $(if ($global:DeployTestbadCI) {'failure'} else {'success'})}
