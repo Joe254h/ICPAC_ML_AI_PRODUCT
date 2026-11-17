@@ -41,7 +41,7 @@ REQUIRED_SENTENCES = (
 # The fixed-sentence path's tools, in the words the answer shows.
 FIXED_EVIDENCE = {
     "get_country_forecast": "Country forecast figures",
-    "get_verification_metrics": "Verification against CHIRPS",
+    "get_verification_metrics": "Verification against observed rainfall",
     "get_bulletin_context": "Weekly bulletin",
     "compare_forecast_values": "Country comparison",
     "compare_observations": "Data sources",

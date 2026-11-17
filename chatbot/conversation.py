@@ -386,6 +386,7 @@ class OperationalConversation:
                 if intent == "verification":
                     tool = "get_verification_metrics"
                     self._verification(detail, country, variant, sentences)
+                    self._other_references(fid, variant, sentences)
                     context["topic"] = next(
                         (t for t in ("rmse", "mae", "bias", "correlation") if t in question), "rmse"
                     )
@@ -614,12 +615,30 @@ class OperationalConversation:
         end = datetime.fromisoformat(detail["valid_end"]) - timedelta(days=1)
         return f"{start:%d %B %Y} to {end:%d %B %Y}"
 
+    def _other_references(self, forecast_id: str, variant: str, sentences: dict) -> None:
+        """The week against ARC 2.0, RFE 2.0 and GPM IMERG (region-wide), which arrive days
+        before CHIRPS: each one's deviation (forecast minus observed) and observed mean."""
+        lines = []
+        for held in self.forecasts.references(forecast_id):
+            scores = (held.get("domain") or {}).get(variant)
+            if held.get("status") != "available" or not scores:
+                continue
+            lines.append(
+                f"{held['name']}: observed {scores['observed_mean']:.1f} mm, deviation "
+                f"{scores['bias']:+.1f} mm, MAE {scores['mae']:.1f} mm"
+            )
+        if lines:
+            sentences["other_references"] = (
+                "Against the other observed datasets over the region (forecast minus observed "
+                "is the deviation): " + "; ".join(lines) + "."
+            )
+
     @staticmethod
     def _verification(detail: dict, country: str, variant: str, sentences: dict) -> None:
         verification = detail["verification"]
         if verification["status"] != "available":
             sentences["verification"] = (
-                "This forecast has not been verified yet: CHIRPS observations are fetched once its Week-2 window has ended. RMSE, MAE, bias and correlation will be available then."
+                "This forecast has not been verified against CHIRPS yet: CHIRPS covers a week a few days after it ends. ARC 2.0, RFE 2.0 and GPM IMERG arrive earlier; their scores follow when they are in."
             )
             return
         item = (
