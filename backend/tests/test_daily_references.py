@@ -204,6 +204,18 @@ def test_verified_forecasts_are_compared_with_the_further_references(env, fast_m
     ).json()
     assert "Against ARC 2.0: MAE" in answer["text"]
     assert "Against GPM IMERG: not compared yet" in answer["text"]
+    # The Copilot's tool gives every dataset's scores, each one's deviation and how far it
+    # is from CHIRPS (RFE 2.0 observed 42 mm against CHIRPS's 21 mm), as figures to quote.
+    tools = agent.ToolBox(env.platform, {"forecast_id": record["forecast_id"]})
+    told = tools.run("get_verification", {})
+    assert told["status"] == "verified against CHIRPS"
+    others = {o["dataset"]: o for o in told["other_references"]}
+    rfe = others["RFE 2.0"]["scores"]["MBC + AI/ML"]
+    assert rfe["observed_minus_chirps_mm"] == pytest.approx(21.0, abs=0.05)
+    assert rfe["bias_mm"] == pytest.approx(
+        told["scores"]["MBC + AI/ML"]["bias_mm"] - 21.0, abs=0.05
+    )
+    assert others["GPM IMERG"]["status"] == "unavailable"
     # A comparison is made once; an unavailable one is tried again in the next pass.
     monkeypatch.setattr(chirps, "download", chc({}))
     again = service.compare_references(record["forecast_id"], "Joe N")
@@ -238,6 +250,22 @@ def test_a_week_chirps_cannot_be_read_for_is_checked_against_the_others(
     assert result["verified"] == [] and result["compared"] == 2
     held = env.platform.repo.get(forecasts.KIND, fid)
     assert "refused the requests (403 Forbidden)" in held["verification_note"]
+    # Without CHIRPS, the Copilot still judges the week from the other datasets.
+    told = agent.ToolBox(env.platform, {"forecast_id": fid}).run("get_verification", {})
+    assert told["status"].startswith("not verified against CHIRPS yet; judged meanwhile")
+    assert "scores" not in told
+    compared = [o["dataset"] for o in told["other_references"] if o.get("scores")]
+    assert compared == ["ARC 2.0", "RFE 2.0"]
+    fallback = env.client.post(
+        "/chat",
+        json={
+            "message": "How well did the forecast do?",
+            "forecast_id": fid,
+            "context_mode": "operational",
+        },
+    ).json()
+    assert "Against the other observed datasets over the region" in fallback["text"]
+    assert "ARC 2.0: observed" in fallback["text"] and "deviation" in fallback["text"]
     listed = next(r for r in env.client.get("/forecasts").json() if r["forecast_id"] == fid)
     assert listed["verification_status"] == "unavailable"
     assert listed["checked_against"] == ["ARC 2.0", "RFE 2.0"]

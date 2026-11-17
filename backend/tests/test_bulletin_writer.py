@@ -249,3 +249,24 @@ def test_a_translation_with_merged_paragraphs_is_asked_for_again(env, fast_maps,
     retries = [t[-1]["text"] for t in merger.asked if len(t) > 1]
     assert retries and "paragraphs missing" in retries[0] and "never merged" in retries[0]
     assert len(section(made.json(), "rainfall")["text"]) == len(section(first, "rainfall")["text"])
+
+
+def test_a_translation_may_run_longer_than_the_english(env, fast_maps):
+    """Live: "Keep each paragraph of Headline under 700 characters" refused a translation
+    of a long English headline. A translated version may run longer than the English."""
+    from backend.app.services.bulletins import BulletinService, RevisionRefused
+
+    first = draft(env)
+    service = BulletinService(env.platform)
+    long = "Mvua ya wastani inatarajiwa katika maeneo mengi. " * 18  # about 900 characters
+    change = [{"section": "headline", "paragraphs": [long]}]
+    try:
+        service.revise(first["forecast_id"], change, [], [], "Joe N", {"by": "Joe N"})
+    except RevisionRefused as exc:
+        assert "under 700 characters" in str(exc)
+    else:
+        raise AssertionError("an English paragraph of 900 characters was accepted")
+    made = service.revise(
+        first["forecast_id"], change, [], [], "Joe N", {"by": "Joe N", "language": "Kiswahili"}
+    )
+    assert section(made, "headline")["text"][0] == long.strip()

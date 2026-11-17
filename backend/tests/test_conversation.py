@@ -103,7 +103,7 @@ def test_missing_verification_never_returns_mock_scores_and_definitions_follow_t
     run(env)
     result = ask(env, "What is the RMSE for Kenya?")
     # A direct request for the score must query the package, not just define RMSE.
-    assert "has not been verified yet" in result["text"]
+    assert "has not been verified against CHIRPS yet" in result["text"]
     assert "5.35" not in result["text"]
     followup = ask(env, "What does that mean?", result["session_id"])
     assert "errors" in followup["text"]

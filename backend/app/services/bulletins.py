@@ -42,6 +42,9 @@ LOST_DOCUMENT = LOST_MAP.replace("frozen map", "frozen Word document")
 MAX_NOTES = 4
 MAX_PARAGRAPHS = 8
 MAX_PARAGRAPH_CHARS = 700
+#: A translation runs longer than the English it keeps word for word (Kiswahili, French and
+#: Somali by a fifth to a half): its paragraphs may be this much longer.
+MAX_TRANSLATED_PARAGRAPH_CHARS = 1100
 
 
 class RevisionRefused(ValueError):
@@ -376,6 +379,11 @@ class BulletinService:
             base = self.latest(forecast_id) or self.generate_weekly(forecast_id, actor=actor)
         sections = json.loads(json.dumps(base["facts"]["sections"]))
         by_key = {s["key"]: s for s in sections}
+        limit = (
+            MAX_TRANSLATED_PARAGRAPH_CHARS
+            if edited.get("language") or language_of(base)
+            else MAX_PARAGRAPH_CHARS
+        )
         changed: list[str] = []
         for change in changes:
             key = change.get("section")
@@ -388,7 +396,7 @@ class BulletinService:
             if key not in by_key:
                 raise RevisionRefused("This bulletin has no country focus this week.")
             section = by_key[key]
-            paragraphs = _paragraphs(change.get("paragraphs"), section["title"])
+            paragraphs = _paragraphs(change.get("paragraphs"), section["title"], limit)
             # A paragraph keeps its bold lead when it still opens with one of the leads.
             leads = [
                 next((lead for lead in section.get("leads", []) if lead and p.startswith(lead)), "")
@@ -398,7 +406,7 @@ class BulletinService:
                 section.update(text=paragraphs, leads=leads, edited=True)
                 changed.append(section["title"])
             if key == "focus" and change.get("why"):
-                why = _paragraphs([change["why"]], "the focus explanation")[0]
+                why = _paragraphs([change["why"]], "the focus explanation", limit)[0]
                 if why != section.get("why"):
                     section.update(why=why, edited=True)
                     if section["title"] not in changed:
@@ -411,7 +419,7 @@ class BulletinService:
             title = " ".join(str(note.get("title") or "").split())[:80]
             if len(title) < 3:
                 raise RevisionRefused("Give each added section a short title.")
-            paragraphs = _paragraphs(note.get("paragraphs"), title)
+            paragraphs = _paragraphs(note.get("paragraphs"), title, limit)
             existing = next(
                 (s for s in sections if s.get("note") and s["title"].lower() == title.lower()),
                 None,
@@ -866,7 +874,7 @@ class BulletinService:
         }
 
 
-def _paragraphs(value: Any, where: str) -> list[str]:
+def _paragraphs(value: Any, where: str, limit: int = MAX_PARAGRAPH_CHARS) -> list[str]:
     """A section's new paragraphs: plain text, a few of them, none empty."""
     from chatbot.tone import tidy
 
@@ -875,8 +883,6 @@ def _paragraphs(value: Any, where: str) -> list[str]:
     paragraphs = [tidy(str(p)) for p in value if str(p).strip()]
     if not paragraphs or len(paragraphs) > MAX_PARAGRAPHS:
         raise RevisionRefused(f"Give {where} between 1 and {MAX_PARAGRAPHS} paragraphs.")
-    if any(len(p) > MAX_PARAGRAPH_CHARS for p in paragraphs):
-        raise RevisionRefused(
-            f"Keep each paragraph of {where} under {MAX_PARAGRAPH_CHARS} characters."
-        )
+    if any(len(p) > limit for p in paragraphs):
+        raise RevisionRefused(f"Keep each paragraph of {where} under {limit} characters.")
     return paragraphs
