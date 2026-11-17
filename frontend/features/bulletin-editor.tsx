@@ -2,7 +2,7 @@
 /** Editing a weekly bulletin draft on the website, and translating it. Each save is a new
  * draft version; its Word document and maps are made again from it. */
 import { useEffect, useId, useRef, useState } from "react";
-import { Languages, Plus, Save, Trash2 } from "lucide-react";
+import { Languages, Plus, Save, Sparkles, Trash2 } from "lucide-react";
 import { Button, Card, ErrorState, Notice } from "@/components/ui";
 import { useActor } from "@/lib/actor";
 import { useLanguage } from "@/lib/language";
@@ -245,23 +245,27 @@ export function DraftEditor({
   );
 }
 
+/** Translating a draft, or (``write``) having the AI service write its English wording
+ * from the forecast: both run on the server, section by section, every figure checked. */
 export function TranslateDraft({
   draft,
   onDone,
+  write = false,
 }: {
   draft: Bulletin;
   onDone: (draft: Bulletin) => void;
+  write?: boolean;
 }) {
   const [actor] = useActor();
   // The site's language (the Copilot's too): choosing one here changes it there.
   const [shared, setLanguage] = useLanguage();
-  const language = shared in TRANSLATIONS ? shared : "sw";
+  const language = write ? "write" : shared in TRANSLATIONS ? shared : "sw";
   const [job, setJob] = useState<TranslationJob | null>(null);
   const [starting, setStarting] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const running = job?.status === "running";
-  const storageKey = `icpac-translation-${draft.id}`;
+  const storageKey = `icpac-${write ? "ai-writing" : "translation"}-${draft.id}`;
   const onDoneRef = useRef(onDone);
   useEffect(() => {
     onDoneRef.current = onDone;
@@ -355,16 +359,21 @@ export function TranslateDraft({
   }, [job]);
   return (
     <div className="draft-translate">
-      <label className="field">
-        Language
-        <select value={language} onChange={(e) => setLanguage(e.target.value)}>
-          {Object.entries(TRANSLATIONS).map(([code, name]) => (
-            <option key={code} value={code}>
-              {name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {!write && (
+        <label className="field">
+          Language
+          <select
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+          >
+            {Object.entries(TRANSLATIONS).map(([code, name]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <Button
         variant="outline"
         disabled={running || starting || recovering}
@@ -394,20 +403,26 @@ export function TranslateDraft({
           }
         }}
       >
-        <Languages size={16} />{" "}
+        {write ? <Sparkles size={16} /> : <Languages size={16} />}{" "}
         {recovering
-          ? "Recovering translation…"
+          ? write
+            ? "Recovering the AI wording…"
+            : "Recovering translation…"
           : running
             ? job?.total
-              ? `Translating · section ${(job.done ?? 0) + 1} of ${job.total}`
-              : "Translating…"
-            : "Translate this draft"}
+              ? `${write ? "Writing" : "Translating"} · section ${(job.done ?? 0) + 1} of ${job.total}`
+              : write
+                ? "Writing…"
+                : "Translating…"
+            : write
+              ? "Write with AI"
+              : "Translate this draft"}
       </Button>
       {error && <ErrorState message={error} />}
       <Notice>
-        The AI service translates the wording; every figure must come back
-        unchanged or nothing is saved. A speaker of the language checks the new
-        version before a reviewer approves it.
+        {write
+          ? "The AI service rewrites the headline, the advice, the regional rainfall and the country focus in a forecaster's words, from this week's forecast. Every figure must be the forecast's or nothing is saved; the maps and the country table stay as computed. A forecaster checks the new version before review."
+          : "The AI service translates the wording; every figure must come back unchanged or nothing is saved. A speaker of the language checks the new version before a reviewer approves it."}
       </Notice>
     </div>
   );

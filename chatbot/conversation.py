@@ -15,6 +15,31 @@ from climate_engine.products.bulletin import BulletinInputs
 
 LABELS = {"hybrid": "MBC + AI/ML", "mbc": "MBC", "raw": "Raw ECMWF"}
 
+
+def place_name(country: str, short: bool = False) -> str:
+    """A place as an answer names it: the region, never its code."""
+    if country != "GHA":
+        return country
+    return "the region" if short else "the region (ICPAC's 11 member states)"
+
+
+_NOT_EXPECTED = re.compile(r"^(Heavy|Moderate) rainfall \(([^)]+)\) not expected over (.+?)\.?$")
+
+
+def condensed(statements: list[str]) -> list[str]:
+    """The bulletin's rainfall statements, what is expected first; the classes not expected
+    anywhere said once ("Neither heavy (above 200 mm) nor moderate (50-200 mm) rainfall...")."""
+    absent = [m for s in statements if (m := _NOT_EXPECTED.match(s.strip()))]
+    expected = [s for s in statements if not _NOT_EXPECTED.match(s.strip())]
+    if len(absent) == 2 and absent[0][3] == absent[1][3]:
+        heavy, moderate = absent
+        return expected + [
+            f"Neither {heavy[1].lower()} ({heavy[2]}) nor {moderate[1].lower()} ({moderate[2]}) "
+            f"rainfall is expected over {heavy[3]}."
+        ]
+    return expected + [m[0] for m in absent]
+
+
 DEFINITIONS = {
     "rainfall": "The country mean averages rainfall across the country's covered grid cells. Local amounts can be higher or lower, so use the map to understand where rainfall is concentrated.",
     "rmse": "RMSE describes the typical size of forecast errors and gives larger errors more weight. Lower values indicate a closer match to observations over the same verified case.",
@@ -323,23 +348,23 @@ class OperationalConversation:
                     )
                     variant = primary
                 context["variant"] = variant
-                sentences["scope"] = f"We're looking at {country} for {period}."
+                sentences["scope"] = f"We're looking at {place_name(country)} for {period}."
                 if detail["synthetic"]:
                     sentences["input"] = (
                         "This package uses synthetic test inputs, so these values are not a forecast of real weather."
                     )
-                sentences["model_status"] = (
-                    f"The forecast comes from {(detail.get('model') or {}).get('model_name') or 'the registered model'}"
-                    f" ({detail['model_status']})."
-                    + (
-                        " A named reviewer approved it for operational use; it is not yet in"
-                        " production, which needs an independent test on data it has never seen."
-                        if detail["model_status"] == "candidate"
-                        else " It has not been approved for operational use."
-                        if detail["model_status"] != "production"
-                        else ""
+                if intent == "model":
+                    sentences["model_status"] = (
+                        f"The forecast comes from {(detail.get('model') or {}).get('model_name') or 'the registered model'}."
+                        + (
+                            " A named reviewer approved it for operational use; it is not yet in"
+                            " production, which needs an independent test on data it has never seen."
+                            if detail["model_status"] == "candidate"
+                            else " It has not been approved for operational use."
+                            if detail["model_status"] != "production"
+                            else ""
+                        )
                     )
-                )
                 rows = detail["countries"]
                 row = next((r for r in rows if r["country"] == country), None)
                 mean = (
@@ -452,12 +477,14 @@ class OperationalConversation:
                 else:
                     context["topic"] = "rainfall"
                     sentences["rainfall"] = (
-                        f"{label} gives mean Week-2 rainfall of {mean:.2f} mm over {country}. This is an area mean; local amounts vary."
+                        f"{label} gives mean Week-2 rainfall of {mean:.2f} mm over {place_name(country, short=True)}. This is an area mean; local amounts vary."
                         if mean is not None
                         else f"Rainfall statistics for {country} are unavailable in this package."
                     )
                     # Where the rain falls, in the bulletin's classes and words.
-                    for index, statement in enumerate(self._statements(fid, variant, country)):
+                    for index, statement in enumerate(
+                        condensed(self._statements(fid, variant, country))
+                    ):
                         sentences[f"class_{index}"] = statement
                     ranked = sorted(
                         (r for r in rows if (r.get(variant) or {}).get("mean_mm") is not None),
@@ -480,6 +507,8 @@ class OperationalConversation:
                         sentences["rank"] = (
                             f"The wettest member state is {wet['country']} ({wet[variant]['mean_mm']:.1f} mm on average) and the driest {dry['country']} ({dry[variant]['mean_mm']:.1f} mm)."
                         )
+                    if "rank" in sentences:  # the main message first, then the details
+                        sentences = {"rank": sentences.pop("rank"), **sentences}
                     if intent == "map":
                         url = detail["maps"][variant]
                         if country != "GHA":

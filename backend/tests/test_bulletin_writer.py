@@ -1,0 +1,110 @@
+"""The AI service writes the weekly bulletin's wording from the forecast, every figure checked."""
+
+import json
+import time
+from types import SimpleNamespace
+
+from backend.tests.test_bulletin_editing import draft, section
+from backend.tests.test_forecasts import env as env  # noqa: F401
+from backend.tests.test_forecasts import fast_maps as fast_maps  # noqa: F401
+from chatbot import agent
+
+
+class Writer:
+    """An AI service that writes each section as a forecaster would, keeping the computed
+    figures; ``invent`` adds a figure the forecast does not hold, ``once`` only the first time."""
+
+    label = "test"
+
+    def __init__(self, invent: bool = False, once: bool = False):
+        self.invent, self.once = invent, once
+        self.requests: list[tuple] = []
+
+    def respond(self, system, transcript, tools):
+        self.requests.append((system, transcript, tools))
+        text = transcript[-1]["text"]
+        payload = json.loads(text.split("Section: ", 1)[1].split("\n\nForecast facts: ", 1)[0])
+        paragraphs = [
+            "Rainfall is expected to stay concentrated over the wetter parts of the region. " + p
+            for p in payload["computed_paragraphs"]
+        ]
+        if self.invent and not (self.once and len(self.requests) > 1):
+            paragraphs[0] += " Isolated totals near 987 mm are possible."
+        body = {"key": payload["key"], "paragraphs": paragraphs}
+        if payload.get("why"):
+            body["why"] = "This country gets the region's main focus this week. " + payload["why"]
+        return SimpleNamespace(text=json.dumps(body), calls=[], raw=None)
+
+
+def follow(env, job_id):
+    for _ in range(150):
+        state = env.client.get(f"/bulletins/translations/{job_id}").json()
+        if state["status"] != "running":
+            return state
+        time.sleep(0.1)
+    raise AssertionError("the writing job did not finish")
+
+
+def test_the_ai_service_writes_the_draft_in_the_background(env, fast_maps, monkeypatch):
+    first = draft(env)
+    writer = Writer()
+    monkeypatch.setattr(agent, "chat_model", lambda: writer)
+    job = env.client.post(f"/bulletins/{first['id']}/translations", json={"language": "write"})
+    assert job.status_code == 200, job.text
+    state = follow(env, job.json()["id"])
+    assert state["status"] == "done", state
+    version = env.client.get(f"/bulletins/{state['version_id']}").json()
+    assert version["edited"]["with"] == "AI writer"
+    assert "language" not in version["edited"]  # still the English draft
+    headline = section(version, "headline")["text"][0]
+    assert headline.startswith("Rainfall is expected to stay concentrated")
+    # The same number of paragraphs, so the Word layout and its maps stay in place.
+    for key in ("headline", "rainfall"):
+        assert len(section(version, key)["text"]) == len(section(first, key)["text"])
+    assert version["document_checksum"] != first["document_checksum"]
+    assert all(tools == [] for _, _, tools in writer.requests)  # plain requests, no tools
+    # Each section was asked for on its own, with the forecast's facts.
+    assert all("Forecast facts: " in t[-1]["text"] for _, t, _ in writer.requests)
+
+
+def test_a_written_figure_the_forecast_lacks_is_never_saved(env, fast_maps, monkeypatch):
+    first = draft(env)
+    monkeypatch.setattr(agent, "chat_model", lambda: Writer(invent=True))
+    refused = env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "write"})
+    assert refused.status_code == 422
+    assert "987" in refused.json()["detail"] and "computed draft stands" in refused.json()["detail"]
+    # Told what was wrong, the service fixes it on the second try.
+    fixed = Writer(invent=True, once=True)
+    monkeypatch.setattr(agent, "chat_model", lambda: fixed)
+    made = env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "write"})
+    assert made.status_code == 200, made.text
+    assert "987" not in json.dumps(made.json()["facts"]["sections"])
+    assert "was refused: figures not in the forecast: 987" in fixed.requests[1][1][-1]["text"]
+
+
+def test_a_translated_draft_is_not_rewritten(env, fast_maps, monkeypatch):
+    from backend.tests.test_bulletin_editing import Translator
+
+    first = draft(env)
+    monkeypatch.setattr(agent, "chat_model", lambda: Translator())
+    swahili = env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "sw"})
+    response = env.client.post(
+        f"/bulletins/{swahili.json()['id']}/translations", json={"language": "write"}
+    )
+    assert response.status_code == 422 and "translate it afterwards" in response.json()["detail"]
+
+
+def test_the_weekly_cycle_has_the_draft_written_when_an_ai_service_is_set_up(
+    env, fast_maps, monkeypatch
+):
+    from backend.app.services.bulletins import BulletinService
+
+    first = draft(env)
+    service = BulletinService(env.platform)
+    assert service.start_ai_writing(first, "Joe N") is None  # no AI service in the tests
+    monkeypatch.setattr(agent, "chat_model", lambda: Writer())
+    monkeypatch.setenv("BULLETIN_AI_WRITER", "off")
+    assert service.start_ai_writing(first, "Joe N") is None
+    monkeypatch.delenv("BULLETIN_AI_WRITER")
+    job = service.start_ai_writing(first, "Joe N")
+    assert job is not None and follow(env, job["id"])["status"] == "done"

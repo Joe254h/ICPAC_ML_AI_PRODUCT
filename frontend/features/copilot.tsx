@@ -67,6 +67,8 @@ const SUGGESTIONS = [
   "Explain the forecast for Kenya.",
   "Show this week's bulletin.",
   "How does El Niño affect the October–December rains?",
+  "Where is heavy rain expected this week?",
+  "What does this week's rain mean for farmers?",
 ];
 const BULLETIN_STATUS: Record<ChatBulletin["status"], string> = {
   draft: "Draft",
@@ -247,25 +249,51 @@ function Sources({ sources }: { sources: Source[] }) {
   );
 }
 
-/** What an answer rests on, in words: the service's data, or general background. */
+/** Who wrote an answer: the AI assistant, or the checked fixed sentences. */
+function answerSource(message: ChatMessage): string | null {
+  if (message.fallback || message.provider === "fixed")
+    return "Checked forecast figures";
+  if (message.provider) return "Written by the AI assistant";
+  return null;
+}
+
+/** What an answer rests on, in words: the service's data, or general background; who
+ * wrote it; and, for a forecast answer, the map of the same week. */
 function AnswerBasis({ message }: { message: ChatMessage }) {
   const basis = message.evidence ?? [];
+  const source = answerSource(message);
+  const week = message.context?.forecast_id;
+  const map =
+    message.kind === "forecast" &&
+    week &&
+    !(message.links ?? []).some((link) => link.url.includes("/maps"))
+      ? `/maps/rainfall?id=${encodeURIComponent(week)}`
+      : null;
   if (message.kind === "general")
     return (
       <div className="chat-basis">
         <span className="basis-chip general">General background</span>
-        <span className="basis-note">Not from this week&apos;s forecast</span>
+        <span className="basis-note">
+          Not from this week&apos;s forecast
+          {source ? ` · ${source}` : ""}
+        </span>
       </div>
     );
-  if (!basis.length) return null;
+  if (!basis.length && !source) return null;
   return (
     <div className="chat-basis">
-      <span className="basis-note">Based on</span>
+      {!!basis.length && <span className="basis-note">Based on</span>}
       {basis.map((item) => (
         <span key={item} className="basis-chip">
           {item}
         </span>
       ))}
+      {source && <span className="basis-note">· {source}</span>}
+      {map && (
+        <Link href={map} className="link-amber basis-map">
+          Open on map →
+        </Link>
+      )}
     </div>
   );
 }
@@ -291,6 +319,8 @@ function Message({
   editable?: boolean;
 }) {
   const user = message.role === "user";
+  // Why the AI service failed is for the staff who can fix it, not for every visitor.
+  const staff = useStaff().staff;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.text);
   const [copied, setCopied] = useState(false);
@@ -469,12 +499,14 @@ function Message({
         )}
         {message.fallback && (
           <p className="chat-fallback">
-            AI assistant unavailable (
-            {(message.fallback_reason ?? "no response").replace(/\.$/, "")}
-            ):{" "}
+            The AI assistant is offline right now
+            {staff
+              ? ` (${(message.fallback_reason ?? "no response").replace(/\.$/, "")})`
+              : ""}
+            :{" "}
             {message.kind === "document"
-              ? "shown as read"
-              : "forecast data only"}
+              ? "the file is shown as read"
+              : "these are the checked forecast figures"}
             {language ? ", in English" : ""}.
           </p>
         )}
@@ -550,7 +582,8 @@ export default function Copilot() {
   const latest = useApi<ForecastDetail>("/forecasts/latest");
   // In staff mode the Copilot answers signed-in staff only: before signing in there is
   // nothing to restore and nothing to retry, only a way to sign in.
-  const signInNeeded = useStaff().needsSignIn;
+  const access = useStaff();
+  const signInNeeded = access.needsSignIn;
 
   const adopt = (data: ChatSession) => {
     setSession(data.id);
@@ -1148,22 +1181,26 @@ export default function Copilot() {
                   ))}
                 </select>
               </label>
-              <label className="context-select context-layer">
-                <span>Layer</span>
-                <select
-                  aria-label="Conversation rainfall method"
-                  value={variant}
-                  disabled={locked}
-                  onChange={(e) => setVariant(e.target.value as Variant | "")}
-                >
-                  <option value="">Issued forecast</option>
-                  {layers.map((layer) => (
-                    <option key={layer} value={layer}>
-                      {LAYER_TEXT[layer].title}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {/* Raw ECMWF and MBC are for forecasters comparing versions; visitors get
+                  the issued forecast. */}
+              {access.staff && (
+                <label className="context-select context-layer">
+                  <span>Layer</span>
+                  <select
+                    aria-label="Conversation rainfall method"
+                    value={variant}
+                    disabled={locked}
+                    onChange={(e) => setVariant(e.target.value as Variant | "")}
+                  >
+                    <option value="">Issued forecast</option>
+                    {layers.map((layer) => (
+                      <option key={layer} value={layer}>
+                        {LAYER_TEXT[layer].title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label className="context-select context-language">
                 <span>Language</span>
                 <select
@@ -1529,6 +1566,11 @@ export default function Copilot() {
                 <ArrowUp size={18} />
               </button>
             </form>
+            <p className="chat-disclaimer">
+              Guidance from ICPAC&apos;s Week-2 forecast, not an official
+              warning. For warnings, follow your national meteorological
+              service.
+            </p>
           </section>
           {historyOpen && (
             <button

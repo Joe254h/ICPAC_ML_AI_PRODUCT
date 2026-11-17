@@ -359,6 +359,15 @@ function Detail({
             it.
           </Notice>
         )}
+        {draft.edited?.with === "AI writer" && (
+          <Notice title="Written by the AI service.">
+            The wording was written from this week&apos;s forecast; every figure
+            is the forecast&apos;s. A forecaster checks it before review.
+          </Notice>
+        )}
+        {editable && !editing && !draft.edited?.language && (
+          <TranslateDraft draft={draft} onDone={onVersion} write />
+        )}
         {editable && !editing && (
           <TranslateDraft draft={draft} onDone={onVersion} />
         )}
