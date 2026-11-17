@@ -199,3 +199,24 @@ def test_each_section_is_written_knowing_the_earlier_ones(env, fast_maps, monkey
     assert "Already written in the earlier sections" not in prompts[0]
     assert all("Already written in the earlier sections" in p for p in prompts[1:])
     assert "no fire, drought or heat warnings" in prompts[0]
+
+
+def test_an_unreadable_translation_is_asked_for_once_more(env, fast_maps, monkeypatch, caplog):
+    """A model that first answers with prose and no JSON is told what to send; its second,
+    readable answer is used, and the unreadable one is logged for diagnosis."""
+    from backend.tests.test_bulletin_editing import Translator
+
+    class Wordy(Translator):
+        def respond(self, system, transcript, tools):
+            if len(transcript) == 1:  # the first try at each section
+                self.requests.append((system, transcript, tools))
+                return SimpleNamespace(text="Voici la traduction demandée, sans JSON.", calls=[])
+            return super().respond(system, transcript[:1], tools)
+
+    first = draft(env)
+    wordy = Wordy()
+    monkeypatch.setattr(agent, "chat_model", lambda: wordy)
+    made = env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "fr"})
+    assert made.status_code == 200, made.text
+    assert made.json()["edited"]["language"] == "French"
+    assert "Unreadable translation" in caplog.text and "sans JSON" in caplog.text

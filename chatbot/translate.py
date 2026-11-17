@@ -13,12 +13,21 @@ note keep their English labels until the translated templates exist
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
 from chatbot import agent
+
+log = logging.getLogger(__name__)
+
+RETRY = (
+    "That reply could not be read as JSON. Answer again with the JSON array only, no other "
+    'text and no code fence: [{"key": ..., "title": ..., "paragraphs": [...], "why": ...}] '
+    "with the same key and the same number of paragraphs."
+)
 
 NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 SYSTEM = (
@@ -150,16 +159,35 @@ def translate(
     for done, section in enumerate(source):
         if progress:
             progress(done, len(source))
-        prompt = [{"role": "user", "text": request_text([section], language)}]
-        try:
-            reply = model.respond(SYSTEM, prompt, [])
-        except Exception as exc:  # the service's failure, said in words; nothing is saved
-            from chatbot.service import plain_reason
+        prompt: list[dict[str, Any]] = [{"role": "user", "text": request_text([section], language)}]
+        for attempt in range(2):
+            try:
+                reply = model.respond(SYSTEM, prompt, [])
+            except Exception as exc:  # the service's failure, said in words; nothing is saved
+                from chatbot.service import plain_reason
 
-            raise TranslationRefused(
-                f"The translation stopped at “{section['title']}”: {plain_reason(exc)}. "
-                "Nothing was saved; try again."
-            ) from exc
-        translated.extend(parse(reply.text))
+                raise TranslationRefused(
+                    f"The translation stopped at “{section['title']}”: {plain_reason(exc)}. "
+                    "Nothing was saved; try again."
+                ) from exc
+            try:
+                translated.extend(parse(reply.text))
+                break
+            except TranslationRefused:
+                # What the model sent, for the logs: an unreadable reply is otherwise a guess.
+                log.warning(
+                    "Unreadable translation of %s into %s (attempt %d): %r",
+                    section["key"],
+                    language,
+                    attempt + 1,
+                    (reply.text or "")[:400],
+                )
+                if attempt:
+                    raise
+                # Once more, saying exactly what came back wrong and what is wanted.
+                prompt = prompt + [
+                    {"role": "assistant", "text": reply.text or ""},
+                    {"role": "user", "text": RETRY},
+                ]
     check(source, translated)
     return translated
