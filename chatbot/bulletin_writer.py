@@ -7,7 +7,8 @@ statements and the country focus) as an ICPAC forecaster would: climate language
 rain falls and why it matters, in the plain bulletin voice. One section per request, so a
 slow AI service answers each in time. A section is kept only when it has the same number of
 paragraphs (the Word layout and its maps stay in place), every number in it is a figure of
-the forecast, and it passes the tone check; a section that fails is asked for once more with
+the forecast, it is no more than about a third longer than the computed one, and it passes
+the tone check; a section that fails is asked for once more with
 the problems named, and then the whole rewrite is refused and the computed draft stands.
 """
 
@@ -30,6 +31,16 @@ SYSTEM = (
 
 #: Every section the writer rewrites; added notes and computed tables are left as they are.
 WRITTEN = ("headline", "decision_support", "rainfall", "focus")
+#: A written paragraph keeps the bulletin's length: at most this share longer than the
+#: computed one, or a few words for a short line.
+LONGER_BY = 1.3
+SHORT_LINE_WORDS = 12
+
+
+def word_limit(computed: str) -> int:
+    """The most words a rewritten paragraph may have."""
+    words = len(computed.split())
+    return max(round(words * LONGER_BY), words + SHORT_LINE_WORDS)
 
 
 class WritingRefused(ValueError):
@@ -64,7 +75,9 @@ def request_text(section: dict[str, Any], facts: dict[str, Any], problems: str =
         "- Speak of likely and expected rainfall, never of certainty. The forecast has no "
         "climatology: never say above or below normal, wetter or drier than usual.\n"
         f"- Exactly {count} paragraph(s), in the same order and with the same purpose as the "
-        "computed ones; each a few plain sentences.\n"
+        "computed ones. Keep the bulletin's length: paragraph by paragraph at most "
+        + ", ".join(str(word_limit(p)) for p in section.get("text") or [])
+        + " words. Say it in fewer words rather than more.\n"
         "- Use only figures that appear in the computed paragraphs or the facts below, "
         "written the same way (mm amounts, ranges, dates). Add no other number.\n"
         + (
@@ -101,10 +114,19 @@ def problems(section: dict[str, Any], written: dict[str, Any], known: list[float
     count = len(section.get("text") or [])
     if not isinstance(paragraphs, list) or len(paragraphs) != count:
         return [f"write exactly {count} paragraph(s)"]
-    texts = [tidy(str(p)) for p in paragraphs]
-    if section.get("why"):
-        texts.append(tidy(str(written.get("why") or "")))
     found: list[str] = []
+    texts = [tidy(str(p)) for p in paragraphs]
+    for index, (computed, text) in enumerate(zip(section["text"], texts, strict=True), 1):
+        limit = word_limit(computed)
+        if len(text.split()) > limit:
+            found.append(
+                f"paragraph {index} is too long ({len(text.split())} words, at most {limit})"
+            )
+    if section.get("why"):
+        why = tidy(str(written.get("why") or ""))
+        if len(why.split()) > word_limit(section["why"]):
+            found.append(f"'why' is too long (at most {word_limit(section['why'])} words)")
+        texts.append(why)
     for text in texts:
         if not text.strip():
             found.append("a paragraph is empty")

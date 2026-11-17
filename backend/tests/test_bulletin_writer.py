@@ -16,8 +16,8 @@ class Writer:
 
     label = "test"
 
-    def __init__(self, invent: bool = False, once: bool = False):
-        self.invent, self.once = invent, once
+    def __init__(self, invent: bool = False, once: bool = False, ramble: bool = False):
+        self.invent, self.once, self.ramble = invent, once, ramble
         self.requests: list[tuple] = []
 
     def respond(self, system, transcript, tools):
@@ -25,11 +25,13 @@ class Writer:
         text = transcript[-1]["text"]
         payload = json.loads(text.split("Section: ", 1)[1].split("\n\nForecast facts: ", 1)[0])
         paragraphs = [
-            "Rainfall is expected to stay concentrated over the wetter parts of the region. " + p
+            "Rain stays heaviest over the wetter parts. " + p
             for p in payload["computed_paragraphs"]
         ]
         if self.invent and not (self.once and len(self.requests) > 1):
             paragraphs[0] += " Isolated totals near 987 mm are possible."
+        if self.ramble and len(self.requests) == 1:
+            paragraphs[0] += " The pattern holds through the week across the area." * 12
         body = {"key": payload["key"], "paragraphs": paragraphs}
         if payload.get("why"):
             body["why"] = "This country gets the region's main focus this week. " + payload["why"]
@@ -57,7 +59,7 @@ def test_the_ai_service_writes_the_draft_in_the_background(env, fast_maps, monke
     assert version["edited"]["with"] == "AI writer"
     assert "language" not in version["edited"]  # still the English draft
     headline = section(version, "headline")["text"][0]
-    assert headline.startswith("Rainfall is expected to stay concentrated")
+    assert headline.startswith("Rain stays heaviest over the wetter parts.")
     # The same number of paragraphs, so the Word layout and its maps stay in place.
     for key in ("headline", "rainfall"):
         assert len(section(version, key)["text"]) == len(section(first, key)["text"])
@@ -79,7 +81,7 @@ def test_a_written_figure_the_forecast_lacks_is_never_saved(env, fast_maps, monk
     made = env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "write"})
     assert made.status_code == 200, made.text
     assert "987" not in json.dumps(made.json()["facts"]["sections"])
-    assert "was refused: figures not in the forecast: 987" in fixed.requests[1][1][-1]["text"]
+    assert "figures not in the forecast: 987" in fixed.requests[1][1][-1]["text"]
 
 
 def test_a_translated_draft_is_not_rewritten(env, fast_maps, monkeypatch):
@@ -108,3 +110,21 @@ def test_the_weekly_cycle_has_the_draft_written_when_an_ai_service_is_set_up(
     monkeypatch.delenv("BULLETIN_AI_WRITER")
     job = service.start_ai_writing(first, "Joe N")
     assert job is not None and follow(env, job["id"])["status"] == "done"
+
+
+def test_the_bulletin_keeps_its_length(env, fast_maps, monkeypatch):
+    """A rewrite far longer than the computed paragraph is asked for again, shorter."""
+    from chatbot.bulletin_writer import word_limit
+
+    first = draft(env)
+    writer = Writer(ramble=True)
+    monkeypatch.setattr(agent, "chat_model", lambda: writer)
+    made = env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "write"})
+    assert made.status_code == 200, made.text
+    assert "is too long" in writer.requests[1][1][-1]["text"]
+    assert "at most" in writer.requests[0][1][-1]["text"]  # the limit is asked for up front
+    for key in ("headline", "decision_support", "rainfall"):
+        for computed, written in zip(
+            section(first, key)["text"], section(made.json(), key)["text"], strict=True
+        ):
+            assert len(written.split()) <= word_limit(computed)
