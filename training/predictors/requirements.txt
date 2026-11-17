@@ -1,0 +1,19 @@
+# pip install -r requirements.txt  (the ecCodes C library must already be installed, e.g.
+# "module load eccodes" on the HPC; conda users take environment.yml instead)
+numpy>=1.26
+pandas>=2.1
+xarray>=2024.1
+dask
+netCDF4
+cfgrib>=0.9.11
+eccodes>=1.7
+scipy
+pyshp
+matplotlib
+pyyaml
+pytest
+ecmwf-api-client
+ecmwf-opendata
+cdsapi>=0.7
+earthaccess
+# windspharm needs pyspharm (Fortran); easiest through conda: conda install -c conda-forge windspharm

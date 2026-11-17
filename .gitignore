@@ -28,3 +28,6 @@ observations/*
 forecasts/*
 !forecasts/README.md
 catboost_info/
+
+# Built archives (the HPC predictor kit zip)
+dist/
