@@ -15,7 +15,6 @@ the problems named, and then the whole rewrite is refused and the computed draft
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable
 from typing import Any
 
@@ -96,16 +95,15 @@ def request_text(section: dict[str, Any], facts: dict[str, Any], problems: str =
 
 
 def parse(reply: str) -> dict[str, Any]:
-    match = re.search(r"\{.*\}", reply, re.S)
-    if not match:
-        raise WritingRefused("The AI service did not return the section")
-    try:
-        data = json.loads(match.group(0))
-    except ValueError as exc:
-        raise WritingRefused("The AI service returned an unreadable section") from exc
-    if not isinstance(data, dict):
-        raise WritingRefused("The AI service returned an unreadable section")
-    return data
+    """The written section: an object with its paragraphs (or a list holding one)."""
+    from chatbot.translate import json_values
+
+    for value in json_values(reply):
+        if isinstance(value, list) and len(value) == 1:
+            value = value[0]
+        if isinstance(value, dict) and isinstance(value.get("paragraphs"), list):
+            return value
+    raise WritingRefused("The AI service returned an unreadable section")
 
 
 def problems(section: dict[str, Any], written: dict[str, Any], known: list[float]) -> list[str]:

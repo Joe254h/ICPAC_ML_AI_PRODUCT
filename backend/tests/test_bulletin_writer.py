@@ -128,3 +128,35 @@ def test_the_bulletin_keeps_its_length(env, fast_maps, monkeypatch):
             section(first, key)["text"], section(made.json(), key)["text"], strict=True
         ):
             assert len(written.split()) <= word_limit(computed)
+
+
+def test_replies_with_prose_fences_or_one_object_are_read():
+    """The live translation failed as "unreadable": a model writes a sentence before the
+    JSON, fences it, keeps a line break inside a string, or returns the one section as an
+    object. Each is read; a reply with no JSON is still refused."""
+    import pytest
+
+    from chatbot import bulletin_writer
+    from chatbot.translate import TranslationRefused, parse
+
+    fenced = (
+        'Here is the translation:\n```json\n[{"key": "headline", "title": "T", '
+        '"paragraphs": ["Mvua [nyepesi] ya 10 mm\nkote"]}]\n```'
+    )
+    assert parse(fenced)[0]["paragraphs"] == ["Mvua [nyepesi] ya 10 mm\nkote"]
+    assert parse('{"key": "headline", "paragraphs": ["a"]}')[0]["key"] == "headline"
+    assert parse('Sure [note]: [{"key": "rainfall", "paragraphs": ["x"]}] done')[0]["key"] == (
+        "rainfall"
+    )
+    assert parse('{"sections": [{"key": "focus", "paragraphs": ["y"]}]}')[0]["key"] == "focus"
+    assert bulletin_writer.parse('Here: {"key": "headline", "paragraphs": ["R"]} ok')["key"] == (
+        "headline"
+    )
+    with pytest.raises(TranslationRefused):
+        parse("no json here")
+
+
+def test_the_copilot_is_told_what_the_calendar_seasons_are():
+    assert "long rains" in agent.SEASON_NAMES["MAM"]
+    assert "not the long rains" in agent.instructions()
+    assert "Kiremt" in agent.SEASON_NAMES["JJA"]

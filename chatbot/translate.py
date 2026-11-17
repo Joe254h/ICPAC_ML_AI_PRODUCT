@@ -65,17 +65,49 @@ def request_text(sections: list[dict[str, Any]], language: str) -> str:
     )
 
 
+_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S | re.I)
+
+
+def json_values(reply: str) -> list[Any]:
+    """Every JSON value an AI service's reply holds, in order: the reply itself, the inside
+    of a ```json fence, or a value inside prose. Models add a sentence before the JSON, fence
+    it, or leave a line break inside a string; none of that should lose a good answer."""
+    decoder = json.JSONDecoder(strict=False)  # raw line breaks inside strings
+    candidates = [reply.strip(), *(m.strip() for m in _FENCE.findall(reply))]
+    values: list[Any] = []
+    for text in candidates:
+        try:
+            values.append(decoder.decode(text))
+            continue
+        except ValueError:
+            pass
+        position = 0
+        while (start := next((i for i in range(position, len(text)) if text[i] in "[{"), -1)) >= 0:
+            try:
+                value, end = decoder.raw_decode(text, start)
+            except ValueError:
+                position = start + 1
+                continue
+            values.append(value)
+            position = end
+    return values
+
+
 def parse(reply: str) -> list[dict[str, Any]]:
-    match = re.search(r"\[.*\]", reply, re.S)
-    if not match:
-        raise TranslationRefused("The AI service did not return a translation")
-    try:
-        data = json.loads(match.group(0))
-    except ValueError as exc:
-        raise TranslationRefused("The AI service returned an unreadable translation") from exc
-    if not isinstance(data, list):
-        raise TranslationRefused("The AI service returned an unreadable translation")
-    return data
+    """The translated sections: a list of them, a {"sections": [...]} object, or the one
+    section asked for as an object."""
+    for value in json_values(reply):
+        if isinstance(value, dict) and isinstance(value.get("sections"), list):
+            value = value["sections"]
+        if isinstance(value, dict) and "key" in value:
+            value = [value]
+        if isinstance(value, list) and value and all(isinstance(v, dict) for v in value):
+            return value
+    raise TranslationRefused(
+        "The AI service returned an unreadable translation"
+        if reply.strip()
+        else "The AI service did not return a translation"
+    )
 
 
 def check(source: list[dict[str, Any]], translated: list[dict[str, Any]]) -> None:
