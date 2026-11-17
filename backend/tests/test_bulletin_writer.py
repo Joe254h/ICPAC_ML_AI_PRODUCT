@@ -1,6 +1,7 @@
 """The AI service writes the weekly bulletin's wording from the forecast, every figure checked."""
 
 import json
+import re
 import time
 from types import SimpleNamespace
 
@@ -23,7 +24,8 @@ class Writer:
     def respond(self, system, transcript, tools):
         self.requests.append((system, transcript, tools))
         text = transcript[-1]["text"]
-        payload = json.loads(text.split("Section: ", 1)[1].split("\n\nForecast facts: ", 1)[0])
+        section = text.split("Section: ", 1)[1]
+        payload = json.loads(re.split(r"\n\n(?:Already written|Forecast facts)", section)[0])
         paragraphs = [
             "Rain stays heaviest over the wetter parts. " + p
             for p in payload["computed_paragraphs"]
@@ -160,3 +162,40 @@ def test_the_copilot_is_told_what_the_calendar_seasons_are():
     assert "long rains" in agent.SEASON_NAMES["MAM"]
     assert "not the long rains" in agent.instructions()
     assert "Kiremt" in agent.SEASON_NAMES["JJA"]
+
+
+def test_a_count_in_words_and_odd_hyphens_are_handled():
+    """Live, the AI wrote "the largest share among the five member states" (it is 11):
+    a count in words the computed text does not give is refused. Its non-breaking hyphens
+    ("50‑200 mm") become plain ones."""
+    from chatbot.bulletin_writer import problems
+    from chatbot.tone import tidy
+
+    section = {
+        "key": "focus",
+        "title": "Country Focus: Kenya",
+        "text": ["Moderate rainfall over 38% of Kenya, eight to fourteen days ahead."],
+        "why": "Kenya is the focus: 38% of its area, the largest share of the 11 member states.",
+    }
+    written = {
+        "paragraphs": ["Moderate rain over 38% of Kenya, eight to fourteen days ahead."],
+        "why": "Kenya is the focus: 38% of its area, the largest share among the five states.",
+    }
+    assert problems(section, written, [38.0, 11.0]) == [
+        "numbers in words the forecast does not give: five"
+    ]
+    assert tidy("about 50‑200 mm") == "about 50-200 mm"
+
+
+def test_each_section_is_written_knowing_the_earlier_ones(env, fast_maps, monkeypatch):
+    """Sections are asked for one by one; each request carries what the earlier sections
+    already say, so the season or the advice is not repeated in every section."""
+    first = draft(env)
+    writer = Writer()
+    monkeypatch.setattr(agent, "chat_model", lambda: writer)
+    made = env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "write"})
+    assert made.status_code == 200, made.text
+    prompts = [t[-1]["text"] for _, t, _ in writer.requests]
+    assert "Already written in the earlier sections" not in prompts[0]
+    assert all("Already written in the earlier sections" in p for p in prompts[1:])
+    assert "no fire, drought or heat warnings" in prompts[0]

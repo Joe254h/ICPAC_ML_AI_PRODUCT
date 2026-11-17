@@ -109,6 +109,8 @@ def tidy(text: str) -> str:
     """The mechanical fixes: straight quotes, no markdown emphasis or list markers, single
     spaces."""
     text = text.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+    # Non-breaking and other look-alike hyphens (models write "50\u2011200 mm"): a plain one.
+    text = re.sub("[\u2010\u2011\u2012\u00ad]", "-", text)
     text = re.sub(r"\*\*|__", "", text)
     text = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s+", "", text)
     return re.sub(r"\s+", " ", text).strip()
