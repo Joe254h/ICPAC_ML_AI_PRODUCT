@@ -950,6 +950,17 @@ class OperationService:
             self._log(operation_id, "The forecast's open bulletin draft is kept")
         else:
             try:
+                writing = BulletinService(self.platform).start_ai_writing(draft, body.actor)
+            except Exception as exc:  # the computed draft stands
+                writing = None
+                self._log(operation_id, f"The AI service could not write the draft: {_plain(exc)}")
+            if writing:
+                self._log(
+                    operation_id,
+                    "The AI service is writing the draft's wording from the forecast; it is "
+                    "saved as a new version when every figure checks",
+                )
+            try:
                 sent = bulletin_mail.notify(self.platform, draft)
             except Exception as exc:
                 sent = {"sent": [], "skipped": f"the email could not be sent ({_plain(exc)})"}

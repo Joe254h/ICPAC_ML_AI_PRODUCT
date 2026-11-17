@@ -204,7 +204,7 @@ def test_llm_gets_conversation_history_with_fresh_approved_facts(env, fast_maps,
     assert calls[1]["answer_ids"] == ["Somalia_mbc", "Somalia_hybrid"]
     assert second["context"]["comparison_methods"] == ["mbc", "hybrid"]
     assert "Somalia" in calls[1]["answer_sentences"]["Somalia_hybrid"]
-    assert set(calls[1]["always_shown"]) == {"scope", "model_status", "comparison_scope"}
+    assert set(calls[1]["always_shown"]) == {"scope", "comparison_scope"}
     # A question with one possible answer needs no model call.
     third = ask(env, "Explain the forecast for Kenya", first["session_id"])
     assert third["provider"] == "deterministic" and len(calls) == 2

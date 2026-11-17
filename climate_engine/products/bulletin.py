@@ -63,6 +63,10 @@ FOCUS_MAPS = "171EEC30"  # the reference's rainfall and temperature maps, side b
 FOCUS_LAST = "4C49DE8B"  # the focus's last rainfall bullet; the forecast note follows it
 # 5.5 x 3.2 inches at most, in the map's own shape: the focus section then shares a page
 FOCUS_MAP_MAX_EMU = (5029200, 2926080)
+# The regional map, square as in the reference but 4.4 inches (not 6.5): it then shares the
+# first page with the headline, the advice and the regional rainfall statements instead of
+# leaving half of that page empty.
+REGIONAL_MAP_EMU = (4023360, 4023360)
 #: The reference paragraphs each section fills, in reading order.
 SECTION_SLOTS: dict[str, list[str]] = {}
 for _paragraph, (_key, _index) in TEXT_SLOTS.items():
@@ -523,6 +527,7 @@ class WordTemplateGenerator(BulletinGenerator):
         document = omit_paragraphs(document, OMITTED)
         # Headings stay with what follows them; Somalia's heading, map and bullets together.
         document = keep_with_next(document, ["64DF6415", "23E25723", "5B525F15"])
+        document = keep_first_picture(document, RAINFALL_MAP, REGIONAL_MAP_EMU)
         focus = content.get("focus")
         focus_png = None
         if focus:

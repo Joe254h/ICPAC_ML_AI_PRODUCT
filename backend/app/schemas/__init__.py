@@ -237,7 +237,7 @@ class BulletinEditRequest(BaseModel):
 
 
 class BulletinTranslateRequest(BaseModel):
-    language: Literal["sw", "am", "so", "ar", "fr", "ti", "om", "rw", "rn", "lg"]
+    language: Literal["sw", "am", "so", "ar", "fr", "ti", "om", "rw", "rn", "lg", "write"]
     actor: str | None = Field(default=None, max_length=80)
 
 

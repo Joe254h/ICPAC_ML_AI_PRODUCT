@@ -135,6 +135,9 @@ def language_of(record: dict[str, Any]) -> str | None:
 
 #: Background translations of drafts, followed by the bulletin page.
 TRANSLATION_KIND = "bulletin_translation"
+#: The background job that has the AI service write a draft's wording, in English, from the
+#: forecast (a "translation" from the computed sentences into a forecaster's own words).
+WRITE = "write"
 
 
 class TranslationBusy(RuntimeError):
@@ -484,10 +487,14 @@ class BulletinService:
         from chatbot.agent import LANGUAGES
 
         base = self.repo.get("bulletin", identifier)
-        if language not in LANGUAGES or language == "en":
+        if language != WRITE and (language not in LANGUAGES or language == "en"):
             raise RevisionRefused("Choose a language other than English")
         if base.get("kind") != WEEKLY or base["status"] == "published":
             raise RevisionRefused("Translate a weekly draft before it is published")
+        if language == WRITE and language_of(base):
+            raise RevisionRefused(
+                "The AI service writes the English draft; translate it afterwards"
+            )
         with self.platform.translation_lock:
             key = (identifier, language)
             # The source version is immutable. A retry after a lost response reuses
@@ -589,6 +596,8 @@ class BulletinService:
         from chatbot.translate import TranslationRefused, editable
         from chatbot.translate import translate as translated_sections
 
+        if language == WRITE:
+            return self.write_with_ai(identifier, actor, model, progress)
         if language not in LANGUAGES or language == "en":
             raise RevisionRefused("Choose a language other than English")
         name = LANGUAGES[language]
@@ -630,6 +639,72 @@ class BulletinService:
             },
             base_id=identifier,
         )
+
+    def writer_facts(self, base: dict) -> tuple[dict[str, Any], list[float]]:
+        """What the AI service may write from, and every number it may use."""
+        from backend.app.services.forecasts import ForecastService
+        from chatbot.agent import number_facts
+
+        detail = ForecastService(self.platform).get(base["forecast_id"])
+        facts = {
+            "period": base["facts"].get("period"),
+            "issued_layer": detail.get("primary_layer"),
+            "interpretation": detail.get("interpretation"),
+            "countries": detail.get("countries"),
+            "computed_bulletin": weekly_text(base["facts"]),
+        }
+        return facts, number_facts(facts)
+
+    def write_with_ai(
+        self, identifier: str, actor: str, model: Any = None, progress: Any = None
+    ) -> dict:
+        """A new version of an English draft whose wording the AI service wrote from the
+        forecast, every figure checked; a forecaster checks it before a reviewer approves."""
+        from chatbot.bulletin_writer import WritingRefused, write
+
+        base = self.repo.get("bulletin", identifier)
+        if base.get("kind") != WEEKLY or base["status"] == "published":
+            raise RevisionRefused("Write a weekly draft before it is published")
+        if language_of(base):
+            raise RevisionRefused(
+                "The AI service writes the English draft; translate it afterwards"
+            )
+        facts, known = self.writer_facts(base)
+        try:
+            written = write(base["facts"]["sections"], facts, known, model, progress=progress)
+        except WritingRefused as exc:
+            raise RevisionRefused(str(exc)) from exc
+        changes = [
+            {
+                "section": entry["key"],
+                "paragraphs": entry["paragraphs"],
+                **({"why": entry["why"]} if entry.get("why") else {}),
+            }
+            for entry in written
+        ]
+        return self.revise(
+            base["forecast_id"],
+            changes,
+            [],
+            [],
+            actor,
+            {
+                "by": actor,
+                "with": "AI writer",
+                "summary": "Written by the AI service from the forecast; every figure is the "
+                "forecast's. A forecaster checks it before review.",
+            },
+            base_id=identifier,
+        )
+
+    def start_ai_writing(self, draft: dict, actor: str) -> dict | None:
+        """Have the AI service write a new draft's wording in the background, when one is set
+        up (BULLETIN_AI_WRITER=off switches it off); the computed draft stays meanwhile."""
+        from chatbot.agent import chat_model
+
+        if os.getenv("BULLETIN_AI_WRITER") == "off" or chat_model() is None:
+            return None
+        return self.start_translation(draft["id"], WRITE, actor)
 
     def transition(self, identifier: str, action: str, review: ReviewRequest) -> dict:
         if not review.confirmed or not review.comment.strip():
