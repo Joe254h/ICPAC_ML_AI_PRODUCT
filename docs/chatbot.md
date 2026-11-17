@@ -146,6 +146,23 @@ Allowed human transitions: draft → under_review → approved → published; un
 
 The Weekly forecast bulletin page uses the owner's retained Word reference and its section order, with a reading preview, the regional rainfall map, the country focus (the member state with the most distinctive outlook, and why) and a Word draft download. Bulletin drafts freeze that same bulletin for review. The template's page settings, header/footer, styles and picture positions are retained, and old forecast text/images are replaced. Products the service does not have (anomalies, temperature, heat stress) are left out; the original document is a layout reference, not current weather evidence. Rendered pages were checked against the reference with LibreOffice; check pagination in Word before release.
 
+**Written by the AI service.** With an AI service set up, **Write with AI** on a draft (and
+the weekly cycle, after it makes the draft; `BULLETIN_AI_WRITER=off` switches that off) has
+the AI rewrite the headline, the decision-support note, the regional rainfall statements and
+the country focus in a forecaster's words, from the forecast, one section per request in the
+background (`POST /bulletins/{id}/translations` with `"language": "write"`). A section is kept
+only with the same number of paragraphs (the Word layout and its maps stay in place), each
+no more than about a third longer than the computed one (the bulletin keeps its length), every
+number a figure of the forecast and the plain bulletin voice of `chatbot/tone.py`; a refused
+section is asked for once more with its problems named, otherwise the computed draft stands.
+Translate the new version as usual. The Word bulletin's regional map is 4.4 inches square so
+that it shares the first page with the headline and the rainfall statements.
+
+**Humanizing by hand.** The project skill `.claude/skills/bulletin-humanizer` rewrites
+bulletin wording to the forecaster's voice in a Claude Code session, and
+`python -m scripts.check_bulletin_tone rewrite.txt --against original.txt` applies the
+service's own tone rules and confirms no figure was dropped or added.
+
 Manual bulletin writes require the configured operator credential; personal email decisions
 require their signed, expiring, single-use token. See [manual access setup](deployment.md#manual-bulletin-access).
 Operator review names remain self-reported. Per-person role-based login and authenticated

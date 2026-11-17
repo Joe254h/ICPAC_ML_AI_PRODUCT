@@ -75,6 +75,23 @@ _PHRASES = (
     r"symbolizing|ensuring|contributing to|fostering)\b",
     r"\bnot only\b.*\bbut\b",
     r"^additionally\b",
+    # Essay connectives and summaries a forecaster does not write in a bulletin.
+    r"^(?:moreover|furthermore|overall|in summary|in conclusion|to summari[sz]e)\b",
+    r"\bit (?:should|must) be noted\b",
+    r"\bin light of\b",
+    r"\bnotably,",
+    # Weather-copy cliches: say what to do, with the forecast's own figures.
+    r"\b(?:remain|stay) vigilant\b",
+    r"\bbrace (?:for|themselves)\b",
+    r"\ba mix of\b",
+    r"\bpoised to\b",
+    r"\bmother nature\b",
+    r"\bweather (?:gods|woes)\b",
+    # Corporate words.
+    r"\bleverag(?:e|es|ed|ing)\b",
+    r"\bseamless(?:ly)?\b",
+    r"\bnavigat(?:e|es|ing) (?:the|these|this)\b",
+    r"\brobust\b",
 )
 _FLAGS = [
     (re.compile(rf"\b(?:{_WORDS})\b", re.I), "stock wording"),
@@ -92,9 +109,24 @@ def tidy(text: str) -> str:
     """The mechanical fixes: straight quotes, no markdown emphasis or list markers, single
     spaces."""
     text = text.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+    # Non-breaking and other look-alike hyphens (models write "50\u2011200 mm"): a plain one.
+    text = re.sub("[\u2010\u2011\u2012\u00ad]", "-", text)
     text = re.sub(r"\*\*|__", "", text)
     text = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s+", "", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
+
+
+def repeated_openings(text: str) -> str | None:
+    """The first word when three sentences in a row open with it ("Rainfall is... Rainfall
+    will... Rainfall may..."), a pattern people hear as machine-written."""
+    firsts = [s.split()[0].lower().strip(",") for s in _SENTENCE.split(text) if s.split()]
+    for i in range(len(firsts) - 2):
+        if firsts[i] == firsts[i + 1] == firsts[i + 2] and firsts[i] not in {"the", "a"}:
+            return firsts[i]
+    return None
 
 
 def tone_problems(text: str) -> list[str]:
@@ -107,4 +139,6 @@ def tone_problems(text: str) -> list[str]:
         problems.append("a dash used as punctuation")
     if _EMOJI.search(text):
         problems.append("an emoji")
+    if word := repeated_openings(text):
+        problems.append(f'three sentences in a row open with "{word}"')
     return problems

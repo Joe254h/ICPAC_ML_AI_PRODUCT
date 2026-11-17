@@ -45,6 +45,17 @@ from climate_engine.inputs import sources as data_sources
 from climate_engine.operational.grid import ICPAC_COUNTRIES
 
 LAYER_NAMES = {"raw": "Raw ECMWF", "mbc": "MBC", "hybrid": "MBC + AI/ML"}
+#: The calendar seasons verification is pooled by, and how they line up with the region's
+#: rainy seasons (the Copilot named JJA "the long rains" without this).
+SEASON_NAMES = {
+    "DJF": "December-February: the end of the October-December short rains in the "
+    "equatorial sector; the wet season in central and southern Tanzania",
+    "MAM": "March-May: the long rains (masika) in the equatorial sector",
+    "JJA": "June-August: the June-September Kiremt rains of Ethiopia's highlands and the "
+    "northern sector; mostly dry in the equatorial sector",
+    "SON": "September-November: the end of Kiremt in the north and the first two months of "
+    "the October-December short rains (vuli)",
+}
 RAINFALL_CLASSES_MM = [1, 10, 30, 50, 100, 200]
 MAX_ROUNDS = 6
 DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5"
@@ -91,6 +102,13 @@ Nino weakens the Walker circulation. The northern sector \
 rains) gets its main rains in June to September. Central and southern Tanzania have one \
 season, from about November to April. Do not present general knowledge as this week's ICPAC forecast, and do not give \
 general rainfall amounts in mm in an answer that also quotes the forecast.
+- Verification scores pooled by DJF, MAM, JJA and SON are calendar seasons: MAM is the \
+long rains, the short rains are October to December (they span SON and DJF), and JJA is \
+the northern sector's Kiremt, not the long rains. When the scores are mixed (better in \
+one season or layer, worse in another), say so; never call the AI/ML correction \
+consistently better unless every season shows it. Write figures as the tools give them, \
+without "about" or the sign for approximately, and do not compare two figures that are \
+the same as if one rose.
 - Rainfall totals are not anomalies: whether rain is above or below normal needs a \
 climatology, which the forecast does not include yet.
 - Write plain language for a forecaster or decision-maker: flowing short paragraphs, \
@@ -723,7 +741,11 @@ class ToolBox:
         return {
             "verified_forecasts": len(seasonal["forecasts"]),
             "seasons": seasons,
-            "note": "Cell-based scores pooled over the verified forecasts of each season."
+            "season_names": SEASON_NAMES,
+            "note": "Cell-based scores pooled over the verified forecasts of each season. "
+            "These are calendar seasons, not the rainy seasons: see season_names. Compare "
+            "the layers season by season and say plainly where MBC + AI/ML does worse than "
+            "MBC or raw ECMWF; do not call the correction consistently better when it is not."
             if seasons
             else "No forecast has been verified yet.",
         }

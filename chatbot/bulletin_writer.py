@@ -7,7 +7,8 @@ statements and the country focus) as an ICPAC forecaster would: climate language
 rain falls and why it matters, in the plain bulletin voice. One section per request, so a
 slow AI service answers each in time. A section is kept only when it has the same number of
 paragraphs (the Word layout and its maps stay in place), every number in it is a figure of
-the forecast, and it passes the tone check; a section that fails is asked for once more with
+the forecast, it is no more than about a third longer than the computed one, and it passes
+the tone check; a section that fails is asked for once more with
 the problems named, and then the whole rewrite is refused and the computed draft stands.
 """
 
@@ -30,6 +31,24 @@ SYSTEM = (
 
 #: Every section the writer rewrites; added notes and computed tables are left as they are.
 WRITTEN = ("headline", "decision_support", "rainfall", "focus")
+#: A written paragraph keeps the bulletin's length: at most this share longer than the
+#: computed one, or a few words for a short line.
+LONGER_BY = 1.3
+SHORT_LINE_WORDS = 12
+
+
+def word_limit(computed: str) -> int:
+    """The most words a rewritten paragraph may have."""
+    words = len(computed.split())
+    return max(round(words * LONGER_BY), words + SHORT_LINE_WORDS)
+
+
+#: Counts written out in words: the figure check reads digits, so a word like "five" could
+#: carry a wrong number past it ("the largest share among the five member states").
+NUMBER_WORDS = re.compile(
+    r"\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|"
+    r"fifteen|twenty|thirty|forty|fifty|hundred|thousand|dozen|half|quarter|third)\b"
+)
 
 
 class WritingRefused(ValueError):
@@ -40,7 +59,12 @@ def editable(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [s for s in sections if s["key"] in WRITTEN and not s.get("note")]
 
 
-def request_text(section: dict[str, Any], facts: dict[str, Any], problems: str = "") -> str:
+def request_text(
+    section: dict[str, Any],
+    facts: dict[str, Any],
+    problems: str = "",
+    earlier: list[str] | None = None,
+) -> str:
     count = len(section.get("text") or [])
     payload = {
         "key": section["key"],
@@ -60,11 +84,23 @@ def request_text(section: dict[str, Any], facts: dict[str, Any], problems: str =
         "short rains or vuli in the equatorial sector, the main season starting in central "
         "and southern Tanzania, the dry season in the northern sector), from general "
         "knowledge, without numbers.\n"
-        "- Say what it means for farming, water and preparedness, in concrete terms.\n"
+        "- Say what it means for farming, water or preparedness in one concrete sentence "
+        "at most per section, only where the rainfall calls for it; do not list every "
+        "sector (farmers, pastoralists, water managers, disaster officers) in every "
+        "paragraph.\n"
+        "- Name only hazards the forecast supports: flooding only where heavy rainfall is "
+        "expected; no fire, drought or heat warnings from a rainfall total.\n"
+        "- Do not repeat a point the bulletin already makes (the earlier sections are "
+        "below), and do not repeat a point within this section.\n"
+        "- Write numbers as digits only when the computed text has them; never add a "
+        "count in words (for example of member states) that the computed text does not "
+        "give.\n"
         "- Speak of likely and expected rainfall, never of certainty. The forecast has no "
         "climatology: never say above or below normal, wetter or drier than usual.\n"
         f"- Exactly {count} paragraph(s), in the same order and with the same purpose as the "
-        "computed ones; each a few plain sentences.\n"
+        "computed ones. Keep the bulletin's length: paragraph by paragraph at most "
+        + ", ".join(str(word_limit(p)) for p in section.get("text") or [])
+        + " words. Say it in fewer words rather than more.\n"
         "- Use only figures that appear in the computed paragraphs or the facts below, "
         "written the same way (mm amounts, ranges, dates). Add no other number.\n"
         + (
@@ -77,22 +113,27 @@ def request_text(section: dict[str, Any], facts: dict[str, Any], problems: str =
         + (', "why": ...' if section.get("why") else "")
         + "}\n\nSection: "
         + json.dumps(payload, ensure_ascii=False)
+        + (
+            "\n\nAlready written in the earlier sections (do not repeat): "
+            + json.dumps(earlier, ensure_ascii=False)
+            if earlier
+            else ""
+        )
         + "\n\nForecast facts: "
         + json.dumps(facts, ensure_ascii=False, default=str)
     )
 
 
 def parse(reply: str) -> dict[str, Any]:
-    match = re.search(r"\{.*\}", reply, re.S)
-    if not match:
-        raise WritingRefused("The AI service did not return the section")
-    try:
-        data = json.loads(match.group(0))
-    except ValueError as exc:
-        raise WritingRefused("The AI service returned an unreadable section") from exc
-    if not isinstance(data, dict):
-        raise WritingRefused("The AI service returned an unreadable section")
-    return data
+    """The written section: an object with its paragraphs (or a list holding one)."""
+    from chatbot.translate import json_values
+
+    for value in json_values(reply):
+        if isinstance(value, list) and len(value) == 1:
+            value = value[0]
+        if isinstance(value, dict) and isinstance(value.get("paragraphs"), list):
+            return value
+    raise WritingRefused("The AI service returned an unreadable section")
 
 
 def problems(section: dict[str, Any], written: dict[str, Any], known: list[float]) -> list[str]:
@@ -101,11 +142,24 @@ def problems(section: dict[str, Any], written: dict[str, Any], known: list[float
     count = len(section.get("text") or [])
     if not isinstance(paragraphs, list) or len(paragraphs) != count:
         return [f"write exactly {count} paragraph(s)"]
-    texts = [tidy(str(p)) for p in paragraphs]
-    if section.get("why"):
-        texts.append(tidy(str(written.get("why") or "")))
     found: list[str] = []
+    texts = [tidy(str(p)) for p in paragraphs]
+    for index, (computed, text) in enumerate(zip(section["text"], texts, strict=True), 1):
+        limit = word_limit(computed)
+        if len(text.split()) > limit:
+            found.append(
+                f"paragraph {index} is too long ({len(text.split())} words, at most {limit})"
+            )
+    if section.get("why"):
+        why = tidy(str(written.get("why") or ""))
+        if len(why.split()) > word_limit(section["why"]):
+            found.append(f"'why' is too long (at most {word_limit(section['why'])} words)")
+        texts.append(why)
+    computed = " ".join([*section["text"], section.get("why") or ""]).lower()
     for text in texts:
+        words = {w for w in NUMBER_WORDS.findall(text.lower()) if w not in computed}
+        if words:
+            found.append("numbers in words the forecast does not give: " + ", ".join(words))
         if not text.strip():
             found.append("a paragraph is empty")
         found += [f'"{word}" reads as machine-written' for word in tone_problems(text)]
@@ -135,7 +189,8 @@ def write(
             progress(done, len(source))
         found = ""
         for _attempt in range(2):
-            prompt = [{"role": "user", "text": request_text(section, facts, found)}]
+            earlier = [p for entry in written for p in entry["paragraphs"]]
+            prompt = [{"role": "user", "text": request_text(section, facts, found, earlier)}]
             try:
                 reply = model.respond(SYSTEM, prompt, [])
             except Exception as exc:  # the service's failure, in words; nothing is saved

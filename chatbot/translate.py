@@ -13,12 +13,21 @@ note keep their English labels until the translated templates exist
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
 from chatbot import agent
+
+log = logging.getLogger(__name__)
+
+RETRY = (
+    "That reply could not be read as JSON. Answer again with the JSON array only, no other "
+    'text and no code fence: [{"key": ..., "title": ..., "paragraphs": [...], "why": ...}] '
+    "with the same key and the same number of paragraphs."
+)
 
 NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 SYSTEM = (
@@ -65,17 +74,49 @@ def request_text(sections: list[dict[str, Any]], language: str) -> str:
     )
 
 
+_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S | re.I)
+
+
+def json_values(reply: str) -> list[Any]:
+    """Every JSON value an AI service's reply holds, in order: the reply itself, the inside
+    of a ```json fence, or a value inside prose. Models add a sentence before the JSON, fence
+    it, or leave a line break inside a string; none of that should lose a good answer."""
+    decoder = json.JSONDecoder(strict=False)  # raw line breaks inside strings
+    candidates = [reply.strip(), *(m.strip() for m in _FENCE.findall(reply))]
+    values: list[Any] = []
+    for text in candidates:
+        try:
+            values.append(decoder.decode(text))
+            continue
+        except ValueError:
+            pass
+        position = 0
+        while (start := next((i for i in range(position, len(text)) if text[i] in "[{"), -1)) >= 0:
+            try:
+                value, end = decoder.raw_decode(text, start)
+            except ValueError:
+                position = start + 1
+                continue
+            values.append(value)
+            position = end
+    return values
+
+
 def parse(reply: str) -> list[dict[str, Any]]:
-    match = re.search(r"\[.*\]", reply, re.S)
-    if not match:
-        raise TranslationRefused("The AI service did not return a translation")
-    try:
-        data = json.loads(match.group(0))
-    except ValueError as exc:
-        raise TranslationRefused("The AI service returned an unreadable translation") from exc
-    if not isinstance(data, list):
-        raise TranslationRefused("The AI service returned an unreadable translation")
-    return data
+    """The translated sections: a list of them, a {"sections": [...]} object, or the one
+    section asked for as an object."""
+    for value in json_values(reply):
+        if isinstance(value, dict) and isinstance(value.get("sections"), list):
+            value = value["sections"]
+        if isinstance(value, dict) and "key" in value:
+            value = [value]
+        if isinstance(value, list) and value and all(isinstance(v, dict) for v in value):
+            return value
+    raise TranslationRefused(
+        "The AI service returned an unreadable translation"
+        if reply.strip()
+        else "The AI service did not return a translation"
+    )
 
 
 def check(source: list[dict[str, Any]], translated: list[dict[str, Any]]) -> None:
@@ -118,16 +159,35 @@ def translate(
     for done, section in enumerate(source):
         if progress:
             progress(done, len(source))
-        prompt = [{"role": "user", "text": request_text([section], language)}]
-        try:
-            reply = model.respond(SYSTEM, prompt, [])
-        except Exception as exc:  # the service's failure, said in words; nothing is saved
-            from chatbot.service import plain_reason
+        prompt: list[dict[str, Any]] = [{"role": "user", "text": request_text([section], language)}]
+        for attempt in range(2):
+            try:
+                reply = model.respond(SYSTEM, prompt, [])
+            except Exception as exc:  # the service's failure, said in words; nothing is saved
+                from chatbot.service import plain_reason
 
-            raise TranslationRefused(
-                f"The translation stopped at “{section['title']}”: {plain_reason(exc)}. "
-                "Nothing was saved; try again."
-            ) from exc
-        translated.extend(parse(reply.text))
+                raise TranslationRefused(
+                    f"The translation stopped at “{section['title']}”: {plain_reason(exc)}. "
+                    "Nothing was saved; try again."
+                ) from exc
+            try:
+                translated.extend(parse(reply.text))
+                break
+            except TranslationRefused:
+                # What the model sent, for the logs: an unreadable reply is otherwise a guess.
+                log.warning(
+                    "Unreadable translation of %s into %s (attempt %d): %r",
+                    section["key"],
+                    language,
+                    attempt + 1,
+                    (reply.text or "")[:400],
+                )
+                if attempt:
+                    raise
+                # Once more, saying exactly what came back wrong and what is wanted.
+                prompt = prompt + [
+                    {"role": "assistant", "text": reply.text or ""},
+                    {"role": "user", "text": RETRY},
+                ]
     check(source, translated)
     return translated
