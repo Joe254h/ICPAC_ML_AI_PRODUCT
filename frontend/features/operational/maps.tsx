@@ -221,9 +221,12 @@ function VerificationMap({ metric }: { metric: string }) {
               {metric === "correlation" && data.correlation_threshold && (
                 <p className="card-note">
                   With {data.cases} weeks the correlation is noisy: only r above{" "}
-                  {data.correlation_threshold.toFixed(2)} differs from chance.
-                  White areas had no rain, observed or forecast, in those weeks,
-                  so there is nothing to correlate.
+                  {/* three weeks need r above 0.997: two decimals would say 1.00 */}
+                  {data.correlation_threshold.toFixed(
+                    data.correlation_threshold > 0.99 ? 3 : 2,
+                  )}{" "}
+                  differs from chance. White areas had no rain, observed or
+                  forecast, in those weeks, so there is nothing to correlate.
                 </p>
               )}
             </Card>
