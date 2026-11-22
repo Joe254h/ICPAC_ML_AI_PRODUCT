@@ -61,6 +61,8 @@ EXAMPLE = (
     + EXAMPLE_AI
     + "\nAs a forecaster writes it: "
     + EXAMPLE_HUMAN
+    + "\nThe example shows the voice only: its places, season and range belong to that "
+    "example. Write every place, season and figure from this week's facts."
 )
 
 _WORDS = (

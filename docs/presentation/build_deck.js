@@ -193,7 +193,7 @@ async function build() {
   s.addText(
     [
       { text: "What this means. ", options: { bold: true, color: C.text2 } },
-      { text: "Most of the skill over raw ECMWF comes from mean bias correction. The machine learning layer adds a small, consistent improvement on top, largest in June to September and in the drier north. Both are now issued operationally, with every figure checked and every forecast verified against CHIRPS and three other rainfall datasets once the week has passed.", options: { color: C.text1 } },
+      { text: "Most of the skill over raw ECMWF comes from multiplicative bias correction (MBC). The machine learning layer adds a small, consistent improvement on top, largest in June to September and in the drier north. Both are now issued operationally, with every figure checked and every forecast verified against CHIRPS and three other rainfall datasets once the week has passed.", options: { color: C.text1 } },
     ],
     { x: 0.95, y: 4.45, w: 11.4, h: 1.95, fontSize: 17, valign: "middle", margin: 0, isTextBox: true, objectName: "message text" },
   );
@@ -232,7 +232,7 @@ async function build() {
   );
   const facts = [
     ["Forecasts", "ECMWF S2S reforecasts, model version 2025, 10 members"],
-    ["Years", "Hindcasts 2005-2024, weekly initialisations"],
+    ["Years", "Hindcasts 2005-2024, an initialisation every two days"],
     ["Truth", "CHIRPS v2.0 Week-2 totals, 0.05°"],
     ["Domain", "11 member states, 800 × 700 grid cells"],
     ["Training", "3,148 cases, 647 million cell rows (2005-2021)"],
@@ -252,7 +252,7 @@ async function build() {
   s.addText("Method: bias correction, then a learned residual", { placeholder: "title" });
   const steps = [
     ["Raw ECMWF", "Ensemble mean and spread of Week-2 rainfall, regridded to 0.05°", HEX.raw],
-    ["MBC", "Mean bias correction per cell and initialisation month, leave-one-year-out", HEX.mbc],
+    ["MBC", "Multiplicative bias correction: observed / forecast mean ratio per cell and initialisation month", HEX.mbc],
     ["24 predictors", "Rainfall mean and spread, MBC, place, season, 17 atmospheric PCs", HEX.forest],
     ["CatBoost", "Learns the remaining error (residual) of MBC from the 24 predictors", HEX.hybrid],
     ["Final rainfall", "max(MBC + residual, 0): never negative, never filled in", HEX.deep],
@@ -273,7 +273,7 @@ async function build() {
     ],
     { x: 0.95, y: 4.75, w: 11.4, h: 1.65, fontSize: 16, color: C.text1, valign: "middle", margin: 0, isTextBox: true, objectName: "method note text" },
   );
-  s.addNotes("Formulas from climate_engine/models/hybrid7_pc17.py: residual = CatBoost(24 predictors); catboost_full = max(MBC + residual, 0). LightGBM scored 15.238 against CatBoost 15.204 on the independent test (T01).");
+  s.addNotes("Formulas from climate_engine/models/hybrid7_pc17.py: residual = CatBoost(24 predictors); catboost_full = max(MBC + residual, 0). Validation 2020-2021 RMSE: CatBoost 14.280, LightGBM 14.383 (foundational_validation_independent_comparison.csv); independent test 15.204 vs 15.238. MBC ratio = clip(observed mean / forecast mean) per initialisation month and cell, 2005-2021 (climate_engine/operational/corrections.py).");
 
   // 7. Predictors
   s = content("The experiment");
@@ -281,7 +281,7 @@ async function build() {
   const groups = [
     [fa.FaCloudRain, "Rainfall (3)", "Ensemble mean and spread of Week-2 rainfall, and the MBC-corrected value"],
     [fa.FaLocationDot, "Place and season (4)", "Latitude and longitude; day of year as sine and cosine"],
-    [fa.FaWind, "Atmosphere (17)", "17 principal components of 15 upper-air quantities (winds, humidity, geopotential and others), mean and spread"],
+    [fa.FaWind, "Atmosphere (17)", "17 principal components of 15 upper-air quantities (humidity, winds, moisture flux, temperature, geopotential height, shear; 850-200 hPa), mean and spread"],
   ];
   for (let i = 0; i < groups.length; i++) {
     await iconCard(s, 0.6 + i * 4.1, 1.5, 3.9, 2.6, groups[i][0], groups[i][1], groups[i][2], "predictor group " + (i + 1));
@@ -403,7 +403,7 @@ async function build() {
   s.addText(
     bullets([
       "Raw ECMWF is less accurate than climatology from June to September",
-      "MBC brings every month above zero",
+      "MBC lifts every month to at least climatology (August only just, 0.001)",
       "The CatBoost hybrid adds most where MBC is weakest: July to September (+0.03 to +0.13)",
       "Months are initialisation months, as in the training cases",
     ], 15),
@@ -439,7 +439,7 @@ async function build() {
   s.addText("They say", { x: 0.9, y: 1.6, w: 5.4, h: 0.55, fontSize: 20, bold: true, color: C.accent1, margin: 0, isTextBox: true, objectName: "does say heading" });
   s.addText(bullets([
     "Bias-corrected ECMWF is clearly better than raw ECMWF and than climatology in every season",
-    "The ML residual is a consistent refinement: best or tied in every season and in 9 of 11 countries",
+    "The ML residual is a consistent refinement: lowest error in every season and in 8 of 11 countries, within 0.12 mm/week of MBC in the other three",
     "Two separate checks (independent test, refit retrospective) agree",
   ], 15), { x: 0.9, y: 2.25, w: 5.4, h: 4.2, color: C.text1, valign: "top", margin: 0, isTextBox: true, objectName: "does say list" });
   card(s, 6.75, 1.45, 5.95, 5.15, "does not say card", "FDF6E3");
@@ -449,7 +449,7 @@ async function build() {
     "That the refit beats the pre-refit model: the difference is within its uncertainty",
     "Anything about probabilities: the hybrid gives one deterministic amount per cell",
   ], 15), { x: 7.05, y: 2.25, w: 5.4, h: 4.2, color: C.text1, valign: "top", margin: 0, isTextBox: true, objectName: "does not say list" });
-  s.addNotes("9 of 11 countries: hybrid below MBC except Rwanda (19.23 vs 19.11) and Burundi (20.12 vs 20.10). Seasons: hybrid lowest in all four.");
+  s.addNotes("8 of 11 countries: hybrid below MBC except Tanzania (23.75 vs 23.73), Rwanda (19.23 vs 19.11) and Burundi (20.12 vs 20.10). Seasons: hybrid lowest in all four.");
 
   // ---------------------------------------------------------------- web service
   pres.addSection({ title: "The web service" });
@@ -528,6 +528,7 @@ async function build() {
     "Translated into Kiswahili, French, Arabic, Amharic and Somali",
     "Forecaster, reviewer and publisher sign off before release",
   ], 15), { x: 0.6, y: 1.5, w: 4.2, h: 5.1, color: C.text1, valign: "top", margin: 0, isTextBox: true, objectName: "bulletin bullets" });
+  s.addText("Screens from a local test run of the service (test input data).", { x: 5.1, y: 6.3, w: 7.6, h: 0.35, fontSize: 11, italic: true, color: C.accent6, margin: 0, isTextBox: true, objectName: "bulletin caption" });
   s.addNotes("chatbot/bulletin_writer.py and chatbot/tone.py; .claude/skills/bulletin-humanizer. A rewrite that adds or drops a figure, runs more than about a third longer, or reads as machine-written is refused and the computed draft stands.");
 
   // 20. Copilot
@@ -554,6 +555,7 @@ async function build() {
     "The frozen 2022-2024 evidence (tables, maps, figures) is served only after its checksum matches",
     "Every score page says whether it is independent or retrospective",
   ], 15), { x: 8.6, y: 1.5, w: 4.1, h: 5.0, color: C.text1, valign: "top", margin: 0, isTextBox: true, objectName: "verification bullets" });
+  s.addText("Screens from a local test run of the service; the evidence figures are the real frozen scores.", { x: 0.6, y: 6.4, w: 7.6, h: 0.35, fontSize: 11, italic: true, color: C.accent6, margin: 0, isTextBox: true, objectName: "evidence caption" });
   s.addNotes("backend/app/services/evidence.py checks SHA256SUMS.txt before reading any table.");
 
   // 22. Engineering

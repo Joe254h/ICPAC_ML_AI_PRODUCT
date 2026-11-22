@@ -512,9 +512,7 @@ export function CountryTable({
                 <td className="num">{num(stats?.min_mm)}</td>
                 <td className="num">{num(stats?.max_mm)}</td>
                 {errors && (
-                  <td className="num">
-                    {num(errors[row.country]?.rmse)}
-                  </td>
+                  <td className="num">{num(errors[row.country]?.rmse)}</td>
                 )}
               </tr>
             );
