@@ -448,8 +448,9 @@ function TypicalErrorStat({
       hint={
         <span title={`${error.label}. ${error.note}`}>
           {when}, 2022–2024{" "}
-          {error.set === "refit" ? "retrospective" : "independent test"} ·{" "}
-          {num(scores.all.rmse)} mm over all months
+          {error.set === "refit" ? "retrospective" : "independent test"}
+          <br />
+          {num(scores.all.rmse)} mm across all months
         </span>
       }
     />
