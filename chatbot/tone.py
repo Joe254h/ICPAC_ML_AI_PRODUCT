@@ -27,13 +27,47 @@ numbers keep a hyphen (50-200 mm).
 important to note, in order to, due to the fact that), no generic upbeat endings.
 - No markdown, bold, bullets symbols or emojis: each paragraph is plain text.
 - Every number, place and date must come from the forecast or from the forecaster's own \
-words; never add one."""
+words; never add one.
+- Lead with what happens and where: where rain is concentrated, where it is light. Name the \
+people who act (farmers, pastoralists, water managers, disaster officers), never \
+"stakeholders", and say what they can do (plant, clear drains, plan water use, watch river \
+levels).
+- Name the season where it helps (the October-December short rains, the March-May long \
+rains, Kiremt in Ethiopia's highlands) without adding a number.
+- Expected, likely, may: never certain, and one hedge per claim is enough."""
+
+#: One worked rewrite, shown to the writer and kept word for word in the bulletin-humanizer
+#: skill (.claude/skills/bulletin-humanizer/SKILL.md), which a test holds in step.
+EXAMPLE_COMPUTED = (
+    "Moderate rainfall (50-200 mm) expected over central to southern parts of Kenya, central "
+    "to southern parts of Burundi, central to northern parts of Tanzania and isolated areas "
+    "in both southern Uganda and southwestern Somalia."
+)
+EXAMPLE_AI = (
+    "Moreover, the region is poised to experience a vibrant mix of rainfall, with moderate "
+    "totals (50-200 mm) underscoring the pivotal role of the short rains — stakeholders "
+    "should remain vigilant."
+)
+EXAMPLE_HUMAN = (
+    "The short rains are most active in the south of the region. Moderate rainfall (50-200 "
+    "mm) is expected over central to southern parts of Kenya and Burundi, central to "
+    "northern parts of Tanzania, and isolated areas of southern Uganda and southwestern "
+    "Somalia."
+)
+EXAMPLE = (
+    "Example. Computed: "
+    + EXAMPLE_COMPUTED
+    + "\nMachine-sounding (never write this): "
+    + EXAMPLE_AI
+    + "\nAs a forecaster writes it: "
+    + EXAMPLE_HUMAN
+)
 
 _WORDS = (
     r"delve[sd]?|delving|tapestry|testament|pivotal|vibrant|intricate|intricacies|interplay|"
     r"showcas(?:e|es|ed|ing)|underscor(?:e|es|ed|ing)|foster(?:s|ed|ing)?|garner(?:s|ed)?|"
-    r"enduring|breathtaking|stunning|renowned|groundbreaking|nestled|boasts?|"
-    r"evolving landscape|ever-changing|realm"
+    r"crucial|enduring|breathtaking|stunning|renowned|groundbreaking|nestled|boasts?|"
+    r"(?:evolving |climate |rainfall |weather )?landscape|ever-changing|realm|stakeholders?"
 )
 _PHRASES = (
     # Inflated importance and the "serves as" habit.

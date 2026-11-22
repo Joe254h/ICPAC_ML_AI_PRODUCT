@@ -79,6 +79,7 @@ refuses AI-written paragraphs beyond that limit (`chatbot/bulletin_writer.py`,
 | Three sentences in a row opening with the same word | Merge them or start with the place or the action |
 | Vague sources: experts say, observers note | Cut, or name ICPAC's forecast |
 | Chatbot leftovers: Certainly, I hope this helps, let me know, here is | Cut |
+| Faceless audiences: stakeholders, the rainfall landscape | Name who acts: farmers, pastoralists, water managers, disaster officers |
 
 ## Example
 
@@ -99,6 +100,9 @@ Humanized:
 > The short rains are most active in the south of the region. Moderate rainfall (50-200
 > mm) is expected over central to southern parts of Kenya and Burundi, central to northern
 > parts of Tanzania, and isolated areas of southern Uganda and southwestern Somalia.
+
+The service gives the writer this same example (`chatbot/tone.py`, `EXAMPLE`); a test keeps
+the two word for word, so change both together.
 
 The humanized version keeps the one range, every place and the meaning, and adds the season
 without a number.
