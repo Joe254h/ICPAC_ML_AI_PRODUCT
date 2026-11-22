@@ -255,10 +255,36 @@ export type ForecastDetail = ForecastRun & {
   countries: CountryRow[];
   verification: Verification;
   interpretation: Interpretation;
+  typical_error?: TypicalError | null;
   maps: Record<string, string>;
   files: Record<string, string>;
   overlays?: Partial<Record<Variant, string>>;
   overlay_bounds?: [number, number, number, number];
+};
+
+/** RMSE, MAE and bias of one layer in the frozen 2022–2024 scores, mm/week. */
+export type ErrorScore = { rmse: number; mae?: number; bias?: number };
+
+/** The typical error of a forecast's layers in the frozen 2022–2024 verification. */
+export type TypicalError = {
+  set: "refit" | "prerefit";
+  label: string;
+  kind: string;
+  month: number;
+  month_basis: string;
+  reference: string;
+  units: string;
+  note: string;
+  layers: Partial<
+    Record<
+      Variant,
+      {
+        all: ErrorScore;
+        month: ErrorScore | null;
+        countries: Record<string, ErrorScore>;
+      }
+    >
+  >;
 };
 
 /** A model with verified forecasts, and how many. */

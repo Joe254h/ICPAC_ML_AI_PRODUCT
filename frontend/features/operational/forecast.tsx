@@ -290,6 +290,7 @@ function Body({
           unit="mm"
           hint="Area mean"
         />
+        <TypicalErrorStat detail={detail} layer={primary} />
         <Stat
           label="Regional mean · raw ECMWF"
           value={num(means.raw)}
@@ -319,11 +320,19 @@ function Body({
         <Outlook bulletin={bulletin.data} />
       </Card>
       <ObservedComparison detail={detail} />
-      <Card title="Country outlook" subtitle="Area mean and range, mm">
+      <Card
+        title="Country outlook"
+        subtitle={
+          detail.typical_error?.layers[primary]
+            ? "Area mean and range, mm; typical error (RMSE) from the 2022–2024 reforecasts"
+            : "Area mean and range, mm"
+        }
+      >
         <CountryTable
           rows={detail.countries}
           layers={layers}
           forecastId={detail.forecast_id}
+          errors={detail.typical_error?.layers[primary]?.countries}
         />
       </Card>
       <Card title="Verification">
@@ -398,5 +407,51 @@ export default function Forecast({ id }: PageProps) {
         )}
       </div>
     </div>
+  );
+}
+
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+/** The layer's typical grid-cell error in the frozen 2022–2024 scores: never this week's. */
+function TypicalErrorStat({
+  detail,
+  layer,
+}: {
+  detail: ForecastDetail;
+  layer: Variant;
+}) {
+  const error = detail.typical_error;
+  const scores = error?.layers[layer];
+  if (!error || !scores) return null;
+  const score = scores.month ?? scores.all;
+  const when = scores.month
+    ? `${MONTHS[error.month - 1]} issues`
+    : "all months";
+  return (
+    <Stat
+      label={`Typical error (RMSE) · ${SERIES[layer].label}`}
+      value={num(score.rmse)}
+      unit="mm"
+      hint={
+        <span title={`${error.label}. ${error.note}`}>
+          {when}, 2022–2024{" "}
+          {error.set === "refit" ? "retrospective" : "independent test"} ·{" "}
+          {num(scores.all.rmse)} mm over all months
+        </span>
+      }
+    />
   );
 }

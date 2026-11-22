@@ -30,7 +30,7 @@ import xarray as xr
 
 from backend.app.db import now
 from backend.app.schemas import ForecastRunRequest, PackageImportRequest, VerificationRequest
-from backend.app.services import operational
+from backend.app.services import operational, retrospective
 from backend.app.services.registry import ModelRegistry, status_at
 from climate_engine import ncio
 from climate_engine.cartography import icpac_maps as maps
@@ -670,6 +670,11 @@ class ForecastService:
             "countries": self._read(forecast_id, "countries.json"),
             "verification": self._read(forecast_id, "verification.json"),
             "interpretation": self._read(forecast_id, "interpretation_inputs.json"),
+            "typical_error": retrospective.summary(
+                record.get("model_id") or provenance.get("model_id"),
+                provenance,
+                int(str(record["initialization"])[5:7]),
+            ),
             "map_style": weekly.MAP_STYLE,
             "bulletin_generator": WordTemplateGenerator().status(),
             "maps": {
