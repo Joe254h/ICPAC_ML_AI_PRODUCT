@@ -39,6 +39,8 @@ def main() -> None:
     ap.add_argument("--first-year", type=int, default=2005)
     ap.add_argument("--last-year", type=int, default=2024)
     ap.add_argument("--perturbed", action="store_true", help="add perturbed-member requests")
+    ap.add_argument("--member-key", default="",
+                    help="request key listing members 1-10 for perturbed requests (e.g. number)")
     ap.add_argument("--test", action="store_true", help="one date, control, CAPE only")
     ap.add_argument("--test-variable", choices=list(VARIABLES),
                     help="one date, control, this variable only (checks its ECDS name)")
@@ -54,7 +56,8 @@ def main() -> None:
     variables = args.variables
     kinds = ["control_forecast"] + (["perturbed_forecast"] if args.perturbed else [])
     if args.test or args.test_variable:
-        dates_sorted, kinds = dates_sorted[:1], ["control_forecast"]
+        dates_sorted = dates_sorted[:1]
+        kinds = ["perturbed_forecast"] if args.perturbed else ["control_forecast"]
         variables = [args.test_variable or "cape"]
 
     years = [str(y) for y in range(args.first_year, args.last_year + 1)]
@@ -72,6 +75,8 @@ def main() -> None:
                 "leadtime_hour": LEADTIMES,
                 "time": "00:00", "grid": "1.5/1.5", "data_format": "grib",
             }
+            if kind == "perturbed_forecast" and args.member_key:
+                request[args.member_key] = [str(n) for n in range(1, 11)]
             short = "cf" if kind == "control_forecast" else "pf"
             target = (f"raw/ecmwf/predictors_245/sfc_{'_'.join(variables)}/"
                       f"{'_'.join(variables)}_{short}_model{d:%Y%m%d}_"
