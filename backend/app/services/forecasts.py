@@ -922,8 +922,14 @@ class ForecastService:
                 layer = next((name for name in ("hybrid", "mbc", "raw") if name in domain), "")
             if not layer:
                 continue
+            references = [
+                {"name": held.get("name") or held.get("source"), "domain": held["domain"]}
+                for held in self.references(candidate["forecast_id"])
+                if held.get("status") == "available" and held.get("domain")
+            ]
             return {
                 "forecast_id": candidate["forecast_id"],
+                "references": references,
                 "valid_start": str(candidate["valid_start"]),
                 "valid_end": str(candidate["valid_end"]),
                 "layer": layer,

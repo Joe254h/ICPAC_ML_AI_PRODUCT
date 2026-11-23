@@ -34,6 +34,10 @@ PREVIOUS = {
             "observed_mean": 22.7,
         },
     },
+    "references": [
+        {"name": "ARC 2.0", "domain": {"hybrid": {"rmse": 15.0, "observed_mean": 20.1}}},
+        {"name": "GPM IMERG", "domain": {"hybrid": {"rmse": 13.8, "observed_mean": 23.9}}},
+    ],
     "countries": {
         "Kenya": {"hybrid": {"rmse": 21.0}},
         "Djibouti": {"hybrid": {"rmse": 3.2}},
@@ -51,6 +55,8 @@ def test_the_section_gives_the_metrics_of_the_issued_layer():
     assert "Raw ECMWF: RMSE 17.9 mm" in text and "cut the error by 21%" in text
     assert "closest in Djibouti (RMSE 3.2 mm)" in text
     assert "largest error in Kenya (RMSE 21.0 mm)" in text
+    assert "ARC 2.0 RMSE 15.0 mm (observed 20.1 mm)" in text
+    assert "GPM IMERG RMSE 13.8 mm (observed 23.9 mm)" in text
 
 
 def test_no_verified_week_means_no_section():

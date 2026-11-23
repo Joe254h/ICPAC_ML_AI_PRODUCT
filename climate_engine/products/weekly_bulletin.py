@@ -456,6 +456,14 @@ def last_week_lines(inputs: BulletinInputs) -> list[tuple[str, str]]:
             f"cut the error by {change:.0f}%." if change >= 0.5 else "did not reduce it."
         )
     lines.append(("Error:", error))
+    others = [
+        f"{held['name']} RMSE {held['domain'][layer]['rmse']:.1f} mm (observed "
+        f"{held['domain'][layer]['observed_mean']:.1f} mm)"
+        for held in previous.get("references") or []
+        if (held.get("domain") or {}).get(layer, {}).get("rmse") is not None
+    ]
+    if others:
+        lines.append(("Other observations:", " " + "; ".join(others) + "."))
     countries = {
         name: by_layer[layer]
         for name, by_layer in (previous.get("countries") or {}).items()

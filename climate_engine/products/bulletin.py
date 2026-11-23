@@ -73,7 +73,7 @@ for _paragraph, (_key, _index) in TEXT_SLOTS.items():
     SECTION_SLOTS.setdefault(_key, []).append(_paragraph)
 #: The sections a forecaster may reword; the country table, the forecast note and the
 #: supplementary products stay as computed.
-EDITABLE = ("headline", "decision_support", "rainfall", "focus")
+EDITABLE = ("headline", "decision_support", "rainfall", "focus", "last_week")
 
 
 def trimmed(png: bytes, margin: int = 24) -> bytes:

@@ -30,7 +30,7 @@ SYSTEM = (
 )
 
 #: Every section the writer rewrites; added notes and computed tables are left as they are.
-WRITTEN = ("headline", "decision_support", "rainfall", "focus")
+WRITTEN = ("headline", "decision_support", "rainfall", "focus", "last_week")
 #: A written paragraph is no longer than the computed one: the bulletin stays short. A short
 #: line (the headline) may gain a few words to read naturally.
 SHORT_LINE, SHORT_LINE_WORDS = 15, 4
@@ -105,6 +105,15 @@ def request_text(
         + (
             "- Also rewrite 'why' (why this country is the focus) in one sentence.\n"
             if section.get("why")
+            else ""
+        )
+        + (
+            "- This section verifies last week's forecast. Explain plainly what the figures "
+            "mean: whether the forecast was close or too wet or too dry over the region, "
+            "where it did best and worst, whether the other observed datasets agree with "
+            "CHIRPS, and what that says about trusting this week's forecast. Keep every "
+            "figure exactly as written.\n"
+            if section["key"] == "last_week"
             else ""
         )
         + (f"\nYour last version was refused: {problems}. Fix that.\n" if problems else "")
