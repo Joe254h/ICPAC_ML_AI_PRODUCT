@@ -489,10 +489,10 @@ def install(app: FastAPI, dependency):
         """Translate a draft in the background; follow it at /bulletins/translations/{job}.
         The language "write" has the AI service write the English draft's wording instead."""
         from backend.app.services.bulletins import WRITE
-        from chatbot.agent import LANGUAGES
+        from chatbot.agent import translation_target
 
-        if body.language != WRITE and (body.language not in LANGUAGES or body.language == "en"):
-            raise HTTPException(422, "Choose a language other than English")
+        if body.language != WRITE and translation_target(body.language) is None:
+            raise HTTPException(422, "Choose a language other than English, by name or code")
         try:
             return BulletinService(platform).start_translation(
                 id, body.language, acting_name(user, body.actor)

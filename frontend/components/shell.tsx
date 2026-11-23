@@ -563,7 +563,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             </Link>
             {/* Also on the public site: the weekly cycle, models and the archive need a
                 staff key there too. */}
-            {health.data && <StaffAccess />}
+            {health.data && !health.data.open_access && <StaffAccess />}
             <button
               type="button"
               className="menu-toggle"

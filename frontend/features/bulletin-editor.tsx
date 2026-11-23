@@ -43,6 +43,9 @@ export const TRANSLATIONS: Record<string, string> = {
   sn: "Shona",
 };
 
+/** The dropdown value that opens the free language-name box. */
+const OTHER = "__other__";
+
 type Note = { title: string; text: string; original?: string };
 
 export function DraftEditor({
@@ -260,7 +263,15 @@ export function TranslateDraft({
   const [actor] = useActor();
   // The site's language (the Copilot's too): choosing one here changes it there.
   const [shared, setLanguage] = useLanguage();
-  const language = write ? "write" : shared in TRANSLATIONS ? shared : "sw";
+  // Any other language is typed by name (Kikuyu, Portuguese, ...); the AI translates it.
+  const [other, setOther] = useState<string | null>(null);
+  const language = write
+    ? "write"
+    : other !== null
+      ? other.trim()
+      : shared in TRANSLATIONS
+        ? shared
+        : "sw";
   const [job, setJob] = useState<TranslationJob | null>(null);
   const [starting, setStarting] = useState(false);
   const [recovering, setRecovering] = useState(false);
@@ -364,20 +375,44 @@ export function TranslateDraft({
         <label className="field">
           Language
           <select
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
+            value={other !== null ? OTHER : language}
+            onChange={(e) => {
+              if (e.target.value === OTHER) {
+                setOther("");
+              } else {
+                setOther(null);
+                setLanguage(e.target.value);
+              }
+            }}
           >
             {Object.entries(TRANSLATIONS).map(([code, name]) => (
               <option key={code} value={code}>
                 {name}
               </option>
             ))}
+            <option value={OTHER}>Other language…</option>
           </select>
+        </label>
+      )}
+      {!write && other !== null && (
+        <label className="field">
+          Language name
+          <input
+            value={other}
+            maxLength={40}
+            placeholder="e.g. Kikuyu, Portuguese, Chinese"
+            onChange={(e) => setOther(e.target.value)}
+          />
         </label>
       )}
       <Button
         variant="outline"
-        disabled={running || starting || recovering}
+        disabled={
+          running ||
+          starting ||
+          recovering ||
+          (!write && other !== null && other.trim().length < 2)
+        }
         onClick={async () => {
           setStarting(true);
           setError(null);

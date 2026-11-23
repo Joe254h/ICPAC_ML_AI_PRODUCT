@@ -26,6 +26,13 @@ def access_mode() -> str:
     return mode
 
 
+def open_access() -> bool:
+    """OPEN_ACCESS=true on the public evaluation site: every visitor may also run the weekly
+    cycle, downloads and forecasts, verify, and manage models (no staff key at all). Model
+    bundle uploads still need a key: the server loads what they send."""
+    return access_mode() == "public" and os.getenv("OPEN_ACCESS", "").lower() == "true"
+
+
 def credentials() -> list[dict]:
     try:
         raw = os.getenv("STAFF_CREDENTIALS", "")
@@ -106,7 +113,8 @@ def principal(
             raise HTTPException(400, "Invalid browser session; reload the page.")
         # Audit entries are visible in the public app. Store a one-way identity,
         # so seeing an actor in the audit cannot grant their conversation access.
-        return Principal(f"visitor:{sha256(visitor.encode()).hexdigest()}", VISITOR_ROLES)
+        roles = VISITOR_ROLES | {"admin"} if open_access() else VISITOR_ROLES
+        return Principal(f"visitor:{sha256(visitor.encode()).hexdigest()}", roles)
     records = credentials()
     if not records:
         raise HTTPException(503, "Staff access is not configured; contact the operator.")
@@ -169,7 +177,7 @@ def require_staff(role: str):
     """A named staff member with ``role`` (or admin), also on the public site."""
 
     def allowed(user: Principal = Depends(require_role(role))) -> Principal:
-        if is_visitor(user):
+        if is_visitor(user) and not open_access():
             raise HTTPException(
                 403, "This needs a staff access key (Staff access, at the top of the page)."
             )

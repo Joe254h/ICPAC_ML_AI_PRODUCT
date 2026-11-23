@@ -218,3 +218,20 @@ def test_a_translation_keeps_its_language_and_the_copilot_shows_it(env, fast_map
     assert again["note"] == "Already translated."
     refused = tools.run("translate_bulletin", {"language": "en"})
     assert "Say which language" in refused["error"]
+
+
+def test_a_draft_is_translated_into_any_language_named(env, fast_maps, monkeypatch):
+    """Beyond the member-state shortcuts, a forecaster can name any language; English,
+    digits and markup are refused."""
+    first = draft(env)
+    monkeypatch.setattr(agent, "chat_model", lambda: Translator())
+    named = env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "kikuyu"})
+    assert named.status_code == 200, named.text
+    assert named.json()["edited"]["language"] == "Kikuyu"
+    by_name = env.client.post(f"/bulletins/{first['id']}/translate", json={"language": "Shona"})
+    assert by_name.json()["edited"]["language"] == "Shona"
+    for bad in ("English", "<b>x</b>", "123", "a"):
+        refused = env.client.post(f"/bulletins/{first['id']}/translations", json={"language": bad})
+        assert refused.status_code == 422, bad
+    assert agent.translation_target("sn") == ("sn", "Shona")
+    assert agent.translation_target("Português") == ("português", "Português")

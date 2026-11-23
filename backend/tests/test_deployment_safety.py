@@ -365,3 +365,28 @@ def test_public_cloud_release_preserves_storage_checks_without_needing_staff(mon
     monkeypatch.setenv("ACCESS_MODE", "staff")
     with pytest.raises(ValueError, match="named staff"):
         validate_release(platform)
+
+
+def test_open_access_lets_every_visitor_run_the_service(client, monkeypatch):
+    """OPEN_ACCESS=true on the public site: no staff key is asked for anything but model
+    bundle uploads; without it the public rules above hold."""
+    monkeypatch.setenv("ACCESS_MODE", "public")
+    monkeypatch.setenv("OPEN_ACCESS", "true")
+    client.headers["X-Visitor-Id"] = "b" * 32
+    assert client.get("/health").json()["open_access"] is True
+    assert "admin" in client.get("/access/me").json()["roles"]
+    for action in ("observations", "refresh_archive"):
+        started = client.post("/operations", json={"action": action, "actor": "Visitor"})
+        assert started.status_code == 202, (action, started.text)
+    assert client.get("/audit").status_code == 200
+    monkeypatch.setenv("ACCESS_MODE", "staff")
+    assert client.get("/health").json()["open_access"] is False
+
+
+def test_a_standing_review_never_stops_the_service_from_starting(tmp_path, monkeypatch):
+    """On a fresh database (a wiped Space disk) the standing real-time review is applied at
+    startup; with no model registered yet it is skipped and the service still starts."""
+    monkeypatch.setenv("OPERATION_WORKER_ENABLED", "false")
+    monkeypatch.setenv("REALTIME_REVIEW_CONFIRMED_BY", "Dr Reviewer")
+    with TestClient(create_app(f"sqlite:///{tmp_path / 'fresh.db'}")) as fresh:
+        assert fresh.get("/health").status_code == 200

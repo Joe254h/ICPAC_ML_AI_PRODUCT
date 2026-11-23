@@ -607,12 +607,15 @@ def fetch_day(
             return None
         try:
             data = server.fetch(url)
-        except CHIRPSUnavailable:
+        except CHIRPSUnavailable as exc:
+            failures.append(f"the mirror failed ({str(exc)[:160]})")
             return None
         if not data:
+            failures.append("the mirror had no file for the day")
             return None
         data = bytes(data)
         if not data.startswith((b"CDF", b"\x89HDF")):
+            failures.append("the mirror did not send a NetCDF file (final product not out yet?)")
             return None
         try:
             values, latitude, longitude = read_mirror(data, day)
@@ -625,15 +628,20 @@ def fetch_day(
             _save_day(store, info, *crop(values, latitude, longitude), None)
         return field_, info
 
+    failures: list[str] = []
     if held and held[1].get("product") == "final":
         return from_held()
     try:
         return from_chc()
-    except CHIRPSUnavailable:
+    except CHIRPSUnavailable as exc:
         # CHC's FTP server first (the same files, both products), then the open mirror
         # (final product only).
         fallback = from_ftp() or from_mirror()
         if fallback is None:
+            if server.ftp.unreachable:  # say why the FTP server failed too
+                failures.insert(0, f"its FTP server failed too ({server.ftp.unreachable})")
+            if failures:
+                raise CHIRPSUnavailable(f"{exc}; " + "; ".join(failures)) from exc
             raise
         return fallback
 

@@ -57,6 +57,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
             Repository(database_url),
             register_descriptors=os.getenv("AUTO_REGISTER_MODELS", "true") == "true",
         )
+        from backend.app.services.registry import ModelRegistry
+
+        try:  # a standing review must never stop the service from starting
+            ModelRegistry(app.state.platform).apply_standing_realtime_review()
+        except Exception:
+            logging.getLogger("icpac").exception("standing_realtime_review_failed")
         stopped = threading.Event()
         worker = threading.Thread(
             target=OperationService(app.state.platform).worker,

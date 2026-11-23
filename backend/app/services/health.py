@@ -87,7 +87,7 @@ def system_health(platform) -> dict:
 
     automation = scheduler_settings()
     components = {"API": "Healthy", "Database": "Healthy"}
-    from backend.app.api.access import access_mode, credentials
+    from backend.app.api.access import access_mode, credentials, open_access
 
     public_access = access_mode() == "public"
     try:
@@ -272,6 +272,8 @@ def system_health(platform) -> dict:
         "release_mode": os.getenv("RELEASE_MODE", "evaluation"),
         "access_configured": access_ready,
         "access_mode": "public" if public_access else "staff",
+        # Every visitor may also run forecasts and manage models: no staff key is asked for.
+        "open_access": open_access(),
         "automation_scheduler_enabled": automation["enabled"],
         "automation_schedule": automation["when"],
         "durable_storage": platform.repo.url.startswith("postgresql")
