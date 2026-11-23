@@ -38,6 +38,7 @@ WIKIPEDIAS = {
     "rw": "Kinyarwanda",
     "rn": "Kirundi",
     "lg": "Luganda",
+    "sn": "Shona",
 }
 MAX_BYTES = 1_500_000
 MAX_TEXT = 6000

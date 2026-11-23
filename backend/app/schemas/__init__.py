@@ -27,7 +27,7 @@ class ChatRequest(BaseModel):
     #: An uploaded forecast of another model the question is about.
     external_id: str | None = Field(default=None, pattern=r"^[0-9a-f-]{36}$")
     #: The answer's language (chatbot.agent.LANGUAGES).
-    language: Literal["en", "sw", "am", "so", "ar", "fr", "ti", "om", "rw", "rn", "lg"] = "en"
+    language: Literal["en", "sw", "am", "so", "ar", "fr", "ti", "om", "rw", "rn", "lg", "sn"] = "en"
     #: Files attached to this question (chatbot/attachments.py).
     attachment_ids: list[str] = Field(default_factory=list, max_length=5)
     #: Editing an earlier question: the position of that question in the conversation;
@@ -237,7 +237,7 @@ class BulletinEditRequest(BaseModel):
 
 
 class BulletinTranslateRequest(BaseModel):
-    language: Literal["sw", "am", "so", "ar", "fr", "ti", "om", "rw", "rn", "lg", "write"]
+    language: Literal["sw", "am", "so", "ar", "fr", "ti", "om", "rw", "rn", "lg", "sn", "write"]
     actor: str | None = Field(default=None, max_length=80)
 
 

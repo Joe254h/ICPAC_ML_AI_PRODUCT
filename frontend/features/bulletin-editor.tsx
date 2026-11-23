@@ -40,6 +40,7 @@ export const TRANSLATIONS: Record<string, string> = {
   rw: "Kinyarwanda",
   rn: "Kirundi",
   lg: "Luganda",
+  sn: "Shona",
 };
 
 type Note = { title: string; text: string; original?: string };

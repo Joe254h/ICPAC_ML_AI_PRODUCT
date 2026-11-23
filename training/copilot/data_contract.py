@@ -24,6 +24,7 @@ LANGUAGES = {
     "rw": "Kinyarwanda",
     "rn": "Kirundi",
     "lg": "Luganda",
+    "sn": "Shona",
 }
 TASKS = {"answer", "tool_call", "translation", "refusal"}
 
