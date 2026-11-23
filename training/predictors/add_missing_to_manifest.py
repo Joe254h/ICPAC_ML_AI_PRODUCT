@@ -76,6 +76,8 @@ def main() -> None:
     ap.add_argument("--audit", help="audit folder (default: newest results/data_audit_*)")
     ap.add_argument("--out", help="manifest to write (default metadata/manifest_<set>.jsonl)")
     ap.add_argument("--variables", nargs="*", help="only these short names of the set")
+    ap.add_argument("--dates", help="file of model dates (YYYY-MM-DD per line): the reforecast "
+                    "dates; default: the audit's ECMWF dates")
     ap.add_argument("--first-year", type=int, default=2005)
     ap.add_argument("--last-year", type=int, default=2024)
     ap.add_argument("--perturbed", action="store_true", help="add perturbed-member requests")
@@ -93,7 +95,8 @@ def main() -> None:
     level_type = args.level_type or level_type
     out = args.out or str(ROOT / "metadata" / f"manifest_{args.set}.jsonl")
     audit = Path(args.audit or sorted(glob.glob("/scratch/njoel/results/data_audit_*"))[-1])
-    dates = case_dates(audit)
+    dates = (sorted({date.fromisoformat(x.strip()[:10]) for x in open(args.dates) if x.strip()})
+             if args.dates else case_dates(audit))
     chosen = args.variables or list(names)
     unknown = [v for v in chosen + ([args.test_variable] if args.test_variable else [])
                if v not in names]

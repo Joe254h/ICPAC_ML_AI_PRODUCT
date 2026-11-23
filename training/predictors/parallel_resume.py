@@ -50,6 +50,8 @@ def fetch(record, retries: int, wait: float):
         status, detail = base.download(client(), record)
         if status in ("DOWNLOADED", "TARGET_APPEARED"):
             return status, detail
+        if "returned no data" in str(detail):  # no reforecast on this date: do not retry
+            return "NO_DATA", detail
         if status == "DOWNLOAD_INVALID" or attempt == retries:
             return status, f"attempt {attempt}: {detail}"
         time.sleep(wait * attempt)  # queue full or rate limited: back off, then retry
