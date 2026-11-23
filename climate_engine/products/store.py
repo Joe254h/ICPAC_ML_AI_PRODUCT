@@ -1,6 +1,7 @@
 """Object storage for product packages, for hosts without a persistent file system.
 
-With ``PACKAGE_STORE_CONNECTION`` (an Azure Storage connection string) set, every package
+With ``PACKAGE_STORE_CONNECTION`` (an Azure Storage connection string, or
+``hf://datasets/<owner>/<name>`` for a private Hugging Face dataset with ``HF_TOKEN``) set, every package
 the platform publishes or updates is copied to the ``PACKAGE_STORE_CONTAINER`` blob
 container, and a package missing from local disk is fetched from it. ``RUN_ROOT`` is then a
 cache: a replica that restarts or scales to zero loses nothing, and packages written on the
@@ -100,6 +101,104 @@ class PackageStore:
         return True
 
 
+class _Blob:
+    def __init__(self, name: str):
+        self.name = name
+
+
+class _Download:
+    def __init__(self, data: bytes):
+        self.data = data
+
+    def readall(self) -> bytes:
+        return self.data
+
+
+class HubContainer:
+    """A folder of a Hugging Face dataset repository behaving like a blob container, for
+    hosts such as a Hugging Face Space (``PACKAGE_STORE_CONNECTION=hf://datasets/o/name``)."""
+
+    def __init__(self, api: Any, repo_id: str, folder: str):
+        self.api, self.repo_id, self.folder = api, repo_id, folder.strip("/")
+
+    def _path(self, name: str) -> str:
+        return f"{self.folder}/{name}"
+
+    def upload_blob(self, name: str, data: bytes, *, overwrite: bool | None = True) -> Any:
+        return self.api.upload_file(
+            path_or_fileobj=data,
+            path_in_repo=self._path(name),
+            repo_id=self.repo_id,
+            repo_type="dataset",
+            commit_message=f"Store {name}",
+        )
+
+    def list_blobs(self, name_starts_with: str | None = None, **kwargs: Any) -> list[_Blob]:
+        prefix = self._path(name_starts_with or "")
+        return [
+            _Blob(path[len(self.folder) + 1 :])
+            for path in self.api.list_repo_files(self.repo_id, repo_type="dataset")
+            if path.startswith(prefix)
+        ]
+
+    def download_blob(self, blob: str, **kwargs: Any) -> _Download:
+        local = self.api.hf_hub_download(self.repo_id, self._path(blob), repo_type="dataset")
+        return _Download(Path(local).read_bytes())
+
+
+class HubPackageStore(PackageStore):
+    """Packages in a Hugging Face dataset: each package is one commit, so a reader never
+    sees part of one."""
+
+    container: HubContainer
+
+    def upload(self, directory: Path) -> None:
+        from huggingface_hub import CommitOperationAdd
+
+        from climate_engine.products.package import check_package, file_path
+
+        directory = Path(directory).resolve()
+        manifest_bytes = (directory / MANIFEST).read_bytes()
+        manifest = json.loads(manifest_bytes)
+        problems = check_package(directory)
+        if problems:
+            raise ValueError(f"Package failed its checks: {problems}")
+        hub = self.container
+        operations = [
+            CommitOperationAdd(
+                path_in_repo=hub._path(
+                    f"{directory.name}/{path.relative_to(directory).as_posix()}"
+                ),
+                path_or_fileobj=path.read_bytes(),
+            )
+            for path in (
+                file_path(directory, logical, manifest) for logical in sorted(manifest["files"])
+            )
+        ]
+        operations.append(
+            CommitOperationAdd(
+                path_in_repo=hub._path(f"{directory.name}/{MANIFEST}"),
+                path_or_fileobj=manifest_bytes,
+            )
+        )
+        hub.api.create_commit(
+            hub.repo_id,
+            operations,
+            repo_type="dataset",
+            commit_message=f"Package {directory.name}",
+        )
+
+
+@lru_cache(maxsize=4)
+def _hub_store(connection: str, container_name: str) -> PackageStore:
+    from huggingface_hub import HfApi
+
+    repo_id = connection.removeprefix("hf://datasets/").strip("/")
+    api = HfApi(token=os.getenv("HF_TOKEN") or None)
+    api.create_repo(repo_id, repo_type="dataset", private=True, exist_ok=True)
+    return HubPackageStore(HubContainer(api, repo_id, container_name))
+
+
 @lru_cache(maxsize=4)
 def _store(connection: str, container_name: str) -> PackageStore:
     from azure.storage.blob import BlobServiceClient
@@ -117,4 +216,7 @@ def package_store() -> PackageStore | None:
     connection = os.getenv(CONNECTION_ENV)
     if not connection:
         return None
-    return _store(connection, os.getenv(CONTAINER_ENV) or DEFAULT_CONTAINER)
+    container = os.getenv(CONTAINER_ENV) or DEFAULT_CONTAINER
+    if connection.startswith("hf://datasets/"):
+        return _hub_store(connection, container)
+    return _store(connection, container)
