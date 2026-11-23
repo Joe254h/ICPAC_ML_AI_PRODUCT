@@ -444,6 +444,14 @@ test("the weekly bulletin shows the correction figures on its page", async ({
     }),
   ).toBeVisible();
   await expect(page.getByText(/Region: raw ECMWF/)).toBeVisible();
+  // The past weeks verified above: the bulletin says how the latest of them was forecast.
+  await expect(
+    page.getByRole("heading", {
+      name: "How Last Week's Forecast Did",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByText(/RMSE \d+\.\d mm, mean error/)).toBeVisible();
 });
 
 test("a reference the Copilot cites opens as a readable page", async ({

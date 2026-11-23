@@ -169,11 +169,11 @@ def test_the_copilot_shows_and_revises_the_bulletin_in_the_conversation(env, fas
                         }
                     ],
                 },
-                # A figure nobody gave is refused.
+                # A figure nobody gave is refused (987: no date, time or forecast value can supply it).
                 {
                     "summary": "Advisory",
                     "add_notes": [
-                        {"title": "Advisory for farmers", "paragraphs": ["Expect 35 mm."]}
+                        {"title": "Advisory for farmers", "paragraphs": ["Expect 987 mm."]}
                     ],
                 },
                 {"summary": "Added an advisory for farmers in western Kenya.", "add_notes": [note]},
@@ -186,7 +186,7 @@ def test_the_copilot_shows_and_revises_the_bulletin_in_the_conversation(env, fas
     )
     results = tool_results(fake.requests[-1])
     assert "plain bulletin voice" in results[1]["error"] and "crucial" in results[1]["error"]
-    assert "35" in results[2]["error"]
+    assert "987" in results[2]["error"]
     assert results[3]["version"] == 2
     assert answer["text"] == "Version 2 saved." and answer["fallback"] is None
     card = answer["bulletin"]

@@ -9,6 +9,7 @@ them before every transition. Without a forecast there is nothing to draft.
 import hashlib
 import json
 import os
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -222,11 +223,19 @@ class BulletinService:
 
         service = ForecastService(self.platform)
         detail = service.get(forecast_id)  # refuses a package that fails its checks
-        inputs = BulletinInputs.from_package(service.directory(forecast_id))
         from backend.app.services.supplemental import SupplementalService
         from climate_engine.products import supplemental_document
 
         parent = self.repo.get("bulletin", parent_id) if parent_id else None
+        # Last week's verification is frozen into each draft, so it reproduces exactly: a
+        # revision keeps its parent's (none for drafts made before the section existed).
+        if revised is not None and parent:
+            inputs = replace(
+                BulletinInputs.from_package(service.directory(forecast_id)),
+                previous=parent["facts"].get("previous_week"),
+            )
+        else:
+            inputs = service.bulletin_inputs(forecast_id)
         supplemental_service = SupplementalService(self.platform)
         # A revision keeps its parent's supplementary products, so words and pages agree.
         extra = (
@@ -269,6 +278,7 @@ class BulletinService:
             "label": weekly.scope_label(inputs),
             "sections": sections,
             "supplemental": extra,
+            "previous_week": inputs.previous,
             "provenance": {
                 key: detail["provenance"].get(key)
                 for key in (
@@ -855,7 +865,10 @@ class BulletinService:
         from backend.app.services.forecasts import ForecastService
 
         directory = ForecastService(self.platform).directory(bulletin["forecast_id"])
-        inputs = BulletinInputs.from_package(directory)
+        inputs = replace(
+            BulletinInputs.from_package(directory),
+            previous=bulletin["facts"].get("previous_week"),
+        )
         if checksum_key == "map_checksum":
             return weekly.rainfall_png(inputs)
         revised = bulletin["facts"]["sections"] if bulletin.get("edited") else None

@@ -163,7 +163,7 @@ class OperationRequest(BaseModel):
     forecast_id: str | None = Field(default=None, pattern=FORECAST_ID)
     #: past_weeks: how many past weeks to forecast and verify; refresh_archive and
     #: restart_archive: how many of the newest Sunday runs to bring up to the model in use.
-    weeks: int = Field(default=4, ge=1, le=12)
+    weeks: int = Field(default=4, ge=1, le=26)
     #: The registered model to forecast with (run_forecast, cycle, end_to_end, past_weeks,
     #: refresh_archive, restart_archive); empty: the model in use.
     model_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]+$", max_length=80)

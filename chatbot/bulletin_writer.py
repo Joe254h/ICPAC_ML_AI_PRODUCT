@@ -7,7 +7,7 @@ statements and the country focus) as an ICPAC forecaster would: climate language
 rain falls and why it matters, in the plain bulletin voice. One section per request, so a
 slow AI service answers each in time. A section is kept only when it has the same number of
 paragraphs (the Word layout and its maps stay in place), every number in it is a figure of
-the forecast, it is no more than about a third longer than the computed one, and it passes
+the forecast, it is no longer than the computed one, and it passes
 the tone check; a section that fails is asked for once more with
 the problems named, and then the whole rewrite is refused and the computed draft stands.
 """
@@ -30,17 +30,16 @@ SYSTEM = (
 )
 
 #: Every section the writer rewrites; added notes and computed tables are left as they are.
-WRITTEN = ("headline", "decision_support", "rainfall", "focus")
-#: A written paragraph keeps the bulletin's length: at most this share longer than the
-#: computed one, or a few words for a short line.
-LONGER_BY = 1.3
-SHORT_LINE_WORDS = 12
+WRITTEN = ("headline", "decision_support", "rainfall", "focus", "last_week")
+#: A written paragraph is no longer than the computed one: the bulletin stays short. A short
+#: line (the headline) may gain a few words to read naturally.
+SHORT_LINE, SHORT_LINE_WORDS = 15, 4
 
 
 def word_limit(computed: str) -> int:
     """The most words a rewritten paragraph may have."""
     words = len(computed.split())
-    return max(round(words * LONGER_BY), words + SHORT_LINE_WORDS)
+    return words + SHORT_LINE_WORDS if words < SHORT_LINE else words
 
 
 #: Counts written out in words: the figure check reads digits, so a word like "five" could
@@ -106,6 +105,15 @@ def request_text(
         + (
             "- Also rewrite 'why' (why this country is the focus) in one sentence.\n"
             if section.get("why")
+            else ""
+        )
+        + (
+            "- This section verifies last week's forecast. Explain plainly what the figures "
+            "mean: whether the forecast was close or too wet or too dry over the region, "
+            "where it did best and worst, whether the other observed datasets agree with "
+            "CHIRPS, and what that says about trusting this week's forecast. Keep every "
+            "figure exactly as written.\n"
+            if section["key"] == "last_week"
             else ""
         )
         + (f"\nYour last version was refused: {problems}. Fix that.\n" if problems else "")

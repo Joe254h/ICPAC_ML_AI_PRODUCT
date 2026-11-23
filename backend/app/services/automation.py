@@ -58,6 +58,20 @@ def scheduler_settings() -> dict:
     }
 
 
+#: Weeks the scheduler keeps forecast: 12, or every week since AUTOMATION_ARCHIVE_SINCE (a
+#: date, e.g. 2026-08-02), up to 26.
+ARCHIVE_WEEKS, MAX_ARCHIVE_WEEKS = 12, 26
+
+
+def archive_weeks(sunday: date) -> int:
+    """How many weekly runs, ending with ``sunday``, the scheduler keeps forecast."""
+    since = os.getenv("AUTOMATION_ARCHIVE_SINCE", "").strip()
+    if not since:
+        return ARCHIVE_WEEKS
+    weeks = (sunday - date.fromisoformat(since)).days // 7 + 1
+    return max(1, min(weeks, MAX_ARCHIVE_WEEKS))
+
+
 def due_run(stamp: datetime) -> tuple[date, datetime]:
     """The Sunday whose weekly forecast is due at ``stamp``, and when it fell due."""
     sunday = weekly_run(stamp.astimezone(EAT).date() - timedelta(days=1))
@@ -102,7 +116,11 @@ class AutomationService:
             # forecast: a Sunday run not forecast yet (the first weeks of the schedule, a
             # missed week) is forecast.
             (
-                OperationRequest(action="refresh_archive", actor="scheduled automation", weeks=12),
+                OperationRequest(
+                    action="refresh_archive",
+                    actor="scheduled automation",
+                    weeks=archive_weeks(sunday),
+                ),
                 f"icpac/weeks/{sunday.isoformat()}",
             )
         ]

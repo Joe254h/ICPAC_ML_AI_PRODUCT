@@ -152,7 +152,7 @@ the AI rewrite the headline, the decision-support note, the regional rainfall st
 the country focus in a forecaster's words, from the forecast, one section per request in the
 background (`POST /bulletins/{id}/translations` with `"language": "write"`). A section is kept
 only with the same number of paragraphs (the Word layout and its maps stay in place), each
-no more than about a third longer than the computed one (the bulletin keeps its length), every
+no longer than the computed one (the bulletin keeps its length), every
 number a figure of the forecast and the plain bulletin voice of `chatbot/tone.py`; a refused
 section is asked for once more with its problems named, otherwise the computed draft stands.
 Translate the new version as usual. The Word bulletin's regional map is 4.4 inches square so

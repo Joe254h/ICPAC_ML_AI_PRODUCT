@@ -26,18 +26,25 @@ class Writer:
         text = transcript[-1]["text"]
         section = text.split("Section: ", 1)[1]
         payload = json.loads(re.split(r"\n\n(?:Already written|Forecast facts)", section)[0])
-        paragraphs = [
-            "Rain stays heaviest over the wetter parts. " + p
-            for p in payload["computed_paragraphs"]
-        ]
+        paragraphs = [reword(p) for p in payload["computed_paragraphs"]]
         if self.invent and not (self.once and len(self.requests) > 1):
             paragraphs[0] += " Isolated totals near 987 mm are possible."
         if self.ramble and len(self.requests) == 1:
             paragraphs[0] += " The pattern holds through the week across the area." * 12
         body = {"key": payload["key"], "paragraphs": paragraphs}
         if payload.get("why"):
-            body["why"] = "This country gets the region's main focus this week. " + payload["why"]
+            body["why"] = reword(payload["why"])
         return SimpleNamespace(text=json.dumps(body), calls=[], raw=None)
+
+
+def reword(paragraph: str) -> str:
+    """A rewrite within the length limit: a short line gains a lead, a longer one says
+    "likely" for "expected" (the same number of words)."""
+    if len(paragraph.split()) < 15:
+        return "Rain stays heaviest. " + paragraph
+    if " expected " in paragraph:
+        return paragraph.replace(" expected ", " likely ", 1)
+    return "Note: " + " ".join(paragraph.split()[1:])
 
 
 def follow(env, job_id):
@@ -61,7 +68,7 @@ def test_the_ai_service_writes_the_draft_in_the_background(env, fast_maps, monke
     assert version["edited"]["with"] == "AI writer"
     assert "language" not in version["edited"]  # still the English draft
     headline = section(version, "headline")["text"][0]
-    assert headline.startswith("Rain stays heaviest over the wetter parts.")
+    assert headline == reword(section(first, "headline")["text"][0])
     # The same number of paragraphs, so the Word layout and its maps stay in place.
     for key in ("headline", "rainfall"):
         assert len(section(version, key)["text"]) == len(section(first, key)["text"])
