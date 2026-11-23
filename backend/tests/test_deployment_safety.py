@@ -381,3 +381,12 @@ def test_open_access_lets_every_visitor_run_the_service(client, monkeypatch):
     assert client.get("/audit").status_code == 200
     monkeypatch.setenv("ACCESS_MODE", "staff")
     assert client.get("/health").json()["open_access"] is False
+
+
+def test_a_standing_review_never_stops_the_service_from_starting(tmp_path, monkeypatch):
+    """On a fresh database (a wiped Space disk) the standing real-time review is applied at
+    startup; with no model registered yet it is skipped and the service still starts."""
+    monkeypatch.setenv("OPERATION_WORKER_ENABLED", "false")
+    monkeypatch.setenv("REALTIME_REVIEW_CONFIRMED_BY", "Dr Reviewer")
+    with TestClient(create_app(f"sqlite:///{tmp_path / 'fresh.db'}")) as fresh:
+        assert fresh.get("/health").status_code == 200

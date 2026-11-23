@@ -499,7 +499,7 @@ class ModelRegistry:
             return None
         try:
             model_id = self.current()["model"]["model_id"]
-        except (KeyError, TypeError):
+        except (KeyError, TypeError):  # no model registered yet
             return None
         with self._write_lock() as session:
             row = session.get(Record, model_id)
