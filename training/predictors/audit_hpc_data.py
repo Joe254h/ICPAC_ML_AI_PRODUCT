@@ -231,7 +231,7 @@ def main() -> None:
         covered[name], how[name] = got, kinds
 
     if args.cases:
-        cases = {date.fromisoformat(l.strip()[:10]) for l in open(args.cases) if l.strip()}
+        cases = {date.fromisoformat(s.strip()[:10]) for s in open(args.cases) if s.strip()}
         case_source = args.cases
     else:
         cases, case_source = covered.get("ecmwf_tp", set()), "dates found for ecmwf_tp"
