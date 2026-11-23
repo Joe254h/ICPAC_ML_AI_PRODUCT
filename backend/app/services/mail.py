@@ -5,6 +5,10 @@ Settings (environment):
 * ``SMTP_HOST``, ``SMTP_PORT`` (587), ``SMTP_USER``, ``SMTP_PASSWORD``, ``SMTP_SECURITY``
   (``starttls``, or ``ssl`` for port 465, or ``none``), ``MAIL_FROM`` (default the SMTP user):
   any mail service, e.g. Gmail with an app password (smtp.gmail.com, 587).
+* ``MAIL_API`` (``resend`` or ``brevo``) and ``MAIL_API_KEY``: send through that service's
+  web API instead of SMTP, for hosts that block mail ports (Hugging Face Spaces). ``MAIL_FROM``
+  is the sender (Resend's test sender ``onboarding@resend.dev`` mails only the account's own
+  address; Brevo needs a verified sender).
 * ``MAIL_OUTBOX_DIR``: write messages there as .eml files instead of sending them (local
   testing, browser tests).
 * ``BULLETIN_REVIEWERS``, ``BULLETIN_PUBLISHERS`` (default: the reviewers),
@@ -36,6 +40,8 @@ from email.utils import formataddr, make_msgid
 from pathlib import Path
 
 LINK_DAYS = 7
+#: Mail services reached over HTTPS (MAIL_API).
+MAIL_APIS = ("resend", "brevo")
 SECRET_RECORD = "email-action-secret"
 
 
@@ -86,16 +92,25 @@ class Mailer:
         self.sender = os.getenv("MAIL_FROM") or self.user
         outbox = os.getenv("MAIL_OUTBOX_DIR")
         self.outbox = Path(outbox) if outbox else None
+        api = (os.getenv("MAIL_API") or "").lower()
+        self.api = api if api in MAIL_APIS else ""
+        self.api_key = os.getenv("MAIL_API_KEY") or ""
 
     @property
     def configured(self) -> bool:
-        return bool(self.outbox or (self.host and self.sender))
+        if self.outbox:
+            return True
+        if self.api:
+            return bool(self.api_key and self.sender)
+        return bool(self.host and self.sender)
 
     def problem(self) -> str | None:
         """Why email cannot be sent, in words; None when it can."""
         if self.configured:
             return None
-        if not self.host:
+        if self.api and not self.api_key:
+            return f"no {self.api} API key is set up"
+        if not self.host and not self.api:
             return "no mail server is set up"
         return "no sender address is set up"
 
@@ -123,6 +138,9 @@ class Mailer:
             name = f"{time.time_ns()}-{to.replace('@', '_at_')}.eml"
             (self.outbox / name).write_bytes(bytes(message))
             return
+        if self.api:
+            self._send_api(to, subject, text, html, attachments or [])
+            return
         if not self.host:
             raise RuntimeError("No mail server is set up")
         if self.security == "ssl":
@@ -135,6 +153,49 @@ class Mailer:
                 if self.security == "starttls":
                     smtp.starttls(context=ssl.create_default_context())
                 self._deliver(smtp, message)
+
+    def _send_api(
+        self, to: str, subject: str, text: str, html: str, attachments: list[Attachment]
+    ) -> None:
+        """One message through the provider's HTTPS API (port 443)."""
+        import httpx
+
+        files = [
+            {"filename": a.filename, "content": base64.b64encode(a.data).decode()}
+            for a in attachments
+        ]
+        if self.api == "resend":
+            url = "https://api.resend.com/emails"
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            body: dict = {
+                "from": f"ICPAC Week-2 Forecasts <{self.sender}>",
+                "to": [to],
+                "subject": subject,
+                "text": text,
+                "html": html,
+            }
+            if files:
+                body["attachments"] = files
+        else:  # brevo
+            url = "https://api.brevo.com/v3/smtp/email"
+            headers = {"api-key": self.api_key}
+            body = {
+                "sender": {"name": "ICPAC Week-2 Forecasts", "email": self.sender},
+                "to": [{"email": to}],
+                "subject": subject,
+                "textContent": text,
+                "htmlContent": html,
+            }
+            if files:
+                body["attachment"] = [
+                    {"name": f["filename"], "content": f["content"]} for f in files
+                ]
+        response = httpx.post(url, json=body, headers=headers, timeout=30)
+        if response.status_code >= 300:
+            raise RuntimeError(
+                f"The {self.api} mail service refused the message "
+                f"({response.status_code}): {response.text[:200]}"
+            )
 
     def _deliver(self, smtp: smtplib.SMTP, message: EmailMessage) -> None:
         if self.user:

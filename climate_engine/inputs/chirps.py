@@ -629,11 +629,15 @@ def fetch_day(
         return from_held()
     try:
         return from_chc()
-    except CHIRPSUnavailable:
+    except CHIRPSUnavailable as exc:
         # CHC's FTP server first (the same files, both products), then the open mirror
         # (final product only).
         fallback = from_ftp() or from_mirror()
         if fallback is None:
+            if server.ftp.unreachable:  # say why the FTP server failed too
+                raise CHIRPSUnavailable(
+                    f"{exc}; its FTP server failed too ({server.ftp.unreachable})"
+                ) from exc
             raise
         return fallback
 
