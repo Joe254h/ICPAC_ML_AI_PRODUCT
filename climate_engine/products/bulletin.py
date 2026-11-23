@@ -434,6 +434,10 @@ class BulletinInputs:
     provenance: dict[str, Any]
     countries_csv: Path
     maps: dict[str, Path]
+    #: How the previous verified week's forecast compared with observed rainfall (see
+    #: ForecastService.previous_verification); frozen into each draft, None when no earlier
+    #: week has been verified.
+    previous: dict[str, Any] | None = None
 
     @classmethod
     def from_package(cls, directory: Path) -> "BulletinInputs":

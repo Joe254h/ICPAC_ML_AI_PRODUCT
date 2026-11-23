@@ -415,6 +415,65 @@ def about_lines(inputs: BulletinInputs) -> list[tuple[str, str]]:
 LAYER_WORDS = {"raw": "raw ECMWF", "mbc": "MBC", "hybrid": "MBC + AI/ML"}
 
 
+def _signed(value: float) -> str:
+    return f"{value:+.1f}".replace("+0.0", "0.0").replace("-0.0", "0.0")
+
+
+def last_week_lines(inputs: BulletinInputs) -> list[tuple[str, str]]:
+    """How the latest verified week's forecast compared with observed rainfall: the regional
+    means, RMSE, mean error (bias) and correlation of the issued layer, the gain over raw
+    ECMWF, and the member states it matched best and least well."""
+    previous = inputs.previous
+    if not previous:
+        return []
+    layer = previous["layer"]
+    metrics = previous["domain"].get(layer)
+    if not metrics:
+        return []
+    period = period_label(previous["valid_start"], previous["valid_end"])
+    observed = previous.get("observed", "CHIRPS")
+    lines = [
+        (
+            f"Week of {period}:",
+            f" the {LAYER_WORDS.get(layer, layer)} forecast gave a regional mean of "
+            f"{metrics['forecast_mean']:.1f} mm; {observed} observed "
+            f"{metrics['observed_mean']:.1f} mm.",
+        )
+    ]
+    error = (
+        f" RMSE {metrics['rmse']:.1f} mm, mean error {_signed(metrics['bias'])} mm"
+        + (
+            f", correlation {metrics['correlation']:.2f}"
+            if metrics.get("correlation") is not None
+            else ""
+        )
+        + "."
+    )
+    raw = previous["domain"].get("raw")
+    if raw and layer != "raw" and raw.get("rmse"):
+        change = (1 - metrics["rmse"] / raw["rmse"]) * 100
+        error += f" Raw ECMWF: RMSE {raw['rmse']:.1f} mm, so the correction " + (
+            f"cut the error by {change:.0f}%." if change >= 0.5 else "did not reduce it."
+        )
+    lines.append(("Error:", error))
+    countries = {
+        name: by_layer[layer]
+        for name, by_layer in (previous.get("countries") or {}).items()
+        if by_layer.get(layer) and by_layer[layer].get("rmse") is not None
+    }
+    if len(countries) >= 2:
+        best = min(countries, key=lambda c: countries[c]["rmse"])
+        worst = max(countries, key=lambda c: countries[c]["rmse"])
+        lines.append(
+            (
+                "By country:",
+                f" closest in {best} (RMSE {countries[best]['rmse']:.1f} mm), largest error "
+                f"in {worst} (RMSE {countries[worst]['rmse']:.1f} mm).",
+            )
+        )
+    return lines
+
+
 def correction_lines(inputs: BulletinInputs) -> list[tuple[str, str]]:
     """What the bias correction (and the AI/ML layer) did to the raw ECMWF rainfall: the
     regional mean before and after, and the member states it changed most."""
@@ -591,6 +650,15 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
                 "title": "What the Correction Changed",
                 "extra": True,
                 **_paragraphs(correction),
+            }
+        )
+    if last_week := last_week_lines(inputs):
+        result.append(
+            {
+                "key": "last_week",
+                "title": "How Last Week's Forecast Did",
+                "extra": True,
+                **_paragraphs(last_week),
             }
         )
     if chances := chance_lines(inputs, masks):

@@ -873,7 +873,7 @@ class ForecastService:
         problems = packages.check_package(directory)
         if problems:
             raise ValueError(f"Package {forecast_id} failed its integrity checks: {problems}")
-        inputs = BulletinInputs.from_package(directory)
+        inputs = self.bulletin_inputs(forecast_id)
         base = f"/forecasts/{forecast_id}/package"
         sections = weekly.sections(inputs)
         for section in sections:
@@ -897,9 +897,52 @@ class ForecastService:
             },
         }
 
+    def previous_verification(self, forecast_id: str) -> dict[str, Any] | None:
+        """How the latest verified week before this forecast's week was forecast: its period,
+        the issued layer and the verification's regional and country metrics; None when no
+        earlier week is verified (or its package cannot be read)."""
+        record = self.repo.get(KIND, forecast_id)
+        start = str(record.get("valid_start", ""))
+        earlier = [
+            r
+            for r in self.runs()
+            if r.get("verification_status") == "available"
+            and r["forecast_id"] != forecast_id
+            and str(r.get("valid_end", "")) <= start
+        ]
+        for candidate in sorted(earlier, key=lambda r: str(r["valid_end"]), reverse=True)[:3]:
+            try:
+                verification = self._read(candidate["forecast_id"], "verification.json")
+                provenance = self._read(candidate["forecast_id"], "provenance.json")
+            except (KeyError, ValueError, OSError):
+                continue  # a package that is not on this host: try the week before
+            domain = verification.get("domain") or {}
+            layer = primary_layer(provenance)
+            if layer not in domain:
+                layer = next((name for name in ("hybrid", "mbc", "raw") if name in domain), "")
+            if not layer:
+                continue
+            return {
+                "forecast_id": candidate["forecast_id"],
+                "valid_start": str(candidate["valid_start"]),
+                "valid_end": str(candidate["valid_end"]),
+                "layer": layer,
+                "observed": "CHIRPS",
+                "domain": domain,
+                "countries": verification.get("countries") or {},
+            }
+        return None
+
+    def bulletin_inputs(self, forecast_id: str) -> BulletinInputs:
+        """The package's bulletin inputs with the previous verified week attached."""
+        from dataclasses import replace
+
+        inputs = BulletinInputs.from_package(self.directory(forecast_id))
+        return replace(inputs, previous=self.previous_verification(forecast_id))
+
     def export_bulletin(self, forecast_id: str) -> bytes:
         self.repo.get(KIND, forecast_id)
-        inputs = BulletinInputs.from_package(self.directory(forecast_id))
+        inputs = self.bulletin_inputs(forecast_id)
         return WordTemplateGenerator().render_bytes(inputs)
 
     # ------------------------------------------------------------------ verification
