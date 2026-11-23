@@ -42,12 +42,12 @@ DATASETS: dict[str, tuple[str, set[str], set[str], set[str]]] = {
     "ecmwf_tcw": ("cases", {"tcw", "tcwv"}, set(), {"era5", "merra"}),
     "ecmwf_sm20": ("cases", {"sm20", "sm100", "swvl1", "swvl2", "sm"}, {"ecmwf", "s2s", "ifs", "reforecast", "hindcast"}, {"era5", "merra", "land"}),
     "ecmwf_pressure": ("cases", {"gh", "z500", "u", "v", "q", "t", "pressure", "pl", "plev", "pressure_levels"}, {"ecmwf", "s2s", "ifs", "reforecast", "hindcast"}, {"era5", "merra", "chirps"}),
-    "oisst": ("daily", {"oisst", "sst"}, set(), {"ecmwf", "s2s", "era5"}),
+    "oisst": ("daily", {"oisst", "sst"}, set(), {"ecmwf", "era5", "skt", "predictors"}),
     "era5_land": ("daily", {"era5land"}, set(), set()),
     "era5_atmos": ("daily", {"era5"}, set(), {"era5land", "land"}),
     "mjo_rmm": ("index", {"rmm", "mjo"}, set(), set()),
     "chirps": ("daily", {"chirps", "chirps3"}, set(), set()),
-    "modis_ndvi": ("16day", {"ndvi", "evi", "mod13", "mod13c1", "mod13a2", "myd13"}, set(), set()),
+    "modis_ndvi": ("monthly", {"ndvi", "evi", "mod13", "mod13c1", "mod13c2", "mod13a2", "myd13"}, set(), set()),
     "modis_landcover": ("yearly", {"mcd12", "mcd12c1", "landcover"}, set(), set()),
     "merra2": ("daily", {"merra", "merra2"}, set(), set()),
     "noaa_olr": ("daily", {"olr"}, set(), set()),
@@ -60,6 +60,7 @@ DATASETS: dict[str, tuple[str, set[str], set[str], set[str]]] = {
 }
 #: Folders never searched: environments, code, logs, other projects.
 SKIP = {"envs", "pkgs", "__pycache__", "code", "logs", ".git", "node_modules", "rl_thesis",
+        "experiments", "results", "quarantine", "_pending_delete_20261117", "audit",
         "rl_thesis_pre_final_20260819", "gemma-4-africa-reasoning", "organized_root_logs"}
 DATA_EXT = (".nc", ".nc4", ".grib", ".grib2", ".grb", ".grb2", ".tif", ".tiff", ".hdf",
             ".h5", ".he5", ".csv", ".txt", ".dat", ".zarr", ".npz", ".npy", ".parquet",
@@ -100,7 +101,7 @@ def dates_in_name(name: str, start: date, end: date) -> tuple[set[date], str]:
         y, mo = int(m[1]), int(m[2])
         first = date(y, mo, 1)
         last = (date(y + (mo == 12), mo % 12 + 1, 1)) - timedelta(days=1)
-        return set(days(max(first, start), min(last, end))), "month"
+        return set(days(max(first, start), min(last, end))), "month"  # includes the 1st
     years = {int(m[1]) for m in Y.finditer(name)}
     if len(years) == 1:
         y = years.pop()
@@ -119,6 +120,8 @@ def expected(freq: str, start: date, end: date, cases: set[date]) -> set[date]:
         return set(days(start, end))
     if freq == "16day":  # MODIS composites start on day 1, 17, 33... of each year
         return {d for d in days(start, end) if (d.timetuple().tm_yday - 1) % 16 == 0}
+    if freq == "monthly":
+        return {d for d in days(start, end) if d.day == 1}
     if freq == "yearly":
         return {date(y, 1, 1) for y in range(start.year, end.year + 1)}
     if freq == "cases":
