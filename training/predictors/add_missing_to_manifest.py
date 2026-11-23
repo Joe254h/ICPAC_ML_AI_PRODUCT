@@ -84,7 +84,7 @@ def main() -> None:
     ap.add_argument("--member-key", default="",
                     help="request key listing members 1-10 for perturbed requests (e.g. number)")
     ap.add_argument("--level-type", help="override the level_type value (pressure sets)")
-    ap.add_argument("--level-key", default="pressure_level", help="request key for the levels")
+    ap.add_argument("--level-key", default="levelist", help="request key for the levels (ECDS accepts levelist or level)")
     ap.add_argument("--test", action="store_true", help="one date, control, first variable")
     ap.add_argument("--test-all", action="store_true",
                     help="one date, control, one request per variable (checks each ECDS name)")
