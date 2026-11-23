@@ -362,6 +362,8 @@ export type BulletinStatus = {
 
 export type Health = {
   access_mode?: "staff" | "public";
+  /** Every visitor may run forecasts and manage models: no staff key is asked for. */
+  open_access?: boolean;
   status: string;
   mode: string;
   /** The deployed source revision (absent on releases before it was reported). */

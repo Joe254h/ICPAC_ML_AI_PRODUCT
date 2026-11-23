@@ -447,3 +447,21 @@ def test_a_realtime_review_needs_a_run_whose_checks_all_passed(setup):
     assert withdrawn["realtime_reviews"] == {}
     actions = [a["action"] for a in platform.repo.list("approval")]
     assert "realtime_review_confirmed" in actions and "realtime_review_withdrawn" in actions
+
+
+def test_a_standing_realtime_review_is_recorded_at_startup(setup, monkeypatch):
+    """REALTIME_REVIEW_CONFIRMED_BY records the reviewer's confirmation once, so a disk
+    wiped on restart still issues the AI/ML layer."""
+    platform, registry, paths, root, tmp = setup
+    model_id = registry.register_descriptor(str(write_descriptor(tmp / "a.yaml", paths, root)))[
+        "model_id"
+    ]
+    monkeypatch.delenv("REALTIME_REVIEW_CONFIRMED_BY", raising=False)
+    assert registry.apply_standing_realtime_review() is None
+    monkeypatch.setenv("REALTIME_REVIEW_CONFIRMED_BY", "Joel Nyongesa")
+    review = registry.apply_standing_realtime_review()
+    assert review is not None and review["actor"] == "Joel Nyongesa" and review["standing"]
+    stored = platform.repo.get("model", model_id)["realtime_reviews"]["ecmwf_opendata"]
+    assert stored["actor"] == "Joel Nyongesa"
+    assert registry.apply_standing_realtime_review() is None  # recorded once
+    assert "realtime_review_confirmed" in [a["action"] for a in platform.repo.list("approval")]

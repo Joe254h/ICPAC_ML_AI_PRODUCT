@@ -489,6 +489,57 @@ class ModelRegistry:
             if operational.is_operational(m)
         }
 
+    def apply_standing_realtime_review(self) -> dict | None:
+        """REALTIME_REVIEW_CONFIRMED_BY (a reviewer's name): that reviewer's standing
+        confirmation that ECMWF Open Data matches the model in use, recorded at startup
+        (a disk wiped on restart keeps it). Each run's input checks still apply. Returns the
+        review recorded, or None when nothing was needed."""
+        reviewer = " ".join((os.getenv("REALTIME_REVIEW_CONFIRMED_BY") or "").split())[:80]
+        if len(reviewer) < 2:
+            return None
+        try:
+            model_id = self.current()["model"]["model_id"]
+        except (KeyError, TypeError):
+            return None
+        with self._write_lock() as session:
+            row = session.get(Record, model_id)
+            if row is None or row.kind != "model":
+                return None
+            metadata = json.loads(row.payload)
+            reviews = dict(metadata.get("realtime_reviews") or {})
+            if "ecmwf_opendata" in reviews:
+                return None
+            comment = (
+                "Standing confirmation (REALTIME_REVIEW_CONFIRMED_BY): ECMWF Open Data is "
+                "compatible with the frozen model; every run's input checks still apply."
+            )
+            review = {
+                "source": "ecmwf_opendata",
+                "actor": reviewer,
+                "comment": comment,
+                "timestamp": now(),
+                "forecast_id": None,
+                "checks": 0,
+                "standing": True,
+            }
+            reviews["ecmwf_opendata"] = review
+            metadata["realtime_reviews"] = reviews
+            row.payload = json.dumps(metadata)
+            session.add(
+                self._approval_record(
+                    "realtime_review_confirmed", model_id, reviewer, comment, "ecmwf_opendata"
+                )
+            )
+            session.add(
+                self._audit_record(
+                    "model_realtime_review_confirmed",
+                    reviewer,
+                    model_id,
+                    {"source": "ecmwf_opendata", "standing": True},
+                )
+            )
+        return review
+
     def review_realtime_feed(self, model_id: str, body) -> dict:
         """A reviewer's confirmation (or withdrawal) that a real-time input source matches
         the frozen model's training data, after a run whose input checks all passed."""

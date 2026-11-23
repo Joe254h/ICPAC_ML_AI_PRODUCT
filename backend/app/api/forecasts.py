@@ -13,6 +13,7 @@ from backend.app.api.access import (
     Principal,
     acting_name,
     is_visitor,
+    open_access,
     require_operator,
     require_staff_operator,
 )
@@ -255,7 +256,7 @@ def install(app: FastAPI, dependency) -> None:
         user: Principal = Depends(require_operator),
     ) -> dict:
         """Start a background task (download, run, verify or the weekly cycle)."""
-        if body.action in STAFF_ACTIONS and is_visitor(user):
+        if body.action in STAFF_ACTIONS and is_visitor(user) and not open_access():
             raise HTTPException(
                 403,
                 "Downloading, running or resetting forecasts needs a staff access key "

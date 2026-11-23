@@ -21,11 +21,13 @@ export function useStaff(): {
   const mode = health.data?.access_mode;
   const me = useApi<StaffUser>(mode ? "/access/me" : null);
   const named = Boolean(me.data && !me.data.name.startsWith("visitor:"));
+  // Open access: every visitor may run forecasts and manage models, no key asked for.
+  const open = mode === "public" && Boolean(health.data?.open_access);
   return {
     signedIn: mode === "public" || Boolean(me.data),
     needsSignIn: mode === "staff" && (me.status === 401 || me.status === 403),
-    staff: named,
-    admin: named && Boolean(me.data?.roles.includes("admin")),
+    staff: named || open,
+    admin: (named && Boolean(me.data?.roles.includes("admin"))) || open,
     user: named ? me.data : undefined,
   };
 }

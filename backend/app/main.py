@@ -57,6 +57,9 @@ def create_app(database_url: str | None = None) -> FastAPI:
             Repository(database_url),
             register_descriptors=os.getenv("AUTO_REGISTER_MODELS", "true") == "true",
         )
+        from backend.app.services.registry import ModelRegistry
+
+        ModelRegistry(app.state.platform).apply_standing_realtime_review()
         stopped = threading.Event()
         worker = threading.Thread(
             target=OperationService(app.state.platform).worker,
