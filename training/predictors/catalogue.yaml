@@ -1,0 +1,298 @@
+# Candidate predictors for the ICPAC Week-2 (days 8-14) rainfall ML model.
+#
+# 124 single variables and 14 gridded fields in 19 groups. Every script reads this file:
+# download.py fetches what the sources need, derive.py computes each variable per case,
+# reduce.py reduces each group. Nothing is reduced here; change "keep" or "reduce" to tune.
+#
+# Sources
+#   ens     ECMWF S2S extended-range reforecasts (training) and ECMWF Open Data (live):
+#           10 perturbed members, 1.5 degree; weekly value = mean over steps 192-336 h
+#           (days 8-14), then ensemble mean and spread (standard deviation over members).
+#   obs     observed at the case's initialization date (never after it).
+#   static  fixed per grid cell.
+#
+# Group kinds
+#   local_pca   per-cell PCA across the group's variables (1.5 degree local box), as the
+#               current model's 30 atmospheric inputs -> 17 components.
+#   field_eof   spatial EOF of one or more fields over a region: a few numbers per case.
+#   indices     one value per case; kept as they are, or a small PCA when reduce: pca.
+#   cell        per-cell values kept as they are (rainfall, geography).
+
+version: 1
+
+# The 11 ICPAC member states. The local box is the 1.5 degree box of the existing pipeline
+# (27 latitudes x 24 longitudes); the model grid and mask are the authoritative 0.05 degree
+# ones (artifacts/.../authoritative_icpac11_mask.npz).
+domain:
+  countries: [Burundi, Djibouti, Eritrea, Ethiopia, Kenya, Rwanda, Somalia, South Sudan,
+              Sudan, Tanzania, Uganda]
+  local_box: {north: 25.5, south: -13.5, west: 18.0, east: 52.5, step: 1.5}
+  # Large-scale download box for the EOF fields and pressure/jet indices.
+  large_box: {north: 45.0, south: -45.0, west: -20.0, east: 180.0, step: 1.5}
+
+training:
+  first_year: 2005
+  last_year: 2021        # 2022 onward stays untouched for the independent test
+  week_steps_hours: [192, 216, 240, 264, 288, 312, 336]
+  members: 10
+
+# Calendar groupings for seasonal EOFs (groups with seasonal: true).
+seasons:
+  JF: [1, 2]
+  MAM: [3, 4, 5]
+  JJAS: [6, 7, 8, 9]
+  OND: [10, 11, 12]
+
+reduction:
+  variance: 0.90          # keep modes until this share of variance is explained
+  north_rule: true        # never cut inside a pair of modes North's rule cannot separate
+  max_modes: 12
+  climatology_harmonics: 3  # seasonal cycle removed with 3 annual harmonics per point
+
+# ---------------------------------------------------------------- ENS raw requests
+# What download.py asks the S2S archive for; derive.py computes everything else from it.
+ens_raw:
+  pressure_levels:
+    q: [925, 850, 700]
+    t: [850, 700, 500]
+    u: [1000, 925, 850, 700, 200, 100]
+    v: [1000, 925, 850, 700, 200, 100]
+    gh: [1000, 850, 700, 500, 200]
+    w: [500]
+  surface: [tp, ttr, msl, sp, tcw, sm20]    # sm20: top-layer soil moisture, if archived
+  # Global 200 hPa wind (velocity potential needs the whole globe) and 10 hPa wind
+  # (polar vortex at 60 N), small requests of their own.
+  global_levels:
+    u: [200, 10]
+    v: [200, 10]
+
+# ---------------------------------------------------------------- groups
+groups:
+
+  L1:
+    name: Moisture and stability
+    kind: local_pca
+    stats: [mean, spread]
+    variables:
+      - {id: [1, 2], name: q850, unit: kg/kg, derive: q@850}
+      - {id: [3, 4], name: q700, unit: kg/kg, derive: q@700}
+      - {id: [5, 6], name: tcwv, unit: kg/m2, derive: tcw, note: "total column water (vapour + condensate) where only tcw is archived"}
+      - {id: [7, 8], name: rh700, unit: "%", derive: rh(q@700, t@700, 700)}
+      - {id: [9, 10], name: mfc_low, unit: kg/m2/s, derive: "moisture-flux convergence integrated 925-700 hPa"}
+      - {id: [11, 12], name: t850, unit: K, derive: t@850}
+      - {id: [13, 14], name: t500, unit: K, derive: t@500}
+      - {id: [15, 16], name: dt850_500, unit: K, derive: t@850 - t@500}
+      - {id: [17, 18], name: k_index, unit: K, derive: "(T850-T500) + Td850 - (T700-Td700)"}
+      - {id: [19, 20], name: w500, unit: Pa/s, derive: w@500}
+
+  L2:
+    name: Local circulation
+    kind: local_pca
+    stats: [mean, spread]
+    variables:
+      - {id: [21, 22], name: u850, unit: m/s, derive: u@850}
+      - {id: [23, 24], name: v850, unit: m/s, derive: v@850}
+      - {id: [25, 26], name: wind850, unit: m/s, derive: "hypot(u, v)@850"}
+      - {id: [27, 28], name: qu850, unit: m/s, derive: "q*u@850"}
+      - {id: [29, 30], name: qv850, unit: m/s, derive: "q*v@850"}
+      - {id: [31, 32], name: qwind850, unit: m/s, derive: "q*hypot(u, v)@850"}
+      - {id: [33, 34], name: u200, unit: m/s, derive: u@200}
+      - {id: [35, 36], name: v200, unit: m/s, derive: v@200}
+      - {id: [37, 38], name: shear200_850, unit: m/s, derive: "|V200 - V850|"}
+      - {id: [39, 40], name: vort850, unit: 1/s, derive: "relative vorticity@850"}
+      - {id: [41, 42], name: div200, unit: 1/s, derive: "divergence@200"}
+
+  L3:
+    name: Land memory
+    kind: local_pca
+    stats: [value]
+    variables:
+      - {id: 43, name: chirps_7d, source: obs, unit: mm, derive: "CHIRPS total, 7 days before initialization"}
+      - {id: 44, name: chirps_14d, source: obs, unit: mm, derive: "CHIRPS total, 14 days before"}
+      - {id: 45, name: chirps_28d, source: obs, unit: mm, derive: "CHIRPS total, 28 days before"}
+      - {id: 46, name: soil_moisture, source: ens, unit: m3/m3, derive: "sm20 at step 0 (ensemble mean); else ERA5-Land swvl1 at initialization"}
+      - {id: 47, name: ndvi, source: obs, unit: "1", derive: "MODIS MOD13C1, latest 16-day composite before initialization", optional: true}
+
+  P1:
+    name: Local pressure and thickness
+    kind: local_pca
+    stats: [mean, spread]
+    variables:
+      - {id: [48, 49], name: sp, unit: Pa, derive: sp}
+      - {id: [50, 51], name: msl, unit: Pa, derive: msl}
+      - {id: [52, 53], name: msl_tendency, unit: Pa, derive: "msl(336 h) - msl(192 h)"}
+      - {id: [54, 55], name: msl_gradient, unit: Pa/m, derive: "|grad msl|"}
+      - {id: [56, 57], name: gh850, unit: gpm, derive: gh@850}
+      - {id: [58, 59], name: gh700, unit: gpm, derive: gh@700}
+      - {id: [60, 61], name: gh500, unit: gpm, derive: gh@500}
+      - {id: [62, 63], name: gh200, unit: gpm, derive: gh@200}
+      - {id: [64, 65], name: thickness1000_500, unit: gpm, derive: gh@500 - gh@1000}
+
+  P2:
+    name: Pressure centres and gradients
+    kind: indices
+    reduce: none          # or pca (about 5 components)
+    variables:
+      - {id: 66, name: mascarene_pressure, derive: "max msl, 20-40S 40-90E"}
+      - {id: 67, name: mascarene_latitude, derive: "latitude of that maximum"}
+      - {id: 68, name: mascarene_longitude, derive: "longitude of that maximum"}
+      - {id: 69, name: st_helena_pressure, derive: "max msl, 15-40S 20W-15E"}
+      - {id: 70, name: st_helena_latitude, derive: "latitude of that maximum"}
+      - {id: 71, name: arabian_high_pressure, derive: "max msl, 20-35N 40-60E"}
+      - {id: 72, name: saharan_low_pressure, derive: "min msl, 15-30N 0-20E"}
+      - {id: 73, name: arabian_low_pressure, derive: "min msl, 15-30N 45-60E"}
+      - {id: 74, name: sudan_low_pressure, derive: "min msl, 5-20N 20-35E"}
+      - {id: 75, name: cross_equatorial_gradient, derive: "mascarene_pressure - arabian_low_pressure"}
+      - {id: 76, name: turkana_gradient, derive: "mean msl 2S-4N 39-42E minus mean msl 5-10N 28-33E"}
+      - {id: 77, name: red_sea_gradient, derive: "mean msl 25-28N 33-37E minus mean msl 13-16N 40-43E"}
+      - {id: 78, name: equatorial_io_gradient, derive: "mean msl 5S-5N 50-60E minus mean msl 5S-5N 85-95E"}
+      - {id: 79, name: soi, source: obs, derive: "Southern Oscillation Index (CPC), month before initialization"}
+
+  N1:
+    name: Rainfall forecast
+    kind: cell
+    variables:
+      - {id: 80, name: rain_mean, derive: "ensemble-mean Week-2 rainfall (tp 336 h - 168 h)"}
+      - {id: 81, name: rain_spread, derive: "ensemble spread of Week-2 rainfall"}
+      - {id: 82, name: rain_mbc, derive: "MBC rainfall (existing pipeline)"}
+      - {id: 83, name: rain_p10, derive: "10th percentile of members"}
+      - {id: 84, name: rain_p90, derive: "90th percentile of members"}
+      - {id: 85, name: rain_share_10mm, derive: "share of members above 10 mm"}
+
+  N2:
+    name: Intraseasonal
+    kind: indices
+    reduce: none
+    variables:
+      - {id: 86, name: rmm1, source: obs, derive: "BoM RMM1 at initialization", duplicates: E1}
+      - {id: 87, name: rmm2, source: obs, derive: "BoM RMM2 at initialization", duplicates: E1}
+      - {id: 88, name: mjo_amplitude, source: obs, derive: "sqrt(RMM1^2 + RMM2^2)", duplicates: E1}
+      - {id: 89, name: bsiso1, source: obs, derive: "BSISO index 1 (user-supplied file)", optional: true}
+      - {id: 90, name: bsiso2, source: obs, derive: "BSISO index 2 (user-supplied file)", optional: true}
+      - {id: 91, name: kelvin_olr, source: obs, per_cell: true, derive: "Kelvin-filtered NOAA OLR at the cell, at initialization"}
+      - {id: 92, name: rossby_olr, source: obs, per_cell: true, derive: "equatorial-Rossby-filtered NOAA OLR at the cell"}
+
+  N3:
+    name: Slow and remote modes
+    kind: indices
+    reduce: none          # or pca (about 2 components)
+    variables:
+      - {id: 93, name: qbo_u30, source: obs, derive: "CPC QBO u30 index, month before initialization"}
+      - {id: 94, name: sam, source: obs, derive: "CPC daily AAO (SAM) index, mean of 7 days before"}
+      - {id: 95, name: nao, source: obs, derive: "CPC daily NAO index, mean of 7 days before"}
+      - {id: 96, name: io_heat_content, source: obs, derive: "ORAS5 upper-300 m heat content, 50S-30N 40-110E mean, month before", optional: true}
+      - {id: 97, name: polar_vortex_u10, source: ens, derive: "zonal-mean u at 10 hPa, 60N, days 8-14 ensemble mean"}
+      - {id: 98, name: dust_aod, source: obs, derive: "CAMS EAC4 dust AOD 550 nm over the local box, day before", optional: true}
+
+  N4:
+    name: Geography and season
+    kind: cell
+    variables:
+      - {id: 99, name: latitude, source: static}
+      - {id: 100, name: longitude, source: static}
+      - {id: 101, name: elevation, source: static, derive: "ETOPO 2022 surface elevation"}
+      - {id: 102, name: slope, source: static, derive: "from elevation"}
+      - {id: 103, name: aspect_sin, source: static}
+      - {id: 104, name: aspect_cos, source: static}
+      - {id: 105, name: dist_coast_km, source: static, derive: "Natural Earth 10 m coastline"}
+      - {id: 106, name: dist_lake_victoria_km, source: static, derive: "Natural Earth 10 m lakes; 0 over the lake"}
+      - {id: 107, name: dist_other_lake_km, source: static, derive: "nearest other lake larger than 1,000 km2"}
+      - {id: 108, name: doy_sin, source: static, derive: "day of year of the initialization"}
+      - {id: 109, name: doy_cos, source: static}
+
+  N5:
+    name: Tropical cyclones
+    kind: indices
+    reduce: none
+    variables:
+      - {id: 110, name: tc_distance_km, source: obs, derive: "IBTrACS: nearest active storm (SI, NI basins) to 0N 40E at initialization; 5000 if none"}
+      - {id: 111, name: tc_wind_kt, source: obs, derive: "its maximum wind; 0 if none"}
+
+  N6:
+    name: Ocean and lake indices
+    kind: indices
+    reduce: none
+    variables:
+      - {id: 112, name: nino34, source: obs, derive: "OISST anomaly 5S-5N 170-120W, 7 days before", duplicates: E7}
+      - {id: 113, name: dmi, source: obs, derive: "OISST 10S-10N 50-70E minus 10S-0 90-110E", duplicates: E7}
+      - {id: 114, name: wio_sst, source: obs, derive: "OISST anomaly 10S-10N 50-70E", duplicates: E7}
+      - {id: 115, name: atl3, source: obs, derive: "OISST anomaly 3S-3N 20W-0", duplicates: E7}
+      - {id: 116, name: lake_victoria_temperature, source: obs, derive: "ERA5 lake mix-layer temperature anomaly over the lake", optional: true}
+
+  N7:
+    name: Circulation indices
+    kind: indices
+    reduce: none
+    variables:
+      - {id: 117, name: turkana_jet, derive: "max wind speed 925 hPa, 1-6N 34-39E", duplicates: E3}
+      - {id: 118, name: somali_jet, derive: "mean wind speed 850 hPa, 5-15N 50-65E", duplicates: E3}
+      - {id: 119, name: congo_inflow, derive: "mean q*u 850 hPa, 5S-5N 25-30E", duplicates: E3}
+      - {id: 120, name: io_walker, derive: "mean u850, 5S-5N 70-90E", duplicates: E2}
+      - {id: 121, name: tej, derive: "minus mean u200, 5-15N 40-80E", duplicates: E5}
+      - {id: 122, name: aej, derive: "minus mean u700, 10-15N 20-40E (600 hPa is not archived)", duplicates: E5}
+      - {id: 123, name: itcz_latitude, derive: "rainfall-weighted latitude, 20S-20N 20-55E", duplicates: E6}
+      - {id: 124, name: red_sea_convergence, derive: "minus mean divergence 850 hPa, 15-25N 36-42E"}
+
+  # ---------------------------------------------------------------- spatial EOFs
+  E1:
+    name: Tropical convection and MJO
+    kind: field_eof
+    region: {north: 15, south: -15, west: 0, east: 180}
+    fields: [olr, chi200, u850, u200]          # F1 F2 F3 F4
+    expect_modes: [3, 4]
+  E2:
+    name: Indian Ocean Walker cell
+    kind: field_eof
+    region: {north: 10, south: -10, west: 40, east: 100}
+    fields: [u850, u200, msl]                  # F3 F4 F5
+    expect_modes: [2, 3]
+  E3:
+    name: Low-level jets and moisture inflow
+    kind: field_eof
+    seasonal: true
+    region: {north: 20, south: -15, west: 20, east: 65}
+    fields: [u850, v850, u925, v925, qflux850]  # F3 F6 F7 F8 F9
+    expect_modes: [3, 4]
+  E4:
+    name: Pressure systems
+    kind: field_eof
+    region: {north: 35, south: -40, west: 0, east: 90}
+    fields: [msl, gh850]                       # F5 F10
+    expect_modes: [3, 4]
+  E5:
+    name: Upper-level jets
+    kind: field_eof
+    seasonal: true
+    region: {north: 35, south: 0, west: 0, east: 90}
+    fields: [u200, u100, u700]                 # F4 F11 F12 (700 hPa stands in for 600)
+    expect_modes: [2, 3]
+  E6:
+    name: Rain-belt position
+    kind: field_eof
+    region: {north: 20, south: -20, west: 20, east: 55}
+    fields: [rain, olr]                        # F13 F1
+    expect_modes: [2, 3]
+  E7:
+    name: Ocean state
+    kind: field_eof
+    source: obs
+    region: {north: 30, south: -30, west: 0, east: 360}
+    fields: [sst]                              # F14
+    expect_modes: [4, 5]
+
+# The 14 gridded fields and how each is made (derive.py).
+fields:
+  F1: {name: olr, source: ens, derive: "-(ttr(336) - ttr(168)) / (7 * 86400), W/m2"}
+  F2: {name: chi200, source: ens, derive: "velocity potential from global u, v at 200 hPa (windspharm); divergence 200 if unavailable"}
+  F3: {name: u850, source: ens}
+  F4: {name: u200, source: ens}
+  F5: {name: msl, source: ens}
+  F6: {name: v850, source: ens}
+  F7: {name: u925, source: ens}
+  F8: {name: v925, source: ens}
+  F9: {name: qflux850, source: ens, derive: "q * hypot(u, v) at 850 hPa"}
+  F10: {name: gh850, source: ens}
+  F11: {name: u100, source: ens}
+  F12: {name: u700, source: ens, derive: "700 hPa in place of the unarchived 600 hPa"}
+  F13: {name: rain, source: ens, derive: "Week-2 rainfall"}
+  F14: {name: sst, source: obs, derive: "NOAA OISST v2.1 anomaly, mean of 7 days before initialization"}

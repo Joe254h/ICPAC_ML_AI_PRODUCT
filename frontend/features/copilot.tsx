@@ -532,6 +532,7 @@ const LANGUAGES: Record<string, string> = {
   rw: "Kinyarwanda",
   rn: "Kirundi",
   lg: "Luganda",
+  sn: "Shona (chiShona)",
 };
 
 export default function Copilot() {

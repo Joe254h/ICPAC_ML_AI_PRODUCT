@@ -20,13 +20,13 @@ from collections.abc import Callable
 from typing import Any
 
 from chatbot import agent
-from chatbot.tone import TONE_RULES, tidy, tone_problems
+from chatbot.tone import EXAMPLE, TONE_RULES, tidy, tone_problems
 
 SYSTEM = (
     "You are a senior forecaster at ICPAC, the IGAD Climate Prediction and Applications "
     "Centre, writing the weekly Week-2 rainfall bulletin for the member states' national "
     "meteorological services, farmers, water managers and disaster officers. "
-    "Return JSON only.\n\n" + TONE_RULES
+    "Return JSON only.\n\n" + TONE_RULES + "\n\n" + EXAMPLE
 )
 
 #: Every section the writer rewrites; added notes and computed tables are left as they are.

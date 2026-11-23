@@ -178,7 +178,7 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   ).toBeVisible({ timeout: 280_000 });
   // The map says how noisy a correlation over so few weeks is.
   await expect(
-    page.getByText(/only r above 0\.\d\d differs from chance/),
+    page.getByText(/only r above 0\.\d{2,3} differs from chance/),
   ).toBeVisible();
   await page.goto("/verification");
   await expect(

@@ -29,10 +29,12 @@
   --red: #b42318;
   --red-50: #fdf2f1;
   --blue: #1f62a8;
-  --shadow-card: none;
+  --shadow-card:
+    0 1px 2px rgba(23, 33, 27, 0.04), 0 4px 18px rgba(23, 33, 27, 0.045);
   --shadow-pop: 0 18px 44px rgba(23, 33, 27, 0.16);
-  --radius-card: 6px;
-  --radius: 6px;
+  --radius-card: 12px;
+  --radius: 8px;
+  --focus-ring: 0 0 0 3px rgba(39, 145, 96, 0.35);
   /* Serif headings as in ICPAC's printed bulletins; a plain sans with tabular figures. */
   --font-heading: "Source Serif 4", Georgia, "Times New Roman", serif;
   --font-body:
@@ -588,6 +590,12 @@ li.open > .dropdown {
     border-color 0.15s;
   white-space: nowrap;
 }
+.btn:focus-visible,
+.card a:focus-visible,
+table.data a:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -713,7 +721,7 @@ li.open > .dropdown {
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
-  padding: 22px 24px 24px;
+  padding: 24px 26px 26px;
   min-width: 0;
 }
 .card.flush {
@@ -921,29 +929,29 @@ li.open > .dropdown {
 }
 
 /* stats */
+/* Stat tiles: one card each, a quiet label above a large figure. */
 .stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+.stat {
+  padding: 16px 20px 18px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
-  /* the dividers sit outside the first column and row and are clipped there */
-  overflow: hidden;
-}
-.stat {
-  padding: 16px 22px 18px;
-  box-shadow:
-    -1px 0 0 var(--line),
-    0 -1px 0 var(--line);
+  min-width: 0;
 }
 .stat .label {
   color: var(--muted);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .stat .value {
-  font: 650 26px/1.2 var(--font-heading);
+  font: 650 30px/1.15 var(--font-heading);
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
@@ -986,7 +994,7 @@ li.open > .dropdown {
 /* tables */
 .table-wrap {
   overflow-x: auto;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid var(--line);
 }
 table.data {
@@ -997,7 +1005,9 @@ table.data {
 }
 table.data th {
   text-align: left;
-  font: 600 12.5px var(--font-body);
+  font: 600 11.5px var(--font-body);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--muted);
   background: var(--surface-2);
   padding: 10px 14px;
@@ -2551,9 +2561,10 @@ select.input,
   }
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
   .stat {
-    padding: 13px 16px 15px;
+    padding: 13px 14px 15px;
   }
   .stat .value {
     font-size: 22px;

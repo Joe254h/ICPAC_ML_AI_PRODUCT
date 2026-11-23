@@ -455,10 +455,13 @@ export function CountryTable({
   rows,
   layers,
   forecastId,
+  errors,
 }: {
   rows: CountryRow[];
   layers: Variant[];
   forecastId: string;
+  /** Typical error (RMSE, mm/week) of the main layer by country, 2022–2024. */
+  errors?: Record<string, { rmse: number }>;
 }) {
   const main = layers.includes("hybrid") ? "hybrid" : "mbc";
   return (
@@ -475,6 +478,14 @@ export function CountryTable({
             <th className="num">Median</th>
             <th className="num">Min</th>
             <th className="num">Max</th>
+            {errors && (
+              <th
+                className="num"
+                title="Typical grid-cell error over 2022–2024"
+              >
+                RMSE
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -500,6 +511,9 @@ export function CountryTable({
                 <td className="num">{num(stats?.median_mm)}</td>
                 <td className="num">{num(stats?.min_mm)}</td>
                 <td className="num">{num(stats?.max_mm)}</td>
+                {errors && (
+                  <td className="num">{num(errors[row.country]?.rmse)}</td>
+                )}
               </tr>
             );
           })}

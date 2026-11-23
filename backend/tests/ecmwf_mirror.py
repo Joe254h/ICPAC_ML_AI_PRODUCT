@@ -424,7 +424,12 @@ def main() -> None:
     day = args.date or latest - timedelta(days=7)
     shutil.rmtree(args.root, ignore_errors=True)
     build(args.root, day, args.members, pressure_steps=tuple(args.pressure_steps))
-    past = [latest - timedelta(days=14 + 7 * week) for week in range(PAST_WEEKS)]
+    # The past runs whose Week-2 window CHIRPS already covers (its last day, run + 13, plus
+    # two days of latency): on a Sunday or Monday the run two weeks back is not yet one.
+    newest_run = latest - timedelta(days=14)
+    while newest_run + timedelta(days=15) > (args.date or today):
+        newest_run -= timedelta(days=7)
+    past = [newest_run - timedelta(days=7 * week) for week in range(PAST_WEEKS)]
     for run in past:
         build(args.root, run, args.members, wetness=wetness(run))
     # Each run's Week-2 window: days 7 to 13 after it.

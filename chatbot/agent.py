@@ -166,6 +166,7 @@ LANGUAGES = {
     "rw": "Kinyarwanda",
     "rn": "Kirundi",
     "lg": "Luganda",
+    "sn": "Shona",
 }
 
 
@@ -274,7 +275,7 @@ TOOLS: list[dict[str, Any]] = [
                     "enum": [code for code in LANGUAGES if code != "en"],
                     "description": "Language code: sw Kiswahili, am Amharic, so Somali, "
                     "ar Arabic, fr French, ti Tigrinya, om Afaan Oromo, rw Kinyarwanda, "
-                    "rn Kirundi, lg Luganda.",
+                    "rn Kirundi, lg Luganda, sn Shona.",
                 },
                 "forecast": FORECAST_ARG,
             }
@@ -400,7 +401,7 @@ WEB_TOOLS: list[dict[str, Any]] = [
                     "enum": sorted(web.WIKIPEDIAS),
                     "description": "Wikipedia edition: en (default), sw Kiswahili, am "
                     "Amharic, so Somali, ar Arabic, fr French, ti Tigrinya, om Afaan Oromo, "
-                    "rw Kinyarwanda, rn Kirundi, lg Luganda.",
+                    "rw Kinyarwanda, rn Kirundi, lg Luganda, sn Shona.",
                 },
             },
             ["query"],

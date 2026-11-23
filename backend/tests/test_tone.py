@@ -49,3 +49,57 @@ def test_the_checker_keeps_every_figure(tmp_path, capsys):
     found = report(changed, original.read_text())
     assert "figures dropped: 12.6" in found and "figures added: 13" in found
     assert any("dash" in line for line in found)
+
+
+def test_humanizer_skill_matches_the_service_rules():
+    """The .claude skill and the writer's prompt show the same example, and every pattern
+    the skill tells people to remove is one the service's checker flags."""
+    import re
+    from pathlib import Path
+
+    from chatbot import tone
+
+    skill = Path(__file__).resolve().parents[2] / ".claude/skills/bulletin-humanizer/SKILL.md"
+    text = skill.read_text(encoding="utf-8")
+    quoted = " ".join(line[1:].strip() for line in text.splitlines() if line.startswith(">"))
+    for paragraph in (tone.EXAMPLE_COMPUTED, tone.EXAMPLE_AI, tone.EXAMPLE_HUMAN):
+        assert paragraph in quoted
+    assert tone.tone_problems(tone.EXAMPLE_AI)
+    assert tone.tone_problems(tone.EXAMPLE_HUMAN) == []
+    for phrase in (
+        "crucial",
+        "pivotal",
+        "a testament",
+        "underscores",
+        "delve",
+        "tapestry",
+        "intricate",
+        "interplay",
+        "showcase",
+        "foster",
+        "garner",
+        "robust",
+        "seamless",
+        "leverage",
+        "Moreover,",
+        "Furthermore,",
+        "Overall,",
+        "In summary,",
+        "In conclusion,",
+        "It should be noted",
+        "Notably,",
+        "In light of",
+        "remain vigilant",
+        "brace for",
+        "a mix of",
+        "Mother Nature",
+        "stakeholders",
+        "experts say",
+        "observers note",
+        "I hope this helps",
+        "let me know",
+    ):
+        assert phrase.lower() in text.lower(), phrase
+        sentence = phrase if phrase[0].isupper() else f"Rain is expected and {phrase} it."
+        assert tone.tone_problems(sentence), phrase
+    assert re.search(r"additionally", text, re.I) and tone.tone_problems("Additionally, rain.")

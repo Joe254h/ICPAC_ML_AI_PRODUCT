@@ -1,0 +1,26 @@
+# conda env create -f environment.yml && conda activate icpac-predictors
+name: icpac-predictors
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy>=1.26
+  - pandas>=2.1
+  - xarray>=2024.1
+  - dask
+  - netcdf4
+  - cfgrib>=0.9.11
+  - eccodes>=2.33          # the ecCodes C library that cfgrib reads GRIB with
+  - python-eccodes
+  - scipy
+  - pyshp                  # Natural Earth shapefiles (import shapefile)
+  - matplotlib             # point-in-polygon for Lake Victoria
+  - pyyaml
+  - windspharm             # velocity potential at 200 hPa (optional but recommended)
+  - pytest                 # to run the kit's tests
+  - pip
+  - pip:
+      - ecmwf-api-client   # S2S reforecasts (needs ~/.ecmwfapirc)
+      - ecmwf-opendata     # live availability probe
+      - cdsapi>=0.7        # optional: ORAS5, ERA5, CAMS (needs ~/.cdsapirc)
+      - earthaccess        # optional: MODIS NDVI (needs ~/.netrc for Earthdata)
