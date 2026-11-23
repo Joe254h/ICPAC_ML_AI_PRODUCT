@@ -27,7 +27,7 @@ jobs:
         with: {python-version: '3.12'}
       - name: Install PostgreSQL build prerequisites
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends gcc libpq-dev
-      - run: pip install -e '.[dev,postgres]'
+      - run: pip install -e '.[dev,postgres,hf]'
       - name: Configure local ECMWF native dependency loading
         run: |
           python - <<'PY'
