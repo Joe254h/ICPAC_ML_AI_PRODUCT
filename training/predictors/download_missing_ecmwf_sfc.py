@@ -30,7 +30,7 @@ from pathlib import Path
 PARAMS = {"cape": "59", "skt": "235", "tcw": "136", "sm20": "228086"}
 AREA = "25/19/-15/54"  # N/W/S/E: the 11 ICPAC member states with a margin
 GRID = "1.5/1.5"
-STEPS = "168/to/336/by/24"  # days 8 to 14, daily, as the Week-2 predictors use them
+STEPS = "168-192/192-216/216-240/240-264/264-288/288-312/312-336"  # daily means, days 8-14 (pilot: 192-216)
 MEMBERS = "1/to/10"
 
 
