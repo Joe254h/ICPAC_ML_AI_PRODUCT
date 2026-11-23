@@ -5,7 +5,7 @@ member type, with every variable, hindcast year and Week-2 lead time of the set 
 Sets (--set):
     sfc      CAPE, skin temperature, total column water, soil moisture 0-20 cm (daily means)
     sfc2     mean sea-level pressure, surface pressure, 2 m temperature, 2 m dewpoint
-             (daily means)
+             (00 UTC each day of Week 2: the archive has no daily means of these)
     cp       convective precipitation (accumulated: lead times 168 and 336)
     pl925    u, v, q, t, geopotential height at 925 hPa (00 UTC each day of Week 2)
     omega    vertical velocity at 925, 850, 700, 500, 300 and 200 hPa (00 UTC each day)
@@ -40,7 +40,7 @@ SETS = {
         "tcw": "total_column_water",
         "sm20": "soil_moisture_top_20_cm",
     }),
-    "sfc2": ("single_level", [], DAILY_MEANS, {
+    "sfc2": ("single_level", [], DAILY_00UTC, {  # instantaneous fields: 00 UTC snapshots
         "msl": "mean_sea_level_pressure",
         "sp": "surface_pressure",
         "t2m": "2m_temperature",
@@ -83,6 +83,7 @@ def main() -> None:
     ap.add_argument("--perturbed", action="store_true", help="add perturbed-member requests")
     ap.add_argument("--member-key", default="",
                     help="request key listing members 1-10 for perturbed requests (e.g. number)")
+    ap.add_argument("--leadtimes", nargs="*", help="override the lead times, e.g. 168 192 ... 336")
     ap.add_argument("--level-type", help="override the level_type value (pressure sets)")
     ap.add_argument("--level-key", default="levelist", help="request key for the levels (ECDS accepts levelist or level)")
     ap.add_argument("--test", action="store_true", help="one date, control, first variable")
@@ -93,6 +94,7 @@ def main() -> None:
 
     level_type, levels, leadtimes, names = SETS[args.set]
     level_type = args.level_type or level_type
+    leadtimes = args.leadtimes or leadtimes
     out = args.out or str(ROOT / "metadata" / f"manifest_{args.set}.jsonl")
     audit = Path(args.audit or sorted(glob.glob("/scratch/njoel/results/data_audit_*"))[-1])
     dates = (sorted({date.fromisoformat(x.strip()[:10]) for x in open(args.dates) if x.strip()})
