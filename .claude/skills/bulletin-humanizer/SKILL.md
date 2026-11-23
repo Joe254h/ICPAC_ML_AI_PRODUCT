@@ -20,8 +20,8 @@ drier than usual, or record.
 
 ## Keep the length
 
-The humanized bulletin is no longer than the original: each paragraph at most about a third
-longer than before (a short line may gain a few words), and shorter is better. The service
+The humanized bulletin is no longer than the original: each paragraph at most as long as
+before (a line under 15 words may gain four), and shorter is better. The service
 refuses AI-written paragraphs beyond that limit (`chatbot/bulletin_writer.py`,
 `word_limit`). Cut filler before adding detail.
 

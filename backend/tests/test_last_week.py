@@ -1,8 +1,14 @@
 """The bulletin says how the latest verified week's forecast did."""
 
 from types import SimpleNamespace
+from typing import Any
 
 from climate_engine.products import weekly_bulletin as weekly
+
+
+def inputs(**fields: Any) -> Any:
+    return SimpleNamespace(**fields)
+
 
 PREVIOUS = {
     "forecast_id": "fc-earlier",
@@ -37,7 +43,7 @@ PREVIOUS = {
 
 
 def test_the_section_gives_the_metrics_of_the_issued_layer():
-    lines = weekly.last_week_lines(SimpleNamespace(previous=PREVIOUS))
+    lines = weekly.last_week_lines(inputs(previous=PREVIOUS))
     text = " ".join(lead + body for lead, body in lines)
     assert lines[0][0] == "Week of 15-22 November 2026:"
     assert "21.4 mm" in text and "CHIRPS observed 22.7 mm" in text
@@ -48,5 +54,5 @@ def test_the_section_gives_the_metrics_of_the_issued_layer():
 
 
 def test_no_verified_week_means_no_section():
-    assert weekly.last_week_lines(SimpleNamespace(previous=None)) == []
-    assert weekly.last_week_lines(SimpleNamespace(previous={**PREVIOUS, "domain": {}})) == []
+    assert weekly.last_week_lines(inputs(previous=None)) == []
+    assert weekly.last_week_lines(inputs(previous={**PREVIOUS, "domain": {}})) == []
