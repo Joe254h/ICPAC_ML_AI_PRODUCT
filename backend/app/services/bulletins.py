@@ -502,11 +502,14 @@ class BulletinService:
     def start_translation(self, identifier: str, language: str, actor: str) -> dict:
         """Translate a draft in the background (a slow AI service takes minutes): a job
         record the page follows, section by section; the draft stays usable meanwhile."""
-        from chatbot.agent import LANGUAGES
+        from chatbot.agent import translation_target
 
         base = self.repo.get("bulletin", identifier)
-        if language != WRITE and (language not in LANGUAGES or language == "en"):
-            raise RevisionRefused("Choose a language other than English")
+        if language != WRITE:
+            target = translation_target(language)
+            if target is None:
+                raise RevisionRefused("Choose a language other than English, by name or code")
+            language = target[0]
         if base.get("kind") != WEEKLY or base["status"] == "published":
             raise RevisionRefused("Translate a weekly draft before it is published")
         if language == WRITE and language_of(base):
@@ -610,15 +613,16 @@ class BulletinService:
     ) -> dict:
         """A new version of a draft with its editable sections in another language, every
         figure checked; a speaker of the language checks it before a reviewer approves it."""
-        from chatbot.agent import LANGUAGES
+        from chatbot.agent import translation_target
         from chatbot.translate import TranslationRefused, editable
         from chatbot.translate import translate as translated_sections
 
         if language == WRITE:
             return self.write_with_ai(identifier, actor, model, progress)
-        if language not in LANGUAGES or language == "en":
-            raise RevisionRefused("Choose a language other than English")
-        name = LANGUAGES[language]
+        target = translation_target(language)
+        if target is None:
+            raise RevisionRefused("Choose a language other than English, by name or code")
+        name = target[1]
         base = self.repo.get("bulletin", identifier)
         sections = base["facts"]["sections"]
         try:

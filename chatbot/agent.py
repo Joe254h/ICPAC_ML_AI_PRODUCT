@@ -174,6 +174,29 @@ LANGUAGES = {
 }
 
 
+#: A language typed by name: letters (any script), spaces, hyphens, apostrophes, brackets.
+_LANGUAGE_NAME = re.compile(r"^[^\W\d_](?:[^\W\d_]|[ '’()\-])*$")
+
+
+def translation_target(value: str) -> tuple[str, str] | None:
+    """(key, name) of the language a bulletin is translated into, or None for English or a
+    value that is not a language name. A member-state code (sw, sn, ...) or its name gives
+    the shortcut; any other language is taken by name ("Kikuyu", "Portuguese", "中文")."""
+    text = " ".join(str(value or "").split())
+    if not text or len(text) > 40:
+        return None
+    if text.lower() in LANGUAGES:
+        code = text.lower()
+        return None if code == "en" else (code, LANGUAGES[code])
+    for code, name in LANGUAGES.items():
+        if name.lower() == text.lower():
+            return None if code == "en" else (code, name)
+    if not _LANGUAGE_NAME.match(text) or text.lower() in {"english", "write"}:
+        return None
+    name = text[0].upper() + text[1:]
+    return name.lower(), name
+
+
 def instructions(language: str = "en") -> str:
     """The system instructions, with the answer language when it is not English."""
     text = SYSTEM + "\n\n" + TONE_RULES

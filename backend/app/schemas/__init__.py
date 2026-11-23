@@ -237,7 +237,9 @@ class BulletinEditRequest(BaseModel):
 
 
 class BulletinTranslateRequest(BaseModel):
-    language: Literal["sw", "am", "so", "ar", "fr", "ti", "om", "rw", "rn", "lg", "sn", "write"]
+    #: A member-state code (sw, am, so, ar, fr, ti, om, rw, rn, lg, sn), any language by
+    #: name ("Kikuyu", "Portuguese"), or "write" (the AI writes the English draft's wording).
+    language: str = Field(min_length=2, max_length=40)
     actor: str | None = Field(default=None, max_length=80)
 
 
