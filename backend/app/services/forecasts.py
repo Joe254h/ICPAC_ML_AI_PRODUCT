@@ -937,6 +937,48 @@ class ForecastService:
                 "domain": domain,
                 "countries": verification.get("countries") or {},
             }
+        return self._previous_by_reference(forecast_id, start)
+
+    def _previous_by_reference(self, forecast_id: str, start: str) -> dict[str, Any] | None:
+        """While no earlier week is verified against CHIRPS (its server refusing this host,
+        say), the latest ended week scored by another observation, in observed_by's order
+        (ARC 2.0, RFE 2.0, GPM IMERG); the other datasets that scored it come with it."""
+        ended = [
+            r
+            for r in self.runs()
+            if r["forecast_id"] != forecast_id and str(r.get("valid_end", "")) <= start
+        ]
+        for candidate in sorted(ended, key=lambda r: str(r["valid_end"]), reverse=True)[:3]:
+            scored = [
+                held
+                for held in self.references(candidate["forecast_id"])
+                if held.get("status") == "available" and held.get("domain")
+            ]
+            if not scored:
+                continue
+            observed, others = scored[0], scored[1:]
+            domain = observed["domain"]
+            try:
+                layer = primary_layer(self._read(candidate["forecast_id"], "provenance.json"))
+            except (KeyError, ValueError, OSError):
+                layer = ""
+            if layer not in domain:
+                layer = next((name for name in ("hybrid", "mbc", "raw") if name in domain), "")
+            if not layer:
+                continue
+            return {
+                "forecast_id": candidate["forecast_id"],
+                "references": [
+                    {"name": held.get("name") or held.get("source"), "domain": held["domain"]}
+                    for held in others
+                ],
+                "valid_start": str(candidate["valid_start"]),
+                "valid_end": str(candidate["valid_end"]),
+                "layer": layer,
+                "observed": observed.get("name") or observed.get("source"),
+                "domain": domain,
+                "countries": observed.get("countries") or {},
+            }
         return None
 
     def bulletin_inputs(self, forecast_id: str) -> BulletinInputs:
@@ -1397,6 +1439,7 @@ class ForecastService:
                         **base,
                         "status": "available",
                         "domain": result["domain"],
+                        "countries": result.get("countries") or {},
                         "season": result["season"],
                         "licence": daily_references.settings(source)["licence"],
                         "observation": snapshot,

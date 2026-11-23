@@ -313,3 +313,42 @@ def test_a_week_chirps_cannot_be_read_for_is_checked_against_the_others(
     replacement = run(env, "2026-09-14")
     assert replacement["forecast_id"] != fid
     assert service.verified(None, False)[1] == []
+
+
+def test_the_bulletin_reports_last_week_from_another_dataset_while_chirps_refuses(
+    env, fast_maps, monkeypatch
+):
+    """A host CHIRPS refuses (429 from a shared cloud address) still gets last week's
+    verification in the bulletin: the week scored by ARC 2.0, with RFE 2.0 beside it."""
+    earlier = run(env, "2026-09-14")
+    later = run(env, "2026-09-21")
+    start = date(2026, 9, 21)
+    days = [start + timedelta(days=n) for n in range(7)]
+    references = {**cpc_files("arc2", days, 3.0), **cpc_files("rfe2", days, 6.0)}
+
+    def refused(url: str) -> bytes | None:
+        if "chc" in url or "chirps" in url.lower():
+            request = httpx.Request("GET", url)
+            raise httpx.HTTPStatusError(
+                "429", request=request, response=httpx.Response(429, request=request)
+            )
+        return references.get(url)
+
+    monkeypatch.setattr(chirps, "download", refused)
+    monkeypatch.delenv("EARTHDATA_TOKEN", raising=False)
+    seen_from(monkeypatch, date(2026, 10, 15))
+    service = forecasts.ForecastService(env.platform)
+    service.verify_due("Joe N")
+    previous = service.previous_verification(later["forecast_id"])
+    assert previous is not None
+    assert previous["forecast_id"] == earlier["forecast_id"]
+    assert previous["observed"] == "ARC 2.0"
+    assert [r["name"] for r in previous["references"]] == ["RFE 2.0"]
+    assert previous["domain"][previous["layer"]]["rmse"] >= 0
+    assert previous["countries"]
+    from climate_engine.products.weekly_bulletin import last_week_lines
+
+    lines = last_week_lines(service.bulletin_inputs(later["forecast_id"]))
+    text = " ".join(" ".join(part) for part in lines)
+    assert "ARC 2.0 observed" in text and "RFE 2.0 RMSE" in text
+    assert "CHIRPS" not in text
