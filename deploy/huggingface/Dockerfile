@@ -1,6 +1,6 @@
 # The ICPAC Week-2 API on a Hugging Face Docker Space. The image is the one GitHub Actions
 # built and tested from main (Publish backend image): change the tag to deploy another commit.
-FROM ghcr.io/joe254h/icpac-backend:d443e59b140eda092d01eca5e17b65a992e1af80
+FROM ghcr.io/joe254h/icpac-backend:74374598816a378fabe05e34cca6448b76523583
 
 # Everything the service writes goes under /app/data (user 1000, as Spaces require). A Space's
 # disk is wiped when it restarts or rebuilds, and Spaces usually cannot reach PostgreSQL or
