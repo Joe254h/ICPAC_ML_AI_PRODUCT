@@ -42,12 +42,21 @@ import { dateTime, day, personName, weekPeriod } from "@/lib/format";
 import { mutate, request } from "@/services/api";
 import { useApi } from "@/services/hooks";
 import { ofRecord } from "@/features/operational/shared";
-import type { ForecastRun } from "@/types/operational";
+import type { ForecastRun, UpcomingForecast } from "@/types/operational";
 import type { Bulletin, EmailNotice, EmailStatus } from "@/types/workflows";
 
 /** A forecast as people know it: its week and the ECMWF run it came from. */
 function forecastLabel(run: ForecastRun): string {
   return `${weekPeriod(run.valid_start, run.valid_end)} · run of ${day(run.initialization)}`;
+}
+
+/** How a draft's forecast is named when it is not in this week's list: next week's (listed
+ * from its Sunday), else one no longer listed. */
+function nextLabel(next: UpcomingForecast[] | undefined, forecastId: string) {
+  const held = next?.find((n) => n.forecast_id === forecastId);
+  return held
+    ? `Run of ${day(held.initialization)} · next week, shown from ${day(held.valid_start)}`
+    : "Forecast no longer listed";
 }
 
 /** Drafts grouped by their forecast, newest forecast week first; drafts of a forecast no
@@ -556,6 +565,9 @@ export default function Bulletins({ id }: PageProps) {
     (r) => r.weekly && (!inUse || r.model_id === inUse),
   );
   const runs = sundays.length ? sundays : issued;
+  // Next week's forecast (made from last Sunday's run), listed from its own Sunday: its
+  // bulletin is drafted now, for the forecasters to check before it is issued.
+  const nextWeek = useApi<UpcomingForecast[]>("/forecasts/upcoming");
   const newest = runs.find((r) => r.latest) ?? runs[0];
   const target = chosen || newest?.forecast_id || "";
   const groups = byForecast(listed, runs);
@@ -630,6 +642,11 @@ export default function Bulletins({ id }: PageProps) {
           onChange={(e) => setChosen(e.target.value)}
           aria-label="Forecast to draft"
         >
+          {(nextWeek.data ?? []).map((next) => (
+            <option key={next.forecast_id} value={next.forecast_id}>
+              {`${weekPeriod(next.valid_start, next.valid_end)} · run of ${day(next.initialization)} (next week)`}
+            </option>
+          ))}
           {runs.map((run) => (
             <option key={run.forecast_id} value={run.forecast_id}>
               {forecastLabel(run)}
@@ -729,7 +746,7 @@ export default function Bulletins({ id }: PageProps) {
                                 ? " · this week"
                                 : ""
                             }`
-                          : "Forecast no longer listed"}
+                          : nextLabel(nextWeek.data, group.forecastId)}
                       </small>
                     </h3>
                     {!group.items.length && group.run && (

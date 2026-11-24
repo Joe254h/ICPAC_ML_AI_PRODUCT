@@ -50,5 +50,6 @@ def _no_startup_registration(monkeypatch):
     # The open CHIRPS mirror is never asked from a test unless it sets one.
     monkeypatch.setenv("CHIRPS_MIRROR_URL", "off")
     monkeypatch.setenv("CHIRPS_FTP_HOST", "off")
+    monkeypatch.setenv("CHIRPS_RELAY_URL", "off")
     # The Copilot tests script each tool call; the read-ahead has its own tests.
     monkeypatch.setenv("LLM_PREFETCH", "off")

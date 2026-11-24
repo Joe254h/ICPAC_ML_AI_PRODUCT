@@ -15,6 +15,7 @@ which averages that dekad over all twelve months; this module does not.
 
 import calendar
 import hashlib
+import json
 import math
 import os
 import re
@@ -30,10 +31,19 @@ import xarray as xr
 from climate_engine import ncio
 from climate_engine.cartography.weekly_maps import Scale
 from climate_engine.core import ROOT
-from climate_engine.inputs.chirps import CHIRPSUnavailable, Server, crop, on_model_grid, settings
+from climate_engine.inputs.chirps import (
+    CHIRPSUnavailable,
+    Server,
+    crop,
+    on_model_grid,
+    relay_base,
+    settings,
+)
 from climate_engine.operational.grid import DomainGrid
 
 DEKAD_FILE = re.compile(r"chirps-v2\.0\.\d{4}\.\d{2}\.[123]\.nc")
+#: The relay's list of what it holds (days and dekads).
+RELAY_INDEX = "index.json"
 FIRST_DAY = {1: 1, 2: 11, 3: 21}
 DRY_MM = 1.0
 
@@ -106,7 +116,17 @@ class Dekad:
 
 
 def published(server: Server) -> list[Dekad]:
-    """Every dekad the server lists, oldest first."""
+    """Every dekad the relay holds (scripts/chirps_relay.py), else every dekad CHC lists,
+    oldest first."""
+    if (base := relay_base()) is not None:
+        try:
+            index = server.fetch(f"{base}/{RELAY_INDEX}")
+            names = json.loads(index or b"{}").get("dekads") or []
+            listed = sorted(Dekad.from_name(n) for n in names if DEKAD_FILE.fullmatch(n))
+            if listed:
+                return listed
+        except (CHIRPSUnavailable, ValueError):
+            pass  # CHC's own listing below
     names = server.listing(settings()["dekad_dir"], DEKAD_FILE)
     return sorted(Dekad.from_name(name) for name in names)
 
@@ -145,9 +165,18 @@ def read(path: Path, dekad: Dekad) -> xr.DataArray:
 
 
 def fetch(dekad: Dekad, server: Server) -> tuple[xr.DataArray, dict[str, Any]]:
-    """Download a listed dekad, check it and crop it; with where it came from."""
-    url = settings()["dekad_dir"] + dekad.name
-    data = server.fetch(url)
+    """Download a listed dekad (from the relay when it holds it), check it and crop it;
+    with where it came from."""
+    data = None
+    if (base := relay_base()) is not None:
+        url = f"{base}/dekad/{dekad.name}"
+        try:
+            data = server.fetch(url)
+        except CHIRPSUnavailable:
+            data = None
+    if data is None:
+        url = settings()["dekad_dir"] + dekad.name
+        data = server.fetch(url)
     if data is None:
         raise CHIRPSUnavailable(f"CHIRPS dekad {dekad.id} is not published yet")
     with tempfile.TemporaryDirectory() as folder:

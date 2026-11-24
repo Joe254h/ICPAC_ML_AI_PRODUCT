@@ -853,3 +853,135 @@ def test_window_completeness_follows_chirps_latency():
     assert not chirps.window_complete(date(2026, 9, 21), today=date(2026, 9, 28))
     assert chirps.window_days(date(2026, 9, 21))[-1] == date(2026, 9, 27)
     assert chirps.window_days(date(2026, 9, 21))[0] + timedelta(days=7) == date(2026, 9, 28)
+
+
+def test_chirps_days_come_from_the_relay_before_chc(env, tmp_path, monkeypatch):
+    """CHC refuses Hugging Face (429) and Spaces cannot use FTP: a scheduled GitHub Actions
+    job relays the days (scripts/chirps_relay.py), read over HTTPS before CHC is asked."""
+    relay = "https://relay.example/chirps-relay"
+    monkeypatch.setenv("CHIRPS_RELAY_URL", relay)
+    start = date(2026, 11, 15)
+    published = tmp_path / "published"
+    for offset in range(7):
+        day = start + timedelta(days=offset)
+        info = chirps.Day(day, "prelim", f"https://chc.example/{day}.tif", "c" * 64, 0)
+        chirps._save_day(published, info, np.full((LAT.size, LON.size), 3.0), LAT, LON, None)
+    asked: list[str] = []
+
+    def get(url: str) -> bytes | None:
+        asked.append(url)
+        if url.startswith(relay + "/daily/"):
+            path = published / "daily" / url.rsplit("/", 1)[1]
+            return path.read_bytes() if path.exists() else None
+        raise AssertionError(f"CHC was asked: {url}")
+
+    store = tmp_path / "store"
+    result = chirps.week_total(start, env.grid, chirps.Server(get), store)
+    assert result.products == ["prelim"]
+    assert [d.url for d in result.days][0] == "https://chc.example/2026-11-15.tif"
+    cells = env.grid.to_cells(result.values)
+    assert np.allclose(cells[np.isfinite(cells)], 7 * 3.0)
+    assert all(u.startswith(relay + "/daily/chirps-v2.0.2026-11-") for u in asked)
+    # The relay's final product replaces the preliminary day held.
+    final = chirps.Day(start, "final", "https://chc.example/final.tif", "f" * 64, 0)
+    chirps._save_day(published, final, np.full((LAT.size, LON.size), 5.0), LAT, LON, None)
+    _, held = chirps.fetch_day(start, env.grid, chirps.Server(get), store)
+    assert held.product == "final"
+    # A day the relay has not got yet falls back to CHC, then says why it failed.
+    monkeypatch.setenv("CHIRPS_MIRROR_URL", "off")
+
+    def missing(url: str) -> bytes | None:
+        if url.startswith(relay):
+            return None
+        raise httpx.HTTPStatusError(
+            "429", request=httpx.Request("GET", url), response=httpx.Response(429)
+        )
+
+    with pytest.raises(chirps.CHIRPSUnavailable, match="the relay has no file for the day yet"):
+        chirps.fetch_day(date(2026, 11, 30), env.grid, chirps.Server(missing, sleep=lambda s: None))
+
+
+def test_chirps_dekads_come_from_the_relay(env, tmp_path, monkeypatch):
+    """The monitoring's dekads are relayed too: listed in the relay's index, cut to the
+    region with their time axis, read as CHC's own files are."""
+    import json
+
+    from climate_engine.inputs import chirps_dekad
+    from climate_engine.inputs.chirps_dekad import Dekad
+
+    relay = "https://relay.example/chirps-relay"
+    monkeypatch.setenv("CHIRPS_RELAY_URL", relay)
+    dekad = Dekad.from_name("chirps-v2.0.2026.11.1.nc")
+    lat = np.round(np.arange(-5.0, 5.01, 0.05), 3)
+    lon = np.round(np.arange(30.0, 40.01, 0.05), 3)
+    path = tmp_path / dekad.name
+    xr.Dataset(
+        {"precip": (("time", "latitude", "longitude"), np.full((1, lat.size, lon.size), 12.0))},
+        coords={
+            "time": [np.datetime64(dekad.start.isoformat(), "ns")],
+            "latitude": lat,
+            "longitude": lon,
+        },
+    ).to_netcdf(path)
+    files = {
+        f"{relay}/index.json": json.dumps({"dekads": [dekad.name]}).encode(),
+        f"{relay}/dekad/{dekad.name}": path.read_bytes(),
+    }
+
+    def get(url: str) -> bytes | None:
+        if url in files:
+            return files[url]
+        raise AssertionError(f"CHC was asked: {url}")
+
+    server = chirps.Server(get)
+    assert chirps_dekad.published(server) == [dekad]
+    field, origin = chirps_dekad.fetch(dekad, server)
+    assert origin["url"] == f"{relay}/dekad/{dekad.name}"
+    assert float(np.nanmax(field.values)) == 12.0
+
+
+def test_the_relay_script_writes_what_the_service_reads(env, tmp_path, monkeypatch):
+    """scripts/chirps_relay.py keeps the recent days and dekads in the store format, drops
+    older ones and lists them in index.json; a relayed dekad reads like CHC's own file."""
+    import json
+
+    from climate_engine.inputs import chirps_dekad
+    from climate_engine.inputs.chirps_dekad import Dekad
+    from scripts import chirps_relay
+
+    today = date.today()
+    store = tmp_path / "relay"
+
+    def fake_day(day, grid, server, store_):
+        if day == today - timedelta(days=3):
+            raise chirps.CHIRPSUnavailable("not published yet")
+        info = chirps.Day(
+            day, "final" if day < today - timedelta(days=5) else "prelim", "u", "s" * 64, 0
+        )
+        chirps._save_day(store_, info, np.full((LAT.size, LON.size), 1.0), LAT, LON, None)
+        return None, info
+
+    dekad = Dekad.from_name("chirps-v2.0.2026.10.3.nc")
+    lat = np.round(np.arange(-5.0, 5.01, 0.05), 3)
+    lon = np.round(np.arange(30.0, 40.01, 0.05), 3)
+    field = xr.DataArray(
+        np.full((lat.size, lon.size), 9.0, dtype=np.float32),
+        dims=("latitude", "longitude"),
+        coords={"latitude": lat, "longitude": lon},
+        name="precip",
+    )
+    monkeypatch.setattr(chirps, "fetch_day", fake_day)
+    monkeypatch.setattr(chirps_dekad, "published", lambda server: [dekad])
+    monkeypatch.setattr(
+        chirps_dekad, "fetch", lambda d, server: (field, {"url": "u", "sha256": "s"})
+    )
+    old = chirps._store_file(store, today - timedelta(days=40))
+    old.parent.mkdir(parents=True)
+    old.write_bytes(b"old")
+    assert chirps_relay.main(["--store", str(store), "--days", "8", "--dekads", "3"]) == 0
+    index = json.loads((store / "index.json").read_text())
+    assert len(index["days"]) == 6 and (today - timedelta(days=3)).isoformat() not in index["days"]
+    assert {d["product"] for d in index["days"].values()} == {"final", "prelim"}
+    assert index["dekads"] == [dekad.name] and not old.exists()
+    read = chirps_dekad.read(store / "dekad" / dekad.name, dekad)
+    assert float(np.nanmax(read.values)) == 9.0

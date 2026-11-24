@@ -519,6 +519,47 @@ def read_mirror(data: bytes, day: date) -> tuple[np.ndarray, np.ndarray, np.ndar
     )
 
 
+def relay_base() -> str | None:
+    """The CHIRPS relay: CHC's files fetched by a scheduled GitHub Actions job (which CHC
+    serves when it refuses this host), cut to the region and published over HTTPS
+    (scripts/chirps_relay.py). None when switched off (``CHIRPS_RELAY_URL=off``)."""
+    base = os.getenv("CHIRPS_RELAY_URL") or settings().get("relay")
+    if not base or base == "off":
+        return None
+    return str(base).rstrip("/")
+
+
+def relay_day_url(day: date) -> str | None:
+    base = relay_base()
+    return None if base is None else f"{base}/{_store_file(Path(''), day).as_posix()}"
+
+
+def read_relay(data: bytes, day: date) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    """A relayed day (the store's own format): rainfall (mm), latitude, longitude and where
+    the relay read it (product, CHC address, checksum of CHC's file)."""
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "day.nc"
+        path.write_bytes(data)
+        with ncio.open_dataset(path) as opened:
+            loaded = opened.load()
+    attrs = dict(loaded.attrs)
+    if attrs.get("day") != day.isoformat():
+        raise ValueError("The CHIRPS relay returned a different day")
+    if attrs.get("product") not in PRODUCTS:
+        raise ValueError("The CHIRPS relay file names no CHIRPS product")
+    precip = loaded["precip"]
+    if precip.dims != ("latitude", "longitude"):
+        raise ValueError("The CHIRPS relay must supply one daily grid")
+    if str(precip.attrs.get("units", "")).strip().lower() not in {"mm/day", "mm"}:
+        raise ValueError("The CHIRPS relay daily rainfall must be in mm")
+    return (
+        np.asarray(precip.values, dtype=np.float64),
+        np.asarray(loaded["latitude"].values, dtype=np.float64),
+        np.asarray(loaded["longitude"].values, dtype=np.float64),
+        attrs,
+    )
+
+
 def _store_file(store: Path, day: date) -> Path:
     return store / "daily" / f"chirps-v2.0.{day.isoformat()}.nc"
 
@@ -628,9 +669,48 @@ def fetch_day(
             _save_day(store, info, *crop(values, latitude, longitude), None)
         return field_, info
 
+    def from_relay() -> tuple[np.ndarray, Day] | None:
+        """The day from the relay, which CHC serves when it refuses this host."""
+        url = relay_day_url(day)
+        if url is None:
+            return None
+        try:
+            data = server.fetch(url)
+        except CHIRPSUnavailable as exc:
+            failures.append(f"the relay failed ({str(exc)[:160]})")
+            return None
+        if not data:
+            failures.append("the relay has no file for the day yet")
+            return None
+        data = bytes(data)
+        try:
+            values, latitude, longitude, attrs = read_relay(data, day)
+            field_ = on_model_grid(values, latitude, longitude, grid, None)
+        except (ValueError, KeyError, OSError):
+            failures.append("the relay file could not be read")
+            return None  # A malformed relay file never becomes an observation.
+        if held and held[1].get("product") == "prelim" and attrs["product"] == "prelim":
+            return from_held()  # nothing better yet
+        missing = int(np.count_nonzero(~np.isfinite(grid.to_cells(field_))))
+        info = Day(
+            day,
+            attrs["product"],
+            str(attrs.get("url") or url),
+            str(attrs.get("sha256") or hashlib.sha256(data).hexdigest()),
+            missing,
+        )
+        if store is not None:
+            _save_day(store, info, values.astype(np.float32), latitude, longitude, None)
+        return field_, info
+
     failures: list[str] = []
     if held and held[1].get("product") == "final":
         return from_held()
+    # The relay first: it holds what CHC published (and replaces a preliminary day with the
+    # final one when CHC does) without this host asking CHC, which refuses it.
+    relayed = from_relay()
+    if relayed is not None:
+        return relayed
     try:
         return from_chc()
     except CHIRPSUnavailable as exc:

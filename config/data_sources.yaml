@@ -44,6 +44,11 @@ chirps:
   # CHC's daily 0.05 degree files and cuts out the region. CHIRPS_MIRROR_URL replaces it
   # ("off" switches it off). The mirror holds the final product only (weeks later).
   mirror: "https://coastwatch.pfeg.noaa.gov/erddap/griddap/chirps20GlobalDailyP05"
+  # CHC refuses Hugging Face's shared addresses (429) and Spaces cannot use FTP, so a
+  # scheduled GitHub Actions job reads CHC and publishes the recent days and dekads, cut to
+  # the region, on this repository's chirps-relay branch (scripts/chirps_relay.py). It is
+  # read first. CHIRPS_RELAY_URL replaces it ("off" switches it off).
+  relay: "https://raw.githubusercontent.com/Joe254h/ICPAC_ML_AI_PRODUCT/chirps-relay"
   # CHC also serves the same daily files over anonymous FTP, tried before the mirror when
   # its web server refuses the service (both products). CHC's pages spell the folder
   # chc and chg; both are tried. CHIRPS_FTP_HOST replaces the host ("off" switches it off).

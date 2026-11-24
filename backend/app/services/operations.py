@@ -859,6 +859,34 @@ class OperationService:
             return result
         return {**result, **self._prepare_draft(operation_id, body, latest)}
 
+    def _compare_last_weeks(self, operation_id: str, forecast_id: str, actor: str) -> None:
+        """Score the two newest weeks that ended before this forecast's week against the
+        further references, when they are not yet (each comparison is made once)."""
+        forecasts = self._forecasts()
+        try:
+            start = str(forecasts.get(forecast_id).get("valid_start", ""))
+        except (KeyError, ValueError):
+            return
+        ended = sorted(
+            (
+                r
+                for r in forecasts.runs()
+                if r["forecast_id"] != forecast_id and str(r.get("valid_end", "")) <= start
+            ),
+            key=lambda r: str(r["valid_end"]),
+            reverse=True,
+        )[:2]
+        due = [
+            r["forecast_id"]
+            for r in ended
+            if not any(
+                held.get("status") == "available" for held in forecasts.references(r["forecast_id"])
+            )
+        ]
+        if due:
+            self._log(operation_id, "Scoring last week's forecast against the observations")
+            self._compare_references(operation_id, due, actor)
+
     def _compare_references(
         self, operation_id: str, forecast_ids: Sequence[str], actor: str
     ) -> int:
@@ -938,11 +966,33 @@ class OperationService:
         from backend.app.services import bulletin_mail
         from backend.app.services.bulletins import BulletinService
 
+        # "How Last Week's Forecast Did" needs the last ended weeks scored before the draft
+        # freezes them: ARC 2.0, RFE 2.0 and GPM IMERG while CHIRPS is not read yet. It
+        # never holds up the draft.
+        try:
+            self._compare_last_weeks(operation_id, forecast_id, body.actor)
+        except Exception as exc:
+            self._log(operation_id, f"Last week could not be scored first: {_plain(exc)}")
         self._log(operation_id, "Drafting the weekly bulletin for the forecasters to check")
         try:
             draft = BulletinService(self.platform).generate(
                 forecast_id=forecast_id, actor=body.actor
             )
+            if (
+                draft.get("reused")
+                and draft["status"] == "draft"
+                and not (draft.get("facts") or {}).get("previous_week")
+                and self._forecasts().previous_verification(forecast_id)
+            ):
+                # The open draft was made before last week was scored: a new version adds
+                # how last week's forecast did, with its maps.
+                draft = BulletinService(self.platform).generate(
+                    forecast_id=forecast_id, parent_id=draft["id"], actor=body.actor
+                )
+                self._log(
+                    operation_id,
+                    "A new version of the draft adds how last week's forecast did",
+                )
         except Exception as exc:  # the forecast stands; the draft can be made on its page
             self._log(operation_id, f"The bulletin draft could not be prepared: {_plain(exc)}")
             return {}
