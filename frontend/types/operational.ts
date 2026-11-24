@@ -340,6 +340,8 @@ export type BulletinStatus = {
     text: string[];
     leads?: string[];
     map?: string;
+    /** Section figures: last week's forecast and observed maps, the correction chart. */
+    figures?: { caption: string; src: string }[];
     missing_dependency?: string;
     extra?: boolean;
     /** The country focus: which member state and why it was chosen. */

@@ -102,6 +102,10 @@ def map_period(inputs: BulletinInputs) -> str:
     return valid_period(inputs, "%b")
 
 
+#: Registry states of a model forecasts are issued with.
+IN_USE = ("production", "candidate")
+
+
 def scope_label(inputs: BulletinInputs) -> str:
     """The draft label in the page header (and under each map)."""
     facts = inputs.interpretation
@@ -111,8 +115,11 @@ def scope_label(inputs: BulletinInputs) -> str:
         parts = ["DRAFT - NOT APPROVED", "ECMWF ensemble + MBC"]
     else:
         parts = ["DRAFT - NOT APPROVED", "ECMWF ensemble + MBC + AI/ML"]
-        if status != "production":
-            parts.append("candidate model, not the production model")
+        # The model in use (production, or the operationally approved candidate) is the
+        # one in production; only an experimental model is flagged as not in production.
+        parts.append(
+            "in production" if status in IN_USE else "experimental model, not in production"
+        )
     parts.append("forecaster review required")
     if facts["input"]["synthetic"]:
         parts.append("SYNTHETIC TEST INPUT - NOT A FORECAST OF REAL WEATHER")
@@ -400,7 +407,8 @@ def about_lines(inputs: BulletinInputs) -> list[tuple[str, str]]:
         ),
         (
             "Verification:",
-            " each week is compared with CHIRPS observed rainfall once the week has passed.",
+            " each week is compared with observed rainfall (CHIRPS, ARC 2.0, RFE 2.0 and GPM"
+            " IMERG) once the week has passed.",
         ),
         (
             "Issued by:",
@@ -480,6 +488,104 @@ def last_week_lines(inputs: BulletinInputs) -> list[tuple[str, str]]:
             )
         )
     return lines
+
+
+def _scores(metrics: dict[str, Any]) -> str:
+    text = f"RMSE {metrics['rmse']:.1f} mm"
+    if metrics.get("mae") is not None:
+        text += f" · MAE {metrics['mae']:.1f} mm"
+    return text
+
+
+def last_week_figures(previous: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The maps of the last verified week: its issued forecast, captioned with its scores
+    against the observation of record, then each observation that scored it, captioned with
+    its observed mean and the forecast's scores against it."""
+    if not previous:
+        return []
+    layer = previous.get("layer")
+    metrics = (previous.get("domain") or {}).get(layer)
+    if not metrics or not previous.get("forecast_id"):
+        return []
+    observed = previous.get("observed", "CHIRPS")
+    words = LAYER_WORDS.get(layer, layer)
+    figures = [
+        {
+            "kind": "forecast",
+            "forecast_id": previous["forecast_id"],
+            "layer": layer,
+            "caption": f"Forecast · {words} · {_scores(metrics)} (against {observed})",
+        }
+    ]
+    sources = [(previous.get("observed_source") or "chirps", observed, metrics)] + [
+        (held.get("source"), held.get("name"), (held.get("domain") or {}).get(layer))
+        for held in previous.get("references") or []
+    ]
+    for source, name, scored in sources:
+        if not source or not scored or scored.get("rmse") is None:
+            continue
+        figures.append(
+            {
+                "kind": "observed",
+                "forecast_id": previous["forecast_id"],
+                "source": source,
+                "caption": (
+                    f"Observed · {name} · mean {scored['observed_mean']:.1f} mm · {_scores(scored)}"
+                ),
+            }
+        )
+    return figures
+
+
+def correction_rows(inputs: BulletinInputs) -> list[dict[str, Any]]:
+    """Each member state's mean rainfall before and after the correction (raw, MBC and the
+    issued layer), wettest raw first."""
+    rows = []
+    for row in inputs.interpretation.get("countries", []):
+        raw, issued = row.get("raw_mean_mm"), row.get("forecast_mean_mm")
+        if raw is None or issued is None:
+            continue
+        ml = row.get("hybrid_minus_mbc_mean_mm")
+        mbc = issued - ml if (primary(inputs) == "hybrid" and ml is not None) else None
+        rows.append({"country": row["country"], "raw": raw, "mbc": mbc, "issued": issued})
+    return sorted(rows, key=lambda r: -r["raw"])
+
+
+def correction_chart(inputs: BulletinInputs) -> bytes | None:
+    """What the correction changed, as a bar chart of the member states' mean rainfall:
+    raw ECMWF, MBC and the issued forecast side by side."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    rows = correction_rows(inputs)
+    if not rows:
+        return None
+    layer = primary(inputs)
+    series = [("raw", "Raw ECMWF", "#2A78D6")]
+    if any(r["mbc"] is not None for r in rows):
+        series.append(("mbc", "MBC", "#E0802F"))
+    series.append(("issued", LAYER_WORDS.get(layer, layer), "#1BAF7A"))
+    figure = Figure(figsize=(8.0, 4.6), dpi=150)
+    FigureCanvasAgg(figure)
+    axes = figure.add_subplot(111)
+    width = 0.8 / len(series)
+    names = [r["country"] for r in rows]
+    for i, (key, label, color) in enumerate(series):
+        values = [r[key] if r[key] is not None else np.nan for r in rows]
+        positions = [j + (i - (len(series) - 1) / 2) * width for j in range(len(rows))]
+        axes.bar(positions, values, width, label=label, color=color)
+    axes.set_xticks(range(len(rows)))
+    axes.set_xticklabels(names, rotation=35, ha="right", fontsize=9)
+    axes.set_ylabel("Mean Week-2 rainfall (mm)", fontsize=9)
+    axes.set_title(f"What the correction changed, {map_period(inputs)}", fontsize=11)
+    axes.spines[["top", "right"]].set_visible(False)
+    axes.grid(axis="y", color="#DDDDDD", linewidth=0.6)
+    axes.set_axisbelow(True)
+    axes.legend(frameon=False, fontsize=9)
+    figure.tight_layout()
+    output = io.BytesIO()
+    figure.savefig(output, format="png", facecolor="white")
+    return output.getvalue()
 
 
 def correction_lines(inputs: BulletinInputs) -> list[tuple[str, str]]:
@@ -658,6 +764,7 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
                 "title": "What the Correction Changed",
                 "extra": True,
                 **_paragraphs(correction),
+                "chart": "correction",
             }
         )
     if last_week := last_week_lines(inputs):
@@ -667,6 +774,7 @@ def sections(inputs: BulletinInputs) -> list[dict[str, Any]]:
                 "title": "How Last Week's Forecast Did",
                 "extra": True,
                 **_paragraphs(last_week),
+                "figures": last_week_figures(inputs.previous),
             }
         )
     if chances := chance_lines(inputs, masks):
@@ -707,9 +815,7 @@ def map_label(
         parts.append("SYNTHETIC TEST INPUT - NOT REAL WEATHER")
     note = METHOD_NOTES.get((method or "").upper())
     if note is None:
-        role = "" if status == "production" else " (candidate model)"
-        if status == "experimental":
-            role = " (experimental model)"
+        role = " (experimental model)" if status not in IN_USE else ""
         named = f"{model_name} {version}".strip() if model_name else "MBC + AI/ML"
         note = f"ECMWF ensemble + {named}{role}"
     parts.append(note)

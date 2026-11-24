@@ -3,12 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   FileDown,
   FilePlus2,
   Globe2,
   Mail,
   PenLine,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -260,6 +263,7 @@ function Detail({
   onChanged,
   onRevise,
   onVersion,
+  onDeleted,
   busy,
 }: {
   draft: Bulletin;
@@ -269,6 +273,8 @@ function Detail({
   onRevise: () => void;
   /** A new version was made (edited or translated): show it. */
   onVersion: (draft: Bulletin) => void;
+  /** The draft was deleted. */
+  onDeleted: () => void;
   busy: boolean;
 }) {
   const [dialog, setDialog] = useState<(typeof ACTIONS)[string][number] | null>(
@@ -285,6 +291,33 @@ function Detail({
       actor: actor || "Forecaster",
     });
     onChanged(await request<Bulletin>(`/bulletins/${draft.id}`));
+  };
+  const [removing, setRemoving] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const archive = async (archived: boolean) => {
+    setProblem(null);
+    try {
+      onChanged(
+        await mutate<Bulletin>(`/bulletins/${draft.id}/archive`, {
+          actor: actor || "Forecaster",
+          archived,
+        }),
+      );
+    } catch (e) {
+      setProblem((e as Error).message);
+    }
+  };
+  const remove = async () => {
+    if (!window.confirm("Delete this draft? This cannot be undone.")) return;
+    setRemoving(true);
+    setProblem(null);
+    try {
+      await request(`/bulletins/${draft.id}`, { method: "DELETE" });
+      onDeleted();
+    } catch (e) {
+      setProblem((e as Error).message);
+      setRemoving(false);
+    }
   };
   const submit = async (review: Review) => {
     if (!dialog) return;
@@ -344,7 +377,38 @@ function Detail({
           >
             <Globe2 size={16} /> Web page
           </LinkButton>
+          <Button
+            variant="outline"
+            onClick={() => archive(!draft.archived)}
+            disabled={busy || removing}
+          >
+            {draft.archived ? (
+              <>
+                <ArchiveRestore size={16} /> Restore
+              </>
+            ) : (
+              <>
+                <Archive size={16} /> Archive
+              </>
+            )}
+          </Button>
+          {(draft.status === "draft" || draft.status === "rejected") && (
+            <Button
+              variant="outline"
+              onClick={remove}
+              disabled={busy || removing}
+            >
+              <Trash2 size={16} /> {removing ? "Deleting…" : "Delete draft"}
+            </Button>
+          )}
         </div>
+        {problem && <ErrorState message={problem} />}
+        {draft.archived && (
+          <Notice>
+            Archived: hidden from the list of drafts. Restore it to list it
+            again.
+          </Notice>
+        )}
         {inLanguage && (
           <Notice title={`${inLanguage.edited?.language} version.`}>
             This week&apos;s bulletin is also drafted in{" "}
@@ -470,7 +534,10 @@ function Detail({
 }
 
 export default function Bulletins({ id }: PageProps) {
-  const drafts = useApi<Bulletin[]>("/bulletins");
+  const drafts = useApi<Bulletin[]>("/bulletins?archived=true");
+  const [showArchived, setShowArchived] = useState(false);
+  const archivedCount = (drafts.data ?? []).filter((d) => d.archived).length;
+  const listed = (drafts.data ?? []).filter((d) => showArchived || !d.archived);
   const forecasts = useApi<ForecastRun[]>("/forecasts");
   const router = useRouter();
   const [actor] = useActor();
@@ -491,7 +558,7 @@ export default function Bulletins({ id }: PageProps) {
   const runs = sundays.length ? sundays : issued;
   const newest = runs.find((r) => r.latest) ?? runs[0];
   const target = chosen || newest?.forecast_id || "";
-  const groups = byForecast(drafts.data ?? [], runs);
+  const groups = byForecast(listed, runs);
   // The bulletin archive: every forecast week, drafted or not, newest first.
   const allWeeks = [
     ...runs.map((run) => ({
@@ -528,10 +595,6 @@ export default function Bulletins({ id }: PageProps) {
           )
           .sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
       : undefined;
-  const newestDrafted =
-    !newest ||
-    (drafts.data ?? []).some((d) => d.forecast_id === newest.forecast_id);
-
   const create = async (parent?: Bulletin, forecastId?: string) => {
     setBusy(true);
     setError(null);
@@ -606,9 +669,6 @@ export default function Bulletins({ id }: PageProps) {
         >
           {forecasts.loading && !forecasts.data && <Skeleton height={60} />}
           {picker}
-          {newest && !newestDrafted && (
-            <Notice tone="amber">This week's forecast has no draft yet.</Notice>
-          )}
           {opened && <Notice>{opened}</Notice>}
         </Card>
         {error && <ErrorState message={error} />}
@@ -616,7 +676,7 @@ export default function Bulletins({ id }: PageProps) {
         {drafts.error && (
           <ErrorState message={drafts.error} retry={drafts.reload} />
         )}
-        {drafts.data && !drafts.data.length && (
+        {drafts.data && !listed.length && (
           <EmptyState
             title="No bulletin draft yet"
             action={
@@ -633,9 +693,18 @@ export default function Bulletins({ id }: PageProps) {
               A draft is made from the latest forecast: the ICPAC weekly
               bulletin&apos;s sections, its Word document and its maps.
             </p>
+            {archivedCount > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowArchived(true)}
+              >
+                Show archived ({archivedCount})
+              </Button>
+            )}
           </EmptyState>
         )}
-        {drafts.data && drafts.data.length > 0 && active && (
+        {drafts.data && listed.length > 0 && active && (
           <div
             style={{
               display: "grid",
@@ -709,6 +778,17 @@ export default function Bulletins({ id }: PageProps) {
                     : `Earlier drafts (${earlier.length})`}
                 </Button>
               )}
+              {archivedCount > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowArchived(!showArchived)}
+                >
+                  {showArchived
+                    ? "Hide archived"
+                    : `Show archived (${archivedCount})`}
+                </Button>
+              )}
             </aside>
             <div style={{ display: "grid", gap: 28, minWidth: 0 }}>
               <Detail
@@ -718,6 +798,11 @@ export default function Bulletins({ id }: PageProps) {
                 busy={busy}
                 onRevise={() => create(active)}
                 onChanged={() => drafts.reload()}
+                onDeleted={() => {
+                  drafts.reload();
+                  setSelected(undefined);
+                  router.replace("/bulletins");
+                }}
                 onVersion={(version) => {
                   drafts.reload();
                   router.replace(`/bulletins?id=${version.id}`);

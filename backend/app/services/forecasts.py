@@ -884,6 +884,24 @@ class ForecastService:
                 )
                 if section.get("map_country"):
                     section["map"] += f"&country={section['map_country']}"
+            if section.get("chart") == "correction":
+                section["figures"] = [
+                    {"caption": "", "src": f"/forecasts/{forecast_id}/bulletin/correction.png"}
+                ]
+            elif section.get("figures"):
+                section["figures"] = [
+                    {
+                        "caption": figure["caption"],
+                        "src": (
+                            f"/forecasts/{figure['forecast_id']}/map?layer={figure['layer']}"
+                            f"&style={weekly.MAP_STYLE}"
+                            if figure["kind"] == "forecast"
+                            else f"/forecasts/{figure['forecast_id']}/observed/map"
+                            f"?source={figure['source']}"
+                        ),
+                    }
+                    for figure in section["figures"]
+                ]
         return {
             "forecast_id": forecast_id,
             "generator": WordTemplateGenerator().status(),
@@ -923,7 +941,11 @@ class ForecastService:
             if not layer:
                 continue
             references = [
-                {"name": held.get("name") or held.get("source"), "domain": held["domain"]}
+                {
+                    "name": held.get("name") or held.get("source"),
+                    "source": held.get("source"),
+                    "domain": held["domain"],
+                }
                 for held in self.references(candidate["forecast_id"])
                 if held.get("status") == "available" and held.get("domain")
             ]
@@ -934,6 +956,7 @@ class ForecastService:
                 "valid_end": str(candidate["valid_end"]),
                 "layer": layer,
                 "observed": "CHIRPS",
+                "observed_source": "chirps",
                 "domain": domain,
                 "countries": verification.get("countries") or {},
             }
@@ -969,13 +992,18 @@ class ForecastService:
             return {
                 "forecast_id": candidate["forecast_id"],
                 "references": [
-                    {"name": held.get("name") or held.get("source"), "domain": held["domain"]}
+                    {
+                        "name": held.get("name") or held.get("source"),
+                        "source": held.get("source"),
+                        "domain": held["domain"],
+                    }
                     for held in others
                 ],
                 "valid_start": str(candidate["valid_start"]),
                 "valid_end": str(candidate["valid_end"]),
                 "layer": layer,
                 "observed": observed.get("name") or observed.get("source"),
+                "observed_source": observed.get("source"),
                 "domain": domain,
                 "countries": observed.get("countries") or {},
             }
@@ -991,7 +1019,36 @@ class ForecastService:
     def export_bulletin(self, forecast_id: str) -> bytes:
         self.repo.get(KIND, forecast_id)
         inputs = self.bulletin_inputs(forecast_id)
-        return WordTemplateGenerator().render_bytes(inputs)
+        return WordTemplateGenerator().render_bytes(
+            inputs, figures=self.bulletin_figures(inputs.previous)
+        )
+
+    def correction_chart(self, forecast_id: str) -> bytes:
+        """The bar chart of what the correction changed in this forecast's week."""
+        self.repo.get(KIND, forecast_id)
+        chart = weekly.correction_chart(BulletinInputs.from_package(self.directory(forecast_id)))
+        if chart is None:
+            raise Unavailable("This forecast has no country means before and after correction")
+        return chart
+
+    def bulletin_figures(
+        self, previous: dict[str, Any] | None
+    ) -> dict[str, list[tuple[str, bytes]]]:
+        """The maps of "How Last Week's Forecast Did": last week's issued forecast and each
+        observation that scored it, captioned with their scores. A map that cannot be drawn
+        here (an observation no longer held) is left out."""
+        held = []
+        for figure in weekly.last_week_figures(previous):
+            try:
+                png = (
+                    self.map_png(figure["forecast_id"], figure["layer"])
+                    if figure["kind"] == "forecast"
+                    else self.observed_png(figure["forecast_id"], figure["source"])
+                )
+            except (Unavailable, KeyError, ValueError, OSError):
+                continue
+            held.append((figure["caption"], png))
+        return {"last_week": held} if held else {}
 
     # ------------------------------------------------------------------ verification
 
@@ -1389,7 +1446,8 @@ class ForecastService:
         held = {}
         for source in daily_references.REFERENCES:
             try:
-                held[source] = self.repo.get(REFERENCE_KIND, f"{forecast_id}-{source}")
+                record = self.repo.get(REFERENCE_KIND, f"{forecast_id}-{source}")
+                held[source] = {**record, "source": record.get("source") or source}
             except KeyError:
                 continue
         return [held[s] for s in daily_references.REFERENCES if s in held]

@@ -242,14 +242,21 @@ export default function ObservedComparison({
         <MapFigure
           src={mapUrl(detail, layer)}
           alt={`${SERIES[layer].label} forecast for ${week}`}
-          caption={`Forecast · ${SERIES[layer].label}`}
+          caption={
+            <>
+              Forecast · {SERIES[layer].label} ·{" "}
+              <Scores metrics={shown.scores[layer]} /> (against {shown.name})
+            </>
+          }
         />
         <MapFigure
           src={`/api/forecasts/${detail.forecast_id}/observed/map?source=${shown.source}`}
           alt={`Rainfall observed by ${shown.name} for ${week}`}
           caption={
             <>
-              Observed · {shown.name} · <Scores metrics={shown.scores[layer]} />
+              Observed · {shown.name}
+              {shown.scores[layer] &&
+                ` · mean ${num(shown.scores[layer].observed_mean)} mm`}
             </>
           }
         />

@@ -300,13 +300,121 @@ def section_segments(section: dict[str, Any], index: int) -> list[tuple[str, str
     return lead_segments(lead, text[len(lead) :])
 
 
-def notes_xml(notes: list[dict[str, Any]]) -> str:
-    """The forecaster's own sections (an advisory, impacts), in the body style."""
+def notes_xml(notes: list[dict[str, Any]], pictures: dict[str, str] | None = None) -> str:
+    """The forecaster's own sections (an advisory, impacts), in the body style; a section's
+    figures (``pictures``, Word XML by section key) follow its text."""
+    pictures = pictures or {}
     return "".join(
         paragraph_xml([("", False)])
         + paragraph_xml([(note["title"], True)], after=120, keep_next=True)
         + "".join(paragraph_xml([(text, False)], after=120) for text in note["text"])
+        + pictures.get(note.get("key", ""), "")
         for note in notes
+    )
+
+
+IMAGE_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+EMU_PER_INCH = 914400
+
+
+def picture_xml(rid: str, size_emu: tuple[int, int], number: int, descr: str = "") -> str:
+    """An inline picture (the relationship ``rid``) in a run; ``descr`` is its alt text."""
+    cx, cy = size_emu
+    alt = html.escape(descr, quote=True)
+    return (
+        f'<w:r><w:drawing><wp:inline><wp:extent cx="{cx}" cy="{cy}" />'
+        f'<wp:docPr id="{number}" name="Figure {number}" descr="{alt}" />'
+        '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        f'<pic:nvPicPr><pic:cNvPr id="{number}" name="Figure {number}" /><pic:cNvPicPr />'
+        "</pic:nvPicPr><pic:blipFill>"
+        f'<a:blip r:embed="{rid}" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" />'
+        "<a:stretch><a:fillRect /></a:stretch></pic:blipFill><pic:spPr>"
+        f'<a:xfrm><a:off x="0" y="0" /><a:ext cx="{cx}" cy="{cy}" /></a:xfrm>'
+        '<a:prstGeom prst="rect"><a:avLst /></a:prstGeom></pic:spPr></pic:pic>'
+        "</a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"
+    )
+
+
+class Pictures:
+    """New pictures for a Word package: each png becomes a media part and an image
+    relationship of the document."""
+
+    def __init__(self, parts: dict[str, bytes]):
+        self.parts = parts
+        self.added: list[str] = []
+        self.number = 9_100_000
+
+    def add(self, png: bytes, width_in: float, descr: str = "") -> str:
+        """The Word XML of a picture ``width_in`` inches wide (its aspect kept)."""
+        from PIL import Image
+
+        with Image.open(io.BytesIO(png)) as image:
+            width, height = image.size
+        self.number += 1
+        rid = f"rIdFigure{self.number}"
+        self.parts[f"word/media/figure{self.number}.png"] = png
+        self.added.append(
+            f'<Relationship Type="{IMAGE_REL}" Target="media/figure{self.number}.png" Id="{rid}" />'
+        )
+        cx = int(width_in * EMU_PER_INCH)
+        return picture_xml(rid, (cx, int(cx * height / width)), self.number, descr)
+
+    def register(self) -> None:
+        name = "word/_rels/document.xml.rels"
+        rels = self.parts[name].decode("utf-8-sig")
+        rels = rels.replace("</Relationships>", "".join(self.added) + "</Relationships>")
+        self.parts[name] = rels.encode("utf-8")
+
+
+def _caption(text: str) -> str:
+    return (
+        '<w:p><w:pPr><w:jc w:val="center" /><w:spacing w:after="120" /></w:pPr>'
+        + _run(text, size=16)
+        + "</w:p>"
+    )
+
+
+#: A section figure's alt text: "<section key>|<caption>", read back by the web export.
+FIGURE_ALT = "{key}|{caption}"
+
+
+def figures_xml(
+    pictures: Pictures, figures: list[tuple[str, bytes]], key: str, columns: int = 2
+) -> str:
+    """Captioned figures of section ``key`` in a borderless table, ``columns`` across the
+    text width."""
+    if not figures:
+        return ""
+    width = 9360 // columns  # twips of the 6.5-inch text width
+    cells = []
+    for caption, png in figures:
+        picture = pictures.add(
+            png, width / 1440 - 0.15, FIGURE_ALT.format(key=key, caption=caption)
+        )
+        cells.append(
+            f'<w:tc><w:tcPr><w:tcW w:w="{width}" w:type="dxa" /></w:tcPr>'
+            f'<w:p><w:pPr><w:jc w:val="center" /><w:keepNext /></w:pPr>{picture}</w:p>'
+            + (_caption(caption) if caption else "<w:p />")
+            + "</w:tc>"
+        )
+    while len(cells) % columns:
+        cells.append(f'<w:tc><w:tcPr><w:tcW w:w="{width}" w:type="dxa" /></w:tcPr><w:p /></w:tc>')
+    rows = "".join(
+        "<w:tr><w:trPr><w:cantSplit /></w:trPr>" + "".join(cells[i : i + columns]) + "</w:tr>"
+        for i in range(0, len(cells), columns)
+    )
+    grid = "".join(f'<w:gridCol w:w="{width}" />' for _ in range(columns))
+    return (
+        '<w:tbl><w:tblPr><w:tblW w:w="9360" w:type="dxa" /><w:tblLayout w:type="fixed" />'
+        "<w:tblBorders>"
+        + "".join(
+            f'<w:{side} w:val="nil" />'
+            for side in ("top", "left", "bottom", "right", "insideH", "insideV")
+        )
+        + f"</w:tblBorders></w:tblPr><w:tblGrid>{grid}</w:tblGrid>{rows}</w:tbl>"
     )
 
 
@@ -507,10 +615,17 @@ class WordTemplateGenerator(BulletinGenerator):
         }
 
     def render_bytes(
-        self, inputs: BulletinInputs, sections: list[dict[str, Any]] | None = None
+        self,
+        inputs: BulletinInputs,
+        sections: list[dict[str, Any]] | None = None,
+        figures: dict[str, list[tuple[str, bytes]]] | None = None,
+        charts: bool = True,
     ) -> bytes:
         """The Word bulletin of a package; ``sections``, a draft's frozen sections, carry a
-        forecaster's rewording of the editable sections and their own notes."""
+        forecaster's rewording of the editable sections and their own notes. ``figures``
+        (captioned PNG maps by section key, such as last week's forecast and observations)
+        go under their section's text; the correction chart is drawn here unless ``charts`` is
+        false (drafts made before it existed reproduce without it)."""
         if self.status()["status"] != "ready":
             raise MissingDependency(self.status()["missing_dependency"])
         content = {s["key"]: s for s in weekly.sections(inputs)}
@@ -571,8 +686,23 @@ class WordTemplateGenerator(BulletinGenerator):
         if anchor in FOCUS:
             anchor = FOCUS_LAST
         extras = [s for s in content.values() if s.get("extra")]
+        pictures = Pictures(parts)
+        placed: dict[str, str] = {}
+        for section in extras:
+            if charts and section.get("chart") == "correction":
+                chart = weekly.correction_chart(inputs)
+                if chart is not None:
+                    placed[section["key"]] = figures_xml(
+                        pictures, [("", chart)], section["key"], columns=1
+                    )
+            held = (figures or {}).get(section["key"])
+            if held:
+                placed[section["key"]] = placed.get(section["key"], "") + figures_xml(
+                    pictures, held, section["key"]
+                )
+        pictures.register()
         document = insert_after(
-            document, anchor, notes_xml(extras + notes) + about_xml(content["about"])
+            document, anchor, notes_xml(extras + notes, placed) + about_xml(content["about"])
         )
         if not focus:
             document = omit_paragraphs(document, FOCUS)
@@ -597,6 +727,9 @@ class WordTemplateGenerator(BulletinGenerator):
             for info in infos:
                 if info.filename in parts:
                     target.writestr(info, parts[info.filename])
+            known = {info.filename for info in infos}
+            for name in sorted(set(parts) - known):  # the section figures added here
+                target.writestr(zipfile.ZipInfo(name, (2026, 1, 1, 0, 0, 0)), parts[name])
         return output.getvalue()
 
     def generate(self, inputs: BulletinInputs, output: Path) -> Path:
