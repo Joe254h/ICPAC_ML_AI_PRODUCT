@@ -14,6 +14,7 @@ they are left out until it does, and nothing is inferred for them.
 
 from __future__ import annotations
 
+import contextvars
 import io
 import math
 from dataclasses import dataclass
@@ -32,7 +33,17 @@ from climate_engine.cartography import weekly_maps
 if TYPE_CHECKING:
     from climate_engine.products.bulletin import BulletinInputs
 
-FORMAT_VERSION = "icpac-weekly-v3"  # v3: only the products the service has
+FORMAT_VERSION = "icpac-weekly-v4"  # v4: section figures, "in production", all observations
+#: The wording drafts are rendered in: a draft frozen in an earlier format is reproduced in
+#: its own wording (see BulletinService._reproduce), so its checksums still match.
+WORDING: contextvars.ContextVar[str] = contextvars.ContextVar("bulletin_wording", default="")
+
+
+def earlier_wording() -> bool:
+    """True while a draft frozen before FORMAT_VERSION v4 is being reproduced."""
+    return WORDING.get() not in ("", FORMAT_VERSION)
+
+
 MAP_STYLE = "weekly-v3"  # the map endpoint's style name; a new name busts browser caches
 REGION = "the region"
 # The reference's classes for the week's total rainfall (mm): name, lower, upper bound.
@@ -117,9 +128,13 @@ def scope_label(inputs: BulletinInputs) -> str:
         parts = ["DRAFT - NOT APPROVED", "ECMWF ensemble + MBC + AI/ML"]
         # The model in use (production, or the operationally approved candidate) is the
         # one in production; only an experimental model is flagged as not in production.
-        parts.append(
-            "in production" if status in IN_USE else "experimental model, not in production"
-        )
+        if earlier_wording():
+            if status != "production":
+                parts.append("candidate model, not the production model")
+        else:
+            parts.append(
+                "in production" if status in IN_USE else "experimental model, not in production"
+            )
     parts.append("forecaster review required")
     if facts["input"]["synthetic"]:
         parts.append("SYNTHETIC TEST INPUT - NOT A FORECAST OF REAL WEATHER")
@@ -407,8 +422,10 @@ def about_lines(inputs: BulletinInputs) -> list[tuple[str, str]]:
         ),
         (
             "Verification:",
-            " each week is compared with observed rainfall (CHIRPS, ARC 2.0, RFE 2.0 and GPM"
-            " IMERG) once the week has passed.",
+            " each week is compared with CHIRPS observed rainfall once the week has passed."
+            if earlier_wording()
+            else " each week is compared with observed rainfall (CHIRPS, ARC 2.0, RFE 2.0 and"
+            " GPM IMERG) once the week has passed.",
         ),
         (
             "Issued by:",
@@ -816,6 +833,10 @@ def map_label(
     note = METHOD_NOTES.get((method or "").upper())
     if note is None:
         role = " (experimental model)" if status not in IN_USE else ""
+        if earlier_wording():
+            role = "" if status == "production" else " (candidate model)"
+            if status == "experimental":
+                role = " (experimental model)"
         named = f"{model_name} {version}".strip() if model_name else "MBC + AI/ML"
         note = f"ECMWF ensemble + {named}{role}"
     parts.append(note)

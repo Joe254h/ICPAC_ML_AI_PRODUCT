@@ -98,7 +98,7 @@ def test_weeks_are_named_by_their_boundary_dates_as_in_the_reference(inputs):
     assert weekly.period_label("2026-12-29T00:00:00", "2027-01-05T00:00:00", "%b") == (
         "29 Dec 2026-05 Jan 2027"
     )
-    assert weekly.FORMAT_VERSION == "icpac-weekly-v3"
+    assert weekly.FORMAT_VERSION == "icpac-weekly-v4"
 
 
 def test_correction_from_zero_raw_rainfall_reports_mm_instead_of_a_false_zero_percent(inputs):

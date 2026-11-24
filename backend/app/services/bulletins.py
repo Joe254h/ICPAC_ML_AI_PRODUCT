@@ -302,8 +302,9 @@ class BulletinService:
         output.mkdir(parents=True, exist_ok=True)
         image, document = output / "map.png", output / "bulletin.docx"
         image.write_bytes(weekly.rainfall_png(inputs))
+        figures, charts = section_figures(sections, service, inputs)
         word_bytes = WordTemplateGenerator().render_bytes(
-            inputs, revised, figures=service.bulletin_figures(inputs.previous)
+            inputs, revised, figures=figures, charts=charts
         )
         if extra:
             extra_record = self.repo.get("supplemental_product", extra["record_id"])
@@ -905,20 +906,21 @@ class BulletinService:
             BulletinInputs.from_package(directory),
             previous=bulletin["facts"].get("previous_week"),
         )
-        if checksum_key == "map_checksum":
-            return weekly.rainfall_png(inputs)
-        revised = bulletin["facts"]["sections"] if bulletin.get("edited") else None
-        # Drafts made before the section figures existed reproduce without them.
-        frozen = {s.get("key"): s for s in bulletin["facts"].get("sections") or []}
-        service = ForecastService(self.platform)
-        figures = (
-            service.bulletin_figures(inputs.previous)
-            if "figures" in (frozen.get("last_week") or {})
-            else None
-        )
-        return WordTemplateGenerator().render_bytes(
-            inputs, revised, figures=figures, charts="chart" in (frozen.get("correction") or {})
-        )
+        # A draft is reproduced in the wording of the format it was frozen in, and with
+        # only the figures its frozen sections carry, so its checksums still match.
+        token = weekly.WORDING.set(bulletin["facts"].get("format") or "icpac-weekly-v3")
+        try:
+            if checksum_key == "map_checksum":
+                return weekly.rainfall_png(inputs)
+            revised = bulletin["facts"]["sections"] if bulletin.get("edited") else None
+            figures, charts = section_figures(
+                bulletin["facts"].get("sections") or [], ForecastService(self.platform), inputs
+            )
+            return WordTemplateGenerator().render_bytes(
+                inputs, revised, figures=figures, charts=charts
+            )
+        finally:
+            weekly.WORDING.reset(token)
 
     def compare(self, left_id: str, right_id: str) -> dict:
         left, right = self.repo.get("bulletin", left_id), self.repo.get("bulletin", right_id)
@@ -931,6 +933,19 @@ class BulletinService:
             if left.get("forecast_id") != right.get("forecast_id")
             else [],
         }
+
+
+def section_figures(
+    sections: list[dict[str, Any]], service: Any, inputs: Any
+) -> tuple[dict[str, list[tuple[str, bytes]]] | None, bool]:
+    """The figures a draft's frozen sections ask for: last week's maps when its "How Last
+    Week's Forecast Did" carries figures, the correction chart when that section carries
+    the chart. Drafts, and revisions of drafts, frozen before the figures existed have
+    neither, so they render and reproduce without them."""
+    frozen = {s.get("key"): s for s in sections}
+    wanted = "figures" in (frozen.get("last_week") or {})
+    figures = service.bulletin_figures(inputs.previous) if wanted else None
+    return figures, "chart" in (frozen.get("correction") or {})
 
 
 def _paragraphs(value: Any, where: str, limit: int = MAX_PARAGRAPH_CHARS) -> list[str]:

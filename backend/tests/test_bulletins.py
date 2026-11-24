@@ -183,3 +183,42 @@ def test_drafts_can_be_archived_restored_and_deleted_until_approved(env, fast_ma
     assert client.get(f"/bulletins/{revision['id']}").status_code == 404
     actions = [a["action"] for a in env.platform.repo.list("audit")]
     assert {"bulletin_archived", "bulletin_restored", "bulletin_deleted"} <= set(actions)
+
+
+def test_drafts_frozen_before_the_figures_still_reproduce(env, fast_maps, monkeypatch):
+    """A draft (and a revision of it) frozen in the earlier format, without the section
+    figures and with the earlier wording, is reproduced exactly when its files are lost."""
+    from backend.app.services.bulletins import BulletinService as Service
+    from climate_engine.products import weekly_bulletin as weekly
+
+    run(env)
+    service = Service(env.platform)
+    # As an earlier version made it: no chart or figures, the earlier wording, format v3.
+    current = weekly.sections
+
+    def earlier(inputs):
+        return [
+            {k: v for k, v in section.items() if k not in ("chart", "figures")}
+            for section in current(inputs)
+        ]
+
+    monkeypatch.setattr(weekly, "sections", earlier)
+    token = weekly.WORDING.set("icpac-weekly-v3")
+    try:
+        draft = service.generate(actor="Joe N")
+    finally:
+        weekly.WORDING.reset(token)
+    monkeypatch.setattr(weekly, "sections", current)
+    draft["facts"]["format"] = "icpac-weekly-v3"  # the format an earlier version recorded
+    env.platform.repo.save("bulletin", draft, draft["id"])
+    old = env.platform.repo.get("bulletin", draft["id"])
+    assert old["facts"]["format"] == "icpac-weekly-v3"
+    assert "candidate model, not the production model" in old["facts"]["label"]
+    # Reproduced in its own wording and without the chart, after losing the disk.
+    shutil.rmtree(Path(old["document_path"]).parent)
+    assert service.document(old)[:2] == b"PK"
+    # A revision of it keeps the parent's sections, so it reproduces without figures too.
+    note = {"title": "Advisory", "paragraphs": ["Check local reports before acting."]}
+    edited = service.edit(old["id"], {"add_notes": [note]}, "Joe N")
+    shutil.rmtree(Path(edited["document_path"]).parent)
+    assert service.document(env.platform.repo.get("bulletin", edited["id"]))[:2] == b"PK"
