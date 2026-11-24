@@ -202,6 +202,14 @@ REFUSALS = (401, 403, 429)
 _unreachable: dict[str, tuple[float, str]] = {}
 
 
+def _folder(url: str) -> str:
+    """The server and the product folder of a URL (``host/products/CHIRPS/v2.0/prelim``),
+    the unit a refusal is remembered for."""
+    parts = urlsplit(url)
+    folders = parts.path.rsplit("/", 1)[0].strip("/").split("/")
+    return parts.netloc + "/" + "/".join(folders[:4])
+
+
 def reset_unreachable() -> None:
     _unreachable.clear()
 
@@ -321,7 +329,11 @@ class Server:
         cfg = settings()
         attempts, wait = int(cfg["retries"]), float(cfg["retry_wait_seconds"])
         host = urlsplit(url).netloc
-        held = _unreachable.get(host)
+        # A refusal (429, 403) is kept per product folder: CHC refuses its preliminary
+        # folders to busy addresses while it still serves the final ones. A server that
+        # does not answer at all is left alone as a whole.
+        folder = _folder(url)
+        held = _unreachable.get(folder) or _unreachable.get(host)
         if held and held[0] > time.monotonic():
             if held[1].startswith("it refused") or held[1].startswith("it asked"):
                 raise CHIRPSUnavailable(
@@ -338,7 +350,7 @@ class Server:
             except Exception as exc:
                 if not _transient(exc) or attempt == attempts:
                     if _refused(exc):
-                        _unreachable[host] = (time.monotonic() + REFUSED_SECONDS, _reason(exc))
+                        _unreachable[folder] = (time.monotonic() + REFUSED_SECONDS, _reason(exc))
                     elif _unreached(exc):
                         _unreachable[host] = (time.monotonic() + UNREACHABLE_SECONDS, _reason(exc))
                     raise CHIRPSUnavailable(

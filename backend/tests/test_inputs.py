@@ -970,6 +970,7 @@ def test_the_relay_script_writes_what_the_service_reads(env, tmp_path, monkeypat
         coords={"latitude": lat, "longitude": lon},
         name="precip",
     )
+    monkeypatch.setattr(chirps_relay, "PAUSE_SECONDS", 0)
     monkeypatch.setattr(chirps, "fetch_day", fake_day)
     monkeypatch.setattr(chirps_dekad, "published", lambda server: [dekad])
     monkeypatch.setattr(
@@ -985,3 +986,24 @@ def test_the_relay_script_writes_what_the_service_reads(env, tmp_path, monkeypat
     assert index["dekads"] == [dekad.name] and not old.exists()
     read = chirps_dekad.read(store / "dekad" / dekad.name, dekad)
     assert float(np.nanmax(read.values)) == 9.0
+
+
+def test_a_refusal_is_remembered_for_its_product_folder_only(monkeypatch):
+    """CHC refuses its preliminary folders to busy addresses (429) while it serves the
+    final ones: a refusal of one folder does not stop the other."""
+    prelim = "https://chc.example/products/CHIRPS/v2.0/prelim/global_daily/tifs/p05/2026/"
+    final = "https://chc.example/products/CHIRPS/v2.0/africa_daily/tifs/p05/2026/"
+
+    def get(url: str) -> bytes | None:
+        if url == prelim:
+            raise httpx.HTTPStatusError(
+                "429", request=httpx.Request("GET", url), response=httpx.Response(429)
+            )
+        return b"<html>listing</html>"
+
+    server = chirps.Server(get, sleep=lambda s: None)
+    with pytest.raises(chirps.CHIRPSUnavailable, match="fewer requests"):
+        server.fetch(prelim)
+    with pytest.raises(chirps.CHIRPSUnavailable, match="left alone"):
+        server.fetch(prelim + "x.tif")
+    assert server.fetch(final) == b"<html>listing</html>"

@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -29,6 +30,9 @@ import xarray as xr
 
 from climate_engine import ncio
 from climate_engine.inputs import chirps, chirps_dekad
+
+#: Seconds between days asked of CHC.
+PAUSE_SECONDS = float(os.getenv("CHIRPS_RELAY_PAUSE", "2"))
 
 
 def relay_days(store: Path, days: int, today: date) -> dict[str, dict[str, str]]:
@@ -39,6 +43,9 @@ def relay_days(store: Path, days: int, today: date) -> dict[str, dict[str, str]]
     held: dict[str, dict[str, str]] = {}
     for offset in range(days, 1, -1):  # CHC publishes a day about two days later
         day = today - timedelta(days=offset)
+        kept = chirps._held_day(store, day)
+        if not kept or kept[1].get("product") != "final":
+            time.sleep(PAUSE_SECONDS)  # a polite pace: CHC refuses addresses that hurry
         try:
             _, info = chirps.fetch_day(day, grid, server, store)
         except chirps.CHIRPSUnavailable as exc:
