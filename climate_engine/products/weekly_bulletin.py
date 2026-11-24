@@ -520,9 +520,9 @@ def last_week_figures(previous: dict[str, Any] | None) -> list[dict[str, Any]]:
     its observed mean and the forecast's scores against it."""
     if not previous:
         return []
-    layer = previous.get("layer")
+    layer = str(previous.get("layer") or "")
     metrics = (previous.get("domain") or {}).get(layer)
-    if not metrics or not previous.get("forecast_id"):
+    if not layer or not metrics or not previous.get("forecast_id"):
         return []
     observed = previous.get("observed", "CHIRPS")
     words = LAYER_WORDS.get(layer, layer)

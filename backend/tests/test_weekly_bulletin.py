@@ -468,7 +468,8 @@ def test_last_week_maps_and_the_correction_chart_go_under_their_sections(inputs,
         "Observed · CHIRPS · mean 15.2 mm · RMSE 12.0 mm · MAE 6.7 mm",
         "Observed · ARC 2.0 · mean 16.4 mm · RMSE 14.4 mm · MAE 6.7 mm",
     ]
-    assert weekly.correction_chart(inputs)[:8] == b"\x89PNG\r\n\x1a\n"
+    chart = weekly.correction_chart(inputs)
+    assert chart is not None and chart[:8] == b"\x89PNG\r\n\x1a\n"
     held = {"last_week": [(f["caption"], png.getvalue()) for f in figures]}
     result = WordTemplateGenerator().render_bytes(inputs, figures=held)
     with zipfile.ZipFile(io.BytesIO(result)) as output:
