@@ -27,6 +27,30 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
       - run: pip install -e .
+      - name: Which CHIRPS servers answer from here
+        continue-on-error: true
+        run: |
+          for url in \
+            https://data.chc.ucsb.edu/products/CHIRPS/v2.0/prelim/global_daily/tifs/p05/2026/ \
+            https://data.chc.ucsb.edu/products/CHIRPS/v2.0/africa_daily/tifs/p05/2026/ \
+            http://data.chc.ucsb.edu/products/CHIRPS/v2.0/prelim/global_daily/tifs/p05/2026/ \
+            ftp://ftp.chc.ucsb.edu/pub/org/chc/products/CHIRPS-2.0/prelim/global_daily/tifs/p05/2026/ \
+            "https://coastwatch.pfeg.noaa.gov/erddap/griddap/chirps20GlobalDailyP05.das" \
+            "https://coastwatch.pfeg.noaa.gov/erddap/info/chirps20GlobalDailyP05/index.json" \
+            "https://iridl.ldeo.columbia.edu/SOURCES/.UCSB/.CHIRPS/.v2p0/.daily-improved/.global/.0p05/.prcp/T/last/VALUE/" ; do
+            code=$(curl -s -m 40 -o /tmp/out -w '%{http_code} %{size_download}B %{time_total}s' "$url" || echo "failed: $?")
+            echo "$code  $url"
+          done
+          grep -o '"time_coverage_end", "[^"]*"\|actual_range[^\]]*' /tmp/out | head -3 || true
+          python - <<'PY'
+          import json, urllib.request
+          url = "https://coastwatch.pfeg.noaa.gov/erddap/info/chirps20GlobalDailyP05/index.json"
+          try:
+              rows = json.load(urllib.request.urlopen(url, timeout=40))["table"]["rows"]
+              print([r for r in rows if r[2] in ("time_coverage_end", "time_coverage_start")])
+          except Exception as exc:
+              print("ERDDAP info failed:", exc)
+          PY
       - name: Read CHIRPS from CHC
         run: python -m scripts.chirps_relay --store relay --days 120 --dekads 18
       - name: Publish on the chirps-relay branch
