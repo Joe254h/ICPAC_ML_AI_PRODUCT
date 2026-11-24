@@ -185,6 +185,24 @@ function Body({ detail }: { detail: ForecastDetail }) {
             title={section.title}
           >
             <Bullets section={section} />
+            {!!section.figures?.length && (
+              <div
+                className={
+                  section.figures.length > 1
+                    ? "grid-2 section-figures"
+                    : "section-figures"
+                }
+              >
+                {section.figures.map((figure) => (
+                  <MapFigure
+                    key={figure.src}
+                    src={"/api" + figure.src}
+                    alt={figure.caption || section.title}
+                    caption={figure.caption || undefined}
+                  />
+                ))}
+              </div>
+            )}
           </Card>
         ))}
       {get("about") && (

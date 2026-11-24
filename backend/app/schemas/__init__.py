@@ -51,6 +51,11 @@ class ChatRequest(BaseModel):
         return value
 
 
+class ArchiveRequest(BaseModel):
+    actor: str = Field(default="Forecaster", max_length=80)
+    archived: bool = True
+
+
 class ReviewRequest(BaseModel):
     actor: str = Field(min_length=2, max_length=80)
     confirmed: bool = False

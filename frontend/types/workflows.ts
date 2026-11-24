@@ -152,6 +152,8 @@ export type Bulletin = {
   kind?: string;
   forecast_id?: string;
   title: string;
+  /** Hidden from the list of drafts (it can be restored). */
+  archived?: boolean;
   status: "draft" | "under_review" | "approved" | "published" | "rejected";
   created_at: string;
   created_by?: string;

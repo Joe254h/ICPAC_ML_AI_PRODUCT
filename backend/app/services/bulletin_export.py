@@ -9,6 +9,7 @@ show those as short notes naming what they need, never as empty maps. The page i
 import base64
 import html
 import io
+import re
 import zipfile
 from datetime import datetime
 from typing import Any
@@ -74,6 +75,8 @@ align-items:start}
 figure{margin:0;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px}
 figure img{display:block;width:100%;height:auto;border-radius:6px}
 figcaption{font-size:13px;color:var(--muted);padding:8px 4px 0}
+.figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;margin-top:18px}
+.figures img{width:100%;height:auto}
 strong{color:var(--ink)}
 .pending{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}
 .pending article{border:1px dashed #cbd5d0;border-radius:12px;padding:16px 18px;background:#fbfcfb}
@@ -126,6 +129,43 @@ def images(document: bytes) -> dict[str, tuple[str, bytes]]:
     if "focus" in found:  # the same picture held Somalia's map in earlier drafts
         found["somalia"] = found["focus"]
     return found
+
+
+def section_figures(document: bytes) -> dict[str, list[tuple[str, bytes]]]:
+    """The figures the Word document holds under its sections (last week's maps, the
+    correction chart), by section key, in order, each with its caption (the picture's alt
+    text "<key>|<caption>")."""
+    found: dict[str, list[tuple[str, bytes]]] = {}
+    with zipfile.ZipFile(io.BytesIO(document)) as package:
+        body = package.read("word/document.xml").decode("utf-8-sig")
+        rels = package.read("word/_rels/document.xml.rels").decode("utf-8-sig")
+        targets = {
+            m["id"]: m["target"]
+            for m in re.finditer(
+                r'<Relationship [^>]*Target="(?P<target>[^"]+)"[^>]*Id="(?P<id>[^"]+)"', rels
+            )
+        }
+        pattern = r'<wp:docPr [^>]*name="Figure \d+" descr="(?P<alt>[^"]*)"[^>]*/>.*?r:embed="(?P<rid>[^"]+)"'
+        for match in re.finditer(pattern, body, re.S):
+            key, _, caption = html.unescape(match["alt"]).partition("|")
+            target = targets.get(match["rid"])
+            if not key or not target:
+                continue
+            found.setdefault(key, []).append((caption, package.read("word/" + target)))
+    return found
+
+
+def _figures_html(figures: list[tuple[str, bytes]]) -> str:
+    if not figures:
+        return ""
+    items = "".join(
+        f'<figure><img alt="{html.escape(caption or "Figure")}" '
+        f'src="data:image/png;base64,{base64.b64encode(data).decode()}">'
+        + (f"<figcaption>{html.escape(caption)}</figcaption>" if caption else "")
+        + "</figure>"
+        for caption, data in figures
+    )
+    return f'<div class="figures">{items}</div>'
 
 
 def _rich(text: str, lead: str) -> str:
@@ -194,6 +234,7 @@ class WeeklyHTMLExporter:
         provenance = facts.get("provenance", {})
         sections = {s["key"]: s for s in facts["sections"]}
         maps = images(document)
+        extra_figures = section_figures(document)
         period = facts.get("period", "")
         status_text, status_class = STATUS.get(bulletin["status"], (bulletin["status"], "draft"))
         # The label's parts, not its text: "ECMWF ensemble + MBC" is also the start of
@@ -235,7 +276,8 @@ class WeeklyHTMLExporter:
             items = "".join(f"<li>{p}</li>" for p in _paragraphs(extra))
             body.append(
                 '<section class="card"><p class="label">This week in figures</p>'
-                f"<h2>{escape(extra['title'])}</h2><ul>{items}</ul></section>"
+                f"<h2>{escape(extra['title'])}</h2><ul>{items}</ul>"
+                f"{_figures_html(extra_figures.get(extra['key'], []))}</section>"
             )
         # The forecaster's own sections (an advisory, impacts), before the forecast note.
         for note in (s for s in facts["sections"] if s.get("note")):

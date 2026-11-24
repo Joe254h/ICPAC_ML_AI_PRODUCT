@@ -427,6 +427,16 @@ def install(app: FastAPI, dependency) -> None:
         """Reference-format draft sections, maps and generator status."""
         return ForecastService(platform).bulletin(forecast_id)
 
+    @app.get("/forecasts/{forecast_id}/bulletin/correction.png")
+    def bulletin_correction_chart(forecast_id: str = ForecastId, platform=Depends(dependency)):
+        """What the correction changed: the member states' mean rainfall, raw ECMWF, MBC and
+        the issued forecast, as a bar chart."""
+        return Response(
+            ForecastService(platform).correction_chart(forecast_id),
+            media_type="image/png",
+            headers=IMMUTABLE,
+        )
+
     @app.get("/forecasts/{forecast_id}/bulletin/export")
     def export_bulletin(forecast_id: str = ForecastId, platform=Depends(dependency)):
         try:

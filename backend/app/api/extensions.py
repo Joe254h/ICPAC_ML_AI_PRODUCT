@@ -18,6 +18,7 @@ from backend.app.api.access import (
 from backend.app.db import now
 from backend.app.schemas import (
     AnswerFeedback,
+    ArchiveRequest,
     BulletinEditRequest,
     BulletinRequest,
     BulletinTranslateRequest,
@@ -368,14 +369,16 @@ def install(app: FastAPI, dependency):
         return ReferenceIndex().get(id)
 
     @app.get("/bulletins")
-    def bulletins(platform=Depends(dependency)) -> list[dict]:
-        """Weekly bulletin drafts of real forecasts. Drafts of the retired demonstration and
-        of synthetic test input stay in older databases but are not listed."""
+    def bulletins(archived: bool = False, platform=Depends(dependency)) -> list[dict]:
+        """Weekly bulletin drafts of real forecasts; archived ones only with archived=true.
+        Drafts of the retired demonstration and of synthetic test input stay in older
+        databases but are not listed."""
         return [
             b
             for b in reversed(platform.repo.list("bulletin"))
             if b.get("kind") == WEEKLY
             and not ((b.get("facts") or {}).get("input") or {}).get("synthetic")
+            and (archived or not b.get("archived"))
         ]
 
     @app.post("/bulletins/generate")
@@ -510,6 +513,33 @@ def install(app: FastAPI, dependency):
             return BulletinService(platform).translation(job_id)
         except KeyError:
             raise HTTPException(404, "Unknown translation") from None
+
+    @app.post("/bulletins/{id}/archive")
+    def archive_bulletin(
+        id: str,
+        body: ArchiveRequest,
+        platform=Depends(dependency),
+        user: Principal = Depends(require_operator),
+    ) -> dict:
+        """Archive a bulletin (hide it from the list) or bring it back."""
+        try:
+            return BulletinService(platform).archive(
+                id, acting_name(user, body.actor), body.archived
+            )
+        except KeyError:
+            raise HTTPException(404, "Unknown bulletin") from None
+
+    @app.delete("/bulletins/{id}")
+    def delete_bulletin(
+        id: str, platform=Depends(dependency), user: Principal = Depends(require_operator)
+    ) -> dict:
+        """Delete a draft that was never approved."""
+        try:
+            return BulletinService(platform).delete(id, acting_name(user))
+        except KeyError:
+            raise HTTPException(404, "Unknown bulletin") from None
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
 
     @app.post("/bulletins/{id}/resend")
     def resend_bulletin_email(

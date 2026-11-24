@@ -66,7 +66,8 @@ def test_drafts_are_the_weekly_bulletin_of_the_latest_forecast(env, fast_maps, m
     assert "<h1>Weekly Forecast for 12-19 October 2026</h1>" in text
     assert "<strong>Decision-Support Note:</strong>" in text
     assert "<li><strong>Heavy rainfall (above 200 mm)</strong>" in text
-    assert text.count('<figure><img alt="') == 2  # the regional and the Somalia rainfall maps
+    # The regional and the focus rainfall maps, and the correction chart.
+    assert text.count('<figure><img alt="') == 3
     assert '<span class="tag">In progress</span>' not in text
     assert "<h2>Rainfall by Country</h2>" in text and "<h2>About this forecast</h2>" in text
     assert "DRAFT - NOT APPROVED" in text and "SYNTHETIC" not in text
@@ -155,3 +156,69 @@ def test_rejected_drafts_and_changed_facts_are_refused(env, fast_maps):
     env.platform.repo.save("bulletin", {**synthetic, "id": "old-synthetic"}, "old-synthetic")
     assert [b["id"] for b in env.client.get("/bulletins").json()] == [draft["id"]]
     assert env.client.get("/bulletins/old-demo/export").status_code == 404
+
+
+def test_drafts_can_be_archived_restored_and_deleted_until_approved(env, fast_maps):
+    run(env)
+    client = env.client
+    draft = client.post("/bulletins/generate", json={}).json()
+    archived = client.post(f"/bulletins/{draft['id']}/archive", json={"archived": True})
+    assert archived.status_code == 200 and archived.json()["archived"] is True
+    assert client.get("/bulletins").json() == []
+    assert [b["id"] for b in client.get("/bulletins?archived=true").json()] == [draft["id"]]
+    assert client.get(f"/bulletins/{draft['id']}").status_code == 200  # still readable
+    client.post(f"/bulletins/{draft['id']}/archive", json={"archived": False})
+    assert [b["id"] for b in client.get("/bulletins").json()] == [draft["id"]]
+    # Approved and published bulletins are sealed: they can be archived, not deleted.
+    service = BulletinService(env.platform)
+    review = ReviewRequest(actor="Reviewer", confirmed=True, comment="Fine")
+    service.transition(draft["id"], "submit", review)
+    service.transition(draft["id"], "approve", review)
+    assert client.delete(f"/bulletins/{draft['id']}").status_code == 409
+    revision = client.post(f"/bulletins/generate?parent_id={draft['id']}", json={}).json()
+    assert client.delete(f"/bulletins/{revision['id']}").json() == {
+        "id": revision["id"],
+        "deleted": True,
+    }
+    assert client.get(f"/bulletins/{revision['id']}").status_code == 404
+    actions = [a["action"] for a in env.platform.repo.list("audit")]
+    assert {"bulletin_archived", "bulletin_restored", "bulletin_deleted"} <= set(actions)
+
+
+def test_drafts_frozen_before_the_figures_still_reproduce(env, fast_maps, monkeypatch):
+    """A draft (and a revision of it) frozen in the earlier format, without the section
+    figures and with the earlier wording, is reproduced exactly when its files are lost."""
+    from backend.app.services.bulletins import BulletinService as Service
+    from climate_engine.products import weekly_bulletin as weekly
+
+    run(env)
+    service = Service(env.platform)
+    # As an earlier version made it: no chart or figures, the earlier wording, format v3.
+    current = weekly.sections
+
+    def earlier(inputs):
+        return [
+            {k: v for k, v in section.items() if k not in ("chart", "figures")}
+            for section in current(inputs)
+        ]
+
+    monkeypatch.setattr(weekly, "sections", earlier)
+    token = weekly.WORDING.set("icpac-weekly-v3")
+    try:
+        draft = service.generate(actor="Joe N")
+    finally:
+        weekly.WORDING.reset(token)
+    monkeypatch.setattr(weekly, "sections", current)
+    draft["facts"]["format"] = "icpac-weekly-v3"  # the format an earlier version recorded
+    env.platform.repo.save("bulletin", draft, draft["id"])
+    old = env.platform.repo.get("bulletin", draft["id"])
+    assert old["facts"]["format"] == "icpac-weekly-v3"
+    assert "candidate model, not the production model" in old["facts"]["label"]
+    # Reproduced in its own wording and without the chart, after losing the disk.
+    shutil.rmtree(Path(old["document_path"]).parent)
+    assert service.document(old)[:2] == b"PK"
+    # A revision of it keeps the parent's sections, so it reproduces without figures too.
+    note = {"title": "Advisory", "paragraphs": ["Check local reports before acting."]}
+    edited = service.edit(old["id"], {"add_notes": [note]}, "Joe N")
+    shutil.rmtree(Path(edited["document_path"]).parent)
+    assert service.document(env.platform.repo.get("bulletin", edited["id"]))[:2] == b"PK"

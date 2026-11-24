@@ -82,7 +82,8 @@ test("draft translation recovers after reload and a temporary API failure", asyn
   let submissions = 0;
   let recover = false;
   let completed = false;
-  await page.route("**/api/bulletins", (route) =>
+  // The drafts list, with or without its query (the page asks for archived drafts too).
+  await page.route(/\/api\/bulletins(\?[^/]*)?$/, (route) =>
     route.fulfill({ json: completed ? [translated, ...stored] : stored }),
   );
   await page.route(`**/api/bulletins/${draft.id}/translations`, (route) => {

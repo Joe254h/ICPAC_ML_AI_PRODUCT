@@ -4317,3 +4317,9 @@ h2,
   font-family: var(--font-heading);
   letter-spacing: 0;
 }
+
+/* Figures under a bulletin section: last week's maps, the correction chart. */
+.section-figures {
+  margin-top: 20px;
+  gap: 20px;
+}

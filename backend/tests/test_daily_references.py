@@ -352,3 +352,11 @@ def test_the_bulletin_reports_last_week_from_another_dataset_while_chirps_refuse
     text = " ".join(" ".join(part) for part in lines)
     assert "ARC 2.0 observed" in text and "RFE 2.0 RMSE" in text
     assert "CHIRPS" not in text
+    # The bulletin's maps of that week: the forecast and each observation that scored it.
+    figures = service.bulletin_figures(previous)["last_week"]
+    assert [caption.split(" · ")[:2] for caption, _ in figures] == [
+        ["Forecast", "MBC + AI/ML" if previous["layer"] == "hybrid" else "MBC"],
+        ["Observed", "ARC 2.0"],
+        ["Observed", "RFE 2.0"],
+    ]
+    assert all(png[:8] == b"\x89PNG\r\n\x1a\n" for _, png in figures)

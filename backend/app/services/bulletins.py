@@ -139,6 +139,8 @@ def language_of(record: dict[str, Any]) -> str | None:
 
 #: Background translations of drafts, followed by the bulletin page.
 TRANSLATION_KIND = "bulletin_translation"
+#: Bulletins that may be deleted: never approved, so nothing sealed is lost.
+DELETABLE = ("draft", "rejected")
 #: The background job that has the AI service write a draft's wording, in English, from the
 #: forecast (a "translation" from the computed sentences into a forecaster's own words).
 WRITE = "write"
@@ -256,6 +258,8 @@ class BulletinService:
                     "why",
                     "missing_dependency",
                     "extra",
+                    "chart",
+                    "figures",
                 )
                 if k in section
             }
@@ -298,7 +302,10 @@ class BulletinService:
         output.mkdir(parents=True, exist_ok=True)
         image, document = output / "map.png", output / "bulletin.docx"
         image.write_bytes(weekly.rainfall_png(inputs))
-        word_bytes = WordTemplateGenerator().render_bytes(inputs, revised)
+        figures, charts = section_figures(sections, service, inputs)
+        word_bytes = WordTemplateGenerator().render_bytes(
+            inputs, revised, figures=figures, charts=charts
+        )
         if extra:
             extra_record = self.repo.get("supplemental_product", extra["record_id"])
             extra_maps = {
@@ -728,6 +735,32 @@ class BulletinService:
             return None
         return self.start_translation(draft["id"], WRITE, actor)
 
+    def archive(self, identifier: str, actor: str, archived: bool = True) -> dict:
+        """Hide a draft (or a published bulletin) from the list, or bring it back; nothing
+        is lost and it stays readable by its link."""
+        bulletin = self.repo.get("bulletin", identifier)
+        bulletin["archived"] = bool(archived)
+        self.repo.save("bulletin", bulletin, identifier)
+        self.repo.audit(
+            "bulletin_archived" if archived else "bulletin_restored", actor, identifier, {}
+        )
+        return bulletin
+
+    def delete(self, identifier: str, actor: str) -> dict:
+        """Delete a draft that was never approved; approved and published bulletins are
+        sealed and can only be archived."""
+        bulletin = self.repo.get("bulletin", identifier)
+        if bulletin.get("status") not in DELETABLE:
+            raise ValueError("Approved and published bulletins are sealed: archive them instead")
+        self.repo.delete("bulletin", identifier)
+        self.repo.audit(
+            "bulletin_deleted",
+            actor,
+            identifier,
+            {"status": bulletin.get("status"), "title": bulletin.get("title")},
+        )
+        return {"id": identifier, "deleted": True}
+
     def transition(self, identifier: str, action: str, review: ReviewRequest) -> dict:
         if not review.confirmed or not review.comment.strip():
             raise ValueError(
@@ -873,10 +906,21 @@ class BulletinService:
             BulletinInputs.from_package(directory),
             previous=bulletin["facts"].get("previous_week"),
         )
-        if checksum_key == "map_checksum":
-            return weekly.rainfall_png(inputs)
-        revised = bulletin["facts"]["sections"] if bulletin.get("edited") else None
-        return WordTemplateGenerator().render_bytes(inputs, revised)
+        # A draft is reproduced in the wording of the format it was frozen in, and with
+        # only the figures its frozen sections carry, so its checksums still match.
+        token = weekly.WORDING.set(bulletin["facts"].get("format") or "icpac-weekly-v3")
+        try:
+            if checksum_key == "map_checksum":
+                return weekly.rainfall_png(inputs)
+            revised = bulletin["facts"]["sections"] if bulletin.get("edited") else None
+            figures, charts = section_figures(
+                bulletin["facts"].get("sections") or [], ForecastService(self.platform), inputs
+            )
+            return WordTemplateGenerator().render_bytes(
+                inputs, revised, figures=figures, charts=charts
+            )
+        finally:
+            weekly.WORDING.reset(token)
 
     def compare(self, left_id: str, right_id: str) -> dict:
         left, right = self.repo.get("bulletin", left_id), self.repo.get("bulletin", right_id)
@@ -889,6 +933,19 @@ class BulletinService:
             if left.get("forecast_id") != right.get("forecast_id")
             else [],
         }
+
+
+def section_figures(
+    sections: list[dict[str, Any]], service: Any, inputs: Any
+) -> tuple[dict[str, list[tuple[str, bytes]]] | None, bool]:
+    """The figures a draft's frozen sections ask for: last week's maps when its "How Last
+    Week's Forecast Did" carries figures, the correction chart when that section carries
+    the chart. Drafts, and revisions of drafts, frozen before the figures existed have
+    neither, so they render and reproduce without them."""
+    frozen = {s.get("key"): s for s in sections}
+    wanted = "figures" in (frozen.get("last_week") or {})
+    figures = service.bulletin_figures(inputs.previous) if wanted else None
+    return figures, "chart" in (frozen.get("correction") or {})
 
 
 def _paragraphs(value: Any, where: str, limit: int = MAX_PARAGRAPH_CHARS) -> list[str]:

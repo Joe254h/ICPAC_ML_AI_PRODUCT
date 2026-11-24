@@ -98,7 +98,7 @@ def test_weeks_are_named_by_their_boundary_dates_as_in_the_reference(inputs):
     assert weekly.period_label("2026-12-29T00:00:00", "2027-01-05T00:00:00", "%b") == (
         "29 Dec 2026-05 Jan 2027"
     )
-    assert weekly.FORMAT_VERSION == "icpac-weekly-v3"
+    assert weekly.FORMAT_VERSION == "icpac-weekly-v4"
 
 
 def test_correction_from_zero_raw_rainfall_reports_mm_instead_of_a_false_zero_percent(inputs):
@@ -405,11 +405,13 @@ def test_scope_label_names_the_model_status_and_synthetic_input():
         return BulletinInputs(Path("p"), "id", facts(**changes), {}, Path("c.csv"), {})
 
     label = weekly.scope_label(inputs_with())
-    assert "not the production model" in label and "SYNTHETIC TEST INPUT" in label
+    assert "in production" in label and "SYNTHETIC TEST INPUT" in label
     real = weekly.scope_label(
         inputs_with(model={"model_id": "m", "status": "production"}, input={"synthetic": False})
     )
-    assert "not the production model" not in real and "SYNTHETIC" not in real
+    assert "ECMWF ensemble + MBC + AI/ML · in production" in real and "SYNTHETIC" not in real
+    trial = weekly.scope_label(inputs_with(model={"model_id": "m", "status": "experimental"}))
+    assert "experimental model, not in production" in trial
 
 
 def test_somalia_logo_is_offshore_and_ticks_match_country_reference():
@@ -423,3 +425,61 @@ def test_somalia_logo_is_offshore_and_ticks_match_country_reference():
     ]
     assert not any(canvas.clip.contains_point(point) for point in points)
     assert canvas.tick_spacing == 2
+
+
+def test_last_week_maps_and_the_correction_chart_go_under_their_sections(inputs, monkeypatch):
+    """The figures of "How Last Week's Forecast Did" (forecast and each observation, with
+    their scores) and the correction chart are placed in the Word document, and the web
+    page reads them back with their captions."""
+    from dataclasses import replace
+
+    from backend.app.services.bulletin_export import section_figures
+
+    png = io.BytesIO()
+    Image.new("RGB", (80, 60), "#0000ff").save(png, format="PNG")
+    monkeypatch.setattr(weekly, "rainfall_png", lambda *args, **kwargs: png.getvalue())
+    monkeypatch.setattr(weekly_maps, "render", lambda *args, **kwargs: png.getvalue())
+    facts_ = inputs.interpretation
+    facts_["domain_mean_mm"] = {"raw": 16.5, "hybrid": 14.4}
+    for row, raw, ml in zip(facts_["countries"], (30.0, 160.0), (1.5, -2.0), strict=True):
+        row.update(raw_mean_mm=raw, hybrid_minus_mbc_mean_mm=ml)
+    scores = {"rmse": 12.0, "mae": 6.7, "bias": -1.3, "correlation": 0.87}
+    previous = {
+        "forecast_id": "w2-2026-10-01-aaaaaaaa",
+        "valid_start": "2026-10-08",
+        "valid_end": "2026-10-14",
+        "layer": "hybrid",
+        "observed": "CHIRPS",
+        "observed_source": "chirps",
+        "domain": {"hybrid": {**scores, "forecast_mean": 13.9, "observed_mean": 15.2}},
+        "references": [
+            {
+                "name": "ARC 2.0",
+                "source": "arc2",
+                "domain": {"hybrid": {**scores, "rmse": 14.4, "observed_mean": 16.4}},
+            }
+        ],
+        "countries": {},
+    }
+    inputs = replace(inputs, previous=previous)
+    figures = weekly.last_week_figures(previous)
+    assert [f["caption"] for f in figures] == [
+        "Forecast · MBC + AI/ML · RMSE 12.0 mm · MAE 6.7 mm (against CHIRPS)",
+        "Observed · CHIRPS · mean 15.2 mm · RMSE 12.0 mm · MAE 6.7 mm",
+        "Observed · ARC 2.0 · mean 16.4 mm · RMSE 14.4 mm · MAE 6.7 mm",
+    ]
+    chart = weekly.correction_chart(inputs)
+    assert chart is not None and chart[:8] == b"\x89PNG\r\n\x1a\n"
+    held = {"last_week": [(f["caption"], png.getvalue()) for f in figures]}
+    result = WordTemplateGenerator().render_bytes(inputs, figures=held)
+    with zipfile.ZipFile(io.BytesIO(result)) as output:
+        added = [n for n in output.namelist() if n.startswith("word/media/figure")]
+        assert len(added) == 4  # the chart and three maps
+        rels = output.read("word/_rels/document.xml.rels").decode()
+        assert all(name.removeprefix("word/") in rels for name in added)
+    found = section_figures(result)
+    assert [c for c, _ in found["last_week"]] == [f["caption"] for f in figures]
+    assert [c for c, _ in found["correction"]] == [""]
+    # A draft made before the chart existed reproduces without it.
+    plain = WordTemplateGenerator().render_bytes(inputs, charts=False)
+    assert "correction" not in section_figures(plain)
