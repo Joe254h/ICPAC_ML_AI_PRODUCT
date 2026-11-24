@@ -48,7 +48,7 @@ def relay_days(store: Path, days: int, today: date) -> dict[str, dict[str, str]]
             time.sleep(PAUSE_SECONDS)  # a polite pace: CHC refuses addresses that hurry
         try:
             _, info = chirps.fetch_day(day, grid, server, store)
-        except chirps.CHIRPSUnavailable as exc:
+        except (chirps.CHIRPSUnavailable, ValueError, KeyError, OSError) as exc:
             print(f"{day}: not relayed: {str(exc)[:200]}")
             continue
         held[day.isoformat()] = {"product": info.product, "sha256": info.sha256}
@@ -108,23 +108,29 @@ def main(argv: list[str] | None = None) -> int:
     days = relay_days(args.store, args.days, today)
     dekads = relay_dekads(args.store, args.dekads)
     prune(args.store, args.days, args.dekads, today)
-    held = {
-        path.name[len("chirps-v2.0.") : -len(".nc")]
-        for path in (args.store / "daily").glob("chirps-v2.0.*.nc")
-    }
-    relayed = {day: days[day] for day in sorted(days) if day in held}
+    # The index lists every day held, also those kept from earlier runs (here or on
+    # another machine running this script).
+    held: dict[str, dict[str, str]] = {}
+    for path in sorted((args.store / "daily").glob("chirps-v2.0.*.nc")):
+        day = date.fromisoformat(path.name[len("chirps-v2.0.") : -len(".nc")])
+        kept = chirps._held_day(args.store, day)
+        if kept:
+            held[day.isoformat()] = {
+                "product": str(kept[1].get("product")),
+                "sha256": str(kept[1].get("sha256")),
+            }
     index = {
         "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "days": relayed,
+        "days": held,
         "dekads": dekads,
     }
     (args.store / chirps_dekad.RELAY_INDEX).write_text(json.dumps(index, indent=1) + "\n")
-    finals = sum(1 for d in relayed.values() if d["product"] == "final")
+    finals = sum(1 for d in held.values() if d["product"] == "final")
     print(
-        f"relayed {len(relayed)} days ({finals} final, {len(relayed) - finals} preliminary) "
-        f"and {len(dekads)} dekads"
+        f"read {len(days)} days this run; holding {len(held)} days ({finals} final, "
+        f"{len(held) - finals} preliminary) and {len(dekads)} dekads"
     )
-    return 0 if relayed or dekads else 1
+    return 0  # CHC refusing this machine today is not an error: the next run tries again
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
 # CHIRPS relay: CHC refuses the Hugging Face Space ("429 Too Many Requests") and Spaces
-# cannot use FTP, so this job reads CHIRPS from CHC (HTTPS, else FTP, else the NOAA mirror)
-# every six hours and publishes the recent days and dekads, cut to the region, on the
-# chirps-relay branch. The service reads them over HTTPS (config chirps.relay). The branch
-# holds only the latest files: each run replaces it.
+# cannot use FTP, so this job reads CHIRPS from CHC every six hours and publishes the recent
+# days and dekads, cut to the region, on the chirps-relay branch, which the service reads
+# over HTTPS (config chirps.relay). CHC does not always answer GitHub's machines either: the
+# same script also runs on a machine CHC serves (the ICPAC HPC, docs/chirps-relay.md), and
+# runs from both add to the branch.
 name: CHIRPS relay
 on:
   schedule: [{cron: '17 */6 * * *'}]
@@ -11,6 +12,7 @@ on:
     branches: ['claude/**']
     paths:
       - scripts/chirps_relay.py
+      - scripts/chirps_relay.sh
       - .github/workflows/chirps-relay.yml
 permissions: {contents: write}
 concurrency: {group: chirps-relay, cancel-in-progress: false}
@@ -20,54 +22,10 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
-      - name: Files already relayed (kept, so final days are not read again)
-        uses: actions/checkout@v4
-        continue-on-error: true
-        with: {ref: chirps-relay, path: relay}
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
       - run: pip install -e .
-      - name: Which CHIRPS servers answer from here
-        continue-on-error: true
-        run: |
-          for url in \
-            https://data.chc.ucsb.edu/products/CHIRPS/v2.0/prelim/global_daily/tifs/p05/2026/ \
-            https://data.chc.ucsb.edu/products/CHIRPS/v2.0/africa_daily/tifs/p05/2026/ \
-            http://data.chc.ucsb.edu/products/CHIRPS/v2.0/prelim/global_daily/tifs/p05/2026/ \
-            ftp://ftp.chc.ucsb.edu/pub/org/chc/products/CHIRPS-2.0/prelim/global_daily/tifs/p05/2026/ \
-            "https://coastwatch.pfeg.noaa.gov/erddap/griddap/chirps20GlobalDailyP05.das" \
-            "https://coastwatch.pfeg.noaa.gov/erddap/info/chirps20GlobalDailyP05/index.json" \
-            "https://iridl.ldeo.columbia.edu/SOURCES/.UCSB/.CHIRPS/.v2p0/.daily-improved/.global/.0p05/.prcp/T/last/VALUE/" ; do
-            code=$(curl -s -m 40 -o /tmp/out -w '%{http_code} %{size_download}B %{time_total}s' "$url" || echo "failed: $?")
-            echo "$code  $url"
-          done
-          grep -o '"time_coverage_end", "[^"]*"\|actual_range[^\]]*' /tmp/out | head -3 || true
-          python - <<'PY'
-          import json, urllib.request
-          url = "https://coastwatch.pfeg.noaa.gov/erddap/info/chirps20GlobalDailyP05/index.json"
-          try:
-              rows = json.load(urllib.request.urlopen(url, timeout=40))["table"]["rows"]
-              print([r for r in rows if r[2] in ("time_coverage_end", "time_coverage_start")])
-          except Exception as exc:
-              print("ERDDAP info failed:", exc)
-          PY
-      - name: Read CHIRPS from CHC
-        run: python -m scripts.chirps_relay --store relay --days 120 --dekads 18
-      - name: Publish on the chirps-relay branch
+      - name: Read CHIRPS from CHC and publish it
         env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir publish
-          cp -r relay/index.json relay/daily publish/
-          [ -d relay/dekad ] && cp -r relay/dekad publish/ || true
-          cat > publish/README.md <<'EOF'
-          CHIRPS v2.0 relayed for the ICPAC Week-2 service by .github/workflows/chirps-relay.yml
-          (scripts/chirps_relay.py). Source: Climate Hazards Center, UC Santa Barbara.
-          This branch is rewritten on every run.
-          EOF
-          cd publish
-          git init -q -b chirps-relay
-          git add -A
-          git -c user.name='CHIRPS relay' -c user.email='actions@github.com' \
-            commit -qm "CHIRPS relay $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push -qf "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" chirps-relay
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/chirps_relay.sh "$RUNNER_TEMP/chirps-relay" "$GITHUB_REPOSITORY"
