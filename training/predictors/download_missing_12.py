@@ -61,20 +61,23 @@ DEFAULT_OUT = "/scratch/njoel/s2s_master_data/raw/era5_cpc_missing12"
 
 
 def years_from_manifest(path: Path) -> list[int]:
-    """Every year that appears as a hindcast date (hdate) in an S2S request manifest."""
+    """Every hindcast year in an S2S request manifest: the ECDS ``hyear`` lists, or the
+    years inside MARS-style ``hdate`` strings."""
     years: set[int] = set()
     for line in path.read_text().splitlines():
         if not line.strip():
             continue
         record = json.loads(line)
-        text = json.dumps(record)
-        for match in re.finditer(r'"hdate"\s*:\s*"([^"]+)"', text):
-            years.update(
-                int(y)
-                for y in re.findall(r"(?<!\d)((?:19|20)\d{2})(?=-?\d{2}-?\d{2})", match.group(1))
-            )
+        request = record.get("request", record)
+        hyear = request.get("hyear")
+        if hyear:
+            years.update(int(y) for y in (hyear if isinstance(hyear, list) else [hyear]))
+        hdate = str(request.get("hdate") or "")
+        years.update(
+            int(y) for y in re.findall(r"(?<!\d)((?:19|20)\d{2})(?=-?\d{2}-?\d{2})", hdate)
+        )
     if not years:
-        raise SystemExit(f"no hdate found in {path}: pass --years FIRST-LAST instead")
+        raise SystemExit(f"no hyear or hdate found in {path}: pass --years FIRST-LAST instead")
     # Antecedent features reach into the days before a start date in early January.
     return sorted(years | {min(years) - 1})
 
