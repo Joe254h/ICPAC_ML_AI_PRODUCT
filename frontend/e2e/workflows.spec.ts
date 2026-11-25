@@ -267,7 +267,7 @@ test("the ECMWF page reports recorded readiness", async ({ page }) => {
 test("a draft is edited on the website as a new version", async ({ page }) => {
   await page.goto("/bulletins");
   await page
-    .getByRole("button", { name: "Draft this week" })
+    .getByRole("button", { name: /Draft this (week|forecast)/ })
     .first()
     .click()
     .catch(() => {});

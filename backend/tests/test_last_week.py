@@ -49,7 +49,7 @@ PREVIOUS = {
 def test_the_section_gives_the_metrics_of_the_issued_layer():
     lines = weekly.last_week_lines(inputs(previous=PREVIOUS))
     text = " ".join(lead + body for lead, body in lines)
-    assert lines[0][0] == "Week of 15-22 November 2026:"
+    assert lines[0][0] == "Week of 15-21 November 2026:"
     assert "21.4 mm" in text and "CHIRPS observed 22.7 mm" in text
     assert "RMSE 14.2 mm" in text and "mean error -1.3 mm" in text and "correlation 0.61" in text
     assert "Raw ECMWF: RMSE 17.9 mm" in text and "cut the error by 21%" in text

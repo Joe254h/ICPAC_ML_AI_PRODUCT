@@ -33,15 +33,25 @@ from climate_engine.cartography import weekly_maps
 if TYPE_CHECKING:
     from climate_engine.products.bulletin import BulletinInputs
 
-FORMAT_VERSION = "icpac-weekly-v4"  # v4: section figures, "in production", all observations
+#: v4: section figures, "in production", all observations; v5: weeks named by calendar days
+FORMAT_VERSION = "icpac-weekly-v5"
+_VERSIONS = ("icpac-weekly-v3", "icpac-weekly-v4", "icpac-weekly-v5")
 #: The wording drafts are rendered in: a draft frozen in an earlier format is reproduced in
 #: its own wording (see BulletinService._reproduce), so its checksums still match.
 WORDING: contextvars.ContextVar[str] = contextvars.ContextVar("bulletin_wording", default="")
 
 
+def wording_before(version: str) -> bool:
+    """True while a draft frozen in a format older than ``version`` is being reproduced
+    (formats before v3 count as older than all)."""
+    held = WORDING.get() or FORMAT_VERSION
+    rank = _VERSIONS.index(held) if held in _VERSIONS else -1
+    return rank < _VERSIONS.index(version)
+
+
 def earlier_wording() -> bool:
-    """True while a draft frozen before FORMAT_VERSION v4 is being reproduced."""
-    return WORDING.get() not in ("", FORMAT_VERSION)
+    """True while a draft frozen before format v4 is being reproduced."""
+    return wording_before("icpac-weekly-v4")
 
 
 MAP_STYLE = "weekly-v3"  # the map endpoint's style name; a new name busts browser caches
@@ -90,12 +100,13 @@ def _window(inputs: BulletinInputs) -> tuple[datetime, datetime]:
 
 
 def period_label(valid_start: str, valid_end: str, month: str = "%B") -> str:
-    """The week as the reference names it: by its boundary dates.
-
-    The reference's "06-13 October 2026" is forecast hours 168-336 from 29 September,
-    06 00 UTC to 13 00 UTC; ``valid_end`` is that exclusive 00 UTC boundary.
-    """
+    """The week by its calendar days: "29 November-05 December 2026" for the seven days
+    from 29 November 00 UTC to 06 December 00 UTC (``valid_end`` is that exclusive
+    boundary). Drafts frozen before format v5 keep the boundary date, as the reference's
+    "06-13 October 2026" did (hours 168-336 from 29 September)."""
     start, end = datetime.fromisoformat(valid_start), datetime.fromisoformat(valid_end)
+    if not wording_before("icpac-weekly-v5") and end > start:
+        end -= timedelta(days=1)
     if (start.year, start.month) == (end.year, end.month):
         return f"{start.day:02d}-{end.day:02d} {end.strftime(month)} {end.year}"
     first = f"{start.day:02d} {start.strftime(month)}"

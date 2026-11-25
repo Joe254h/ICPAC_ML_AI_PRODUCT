@@ -88,17 +88,36 @@ def paragraphs(document: bytes) -> list[list[tuple[str, bool]]]:
     return result
 
 
-def test_weeks_are_named_by_their_boundary_dates_as_in_the_reference(inputs):
-    # The reference's "06-13 October 2026" is 06 00 UTC to 13 00 UTC (hours 168-336).
-    assert weekly.valid_period(inputs) == "15-22 October 2026"
-    assert weekly.map_period(inputs) == "15-22 Oct 2026"
-    assert weekly.period_label("2026-09-29T00:00:00", "2026-10-06T00:00:00") == (
-        "29 September-06 October 2026"
+def test_weeks_are_named_by_their_calendar_days(inputs):
+    # Hours 168-336 from 08 October 00 UTC: the days 15 to 21 October.
+    assert weekly.valid_period(inputs) == "15-21 October 2026"
+    assert weekly.map_period(inputs) == "15-21 Oct 2026"
+    assert weekly.period_label("2026-11-29T00:00:00", "2026-12-06T00:00:00") == (
+        "29 November-05 December 2026"
     )
     assert weekly.period_label("2026-12-29T00:00:00", "2027-01-05T00:00:00", "%b") == (
-        "29 Dec 2026-05 Jan 2027"
+        "29 Dec 2026-04 Jan 2027"
     )
-    assert weekly.FORMAT_VERSION == "icpac-weekly-v4"
+    assert weekly.period_label("2026-12-26T00:00:00", "2027-01-02T00:00:00", "%b") == (
+        "26 Dec 2026-01 Jan 2027"
+    )
+
+
+def test_drafts_frozen_before_v5_keep_the_boundary_date():
+    # Their checksums cover the title and map captions as they were written.
+    for frozen in ("icpac-weekly-v3", "icpac-weekly-v4"):
+        token = weekly.WORDING.set(frozen)
+        try:
+            assert weekly.period_label("2026-09-29T00:00:00", "2026-10-06T00:00:00") == (
+                "29 September-06 October 2026"
+            )
+        finally:
+            weekly.WORDING.reset(token)
+    token = weekly.WORDING.set("icpac-weekly-v4")
+    try:
+        assert not weekly.earlier_wording()  # v4 keeps its own figures and labels
+    finally:
+        weekly.WORDING.reset(token)
 
 
 def test_correction_from_zero_raw_rainfall_reports_mm_instead_of_a_false_zero_percent(inputs):
@@ -259,7 +278,7 @@ def test_word_draft_keeps_the_template_and_its_bold_leads(inputs, monkeypatch):
         document = output.read("word/document.xml")
         runs = paragraphs(document)
         text = ["".join(t for t, _ in p) for p in runs]
-        assert "Weekly Forecast for 15-22 October 2026" in text
+        assert "Weekly Forecast for 15-21 October 2026" in text
         heavy = text.index("Heavy rainfall (above 200 mm) expected over northern parts of Somalia.")
         assert runs[heavy][0] == ("Heavy rainfall (above 200 mm)", True)
         assert runs[heavy][1] == (" expected over northern parts of Somalia.", False)
@@ -356,7 +375,7 @@ def test_weekly_maps_reproduce_the_reference_geometry():
     lat = np.arange(-12.0, 24.0, 0.25)
     lon = np.arange(21.0, 52.0, 0.25)
     field = maps.Field("hybrid", np.full((lat.size, lon.size), 60.0), lat, lon)
-    png = weekly_maps.render("Total Rainfall (mm) for 15-22 Oct 2026", field, note="DRAFT")
+    png = weekly_maps.render("Total Rainfall (mm) for 15-21 Oct 2026", field, note="DRAFT")
     pixels, rows, cols = dark_lines(png)
     scale = weekly_maps.SCALE
     assert pixels.shape[:2] == (1024 * scale, 1024 * scale)
@@ -374,10 +393,10 @@ def test_weekly_maps_reproduce_the_reference_geometry():
 
 
 def test_country_and_placeholder_maps_keep_the_layout():
-    message = weekly_maps.render("Rainfall Anomalies for 15-22 Oct 2026", message="In progress")
+    message = weekly_maps.render("Rainfall Anomalies for 15-21 Oct 2026", message="In progress")
     _, rows, cols = dark_lines(message)
     assert rows and cols  # the frame is drawn without a field
-    somalia = weekly_maps.render("Total Rainfall (mm) for 15-22 Oct 2026", country="Somalia")
+    somalia = weekly_maps.render("Total Rainfall (mm) for 15-21 Oct 2026", country="Somalia")
     _, rows, cols = dark_lines(somalia)
     left, top, right, bottom = (v * weekly_maps.SCALE for v in weekly_maps.SOMALIA.frame)
     assert any(abs(c - left) <= 2 for c in cols) and any(abs(c - right) <= 2 for c in cols)

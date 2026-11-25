@@ -129,7 +129,7 @@ def test_chat_bulletin_and_map_use_the_same_package_as_forecast(env, fast_maps):
     assert fid in mapped["images"][0]["url"]
     assert (
         env.client.get(f"/forecasts/{fid}/bulletin").json()["title"]
-        == "Weekly Forecast for 12-19 October 2026"  # boundary dates, as in the reference
+        == "Weekly Forecast for 12-18 October 2026"  # its calendar days
     )
 
 

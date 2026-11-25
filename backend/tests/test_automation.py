@@ -572,6 +572,18 @@ def test_the_website_shows_this_weeks_forecast_and_holds_back_the_next(platform)
     ]
     assert service.latest_id() == current and listed[0]["latest"]
     assert [r["forecast_id"] for r in service.upcoming()] == [f"w2-{this_sunday.isoformat()}"]
+    # The bulletin follows the calendar: the cycle that makes next week's forecast drafts
+    # this week's bulletin, and next week's is drafted on its own Sunday.
+    from backend.app.services.operations import OperationService
+
+    operations = OperationService(platform)
+    task = operations.start(OperationRequest(action="cycle", actor="Operator"))["id"]
+    assert operations._week_to_draft(task, f"w2-{this_sunday.isoformat()}") == current
+    # Without a forecast for this week, next week's still waits for its Sunday.
+    platform.repo.delete(KIND, current)
+    assert operations._week_to_draft(task, f"w2-{this_sunday.isoformat()}") is None
+    said = operations.get(task)["messages"][-1]["text"]
+    assert said.startswith("No bulletin draft yet: this forecast's week begins on")
 
 
 def test_a_week_that_cannot_be_verified_says_why(platform, monkeypatch):

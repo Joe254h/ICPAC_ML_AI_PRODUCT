@@ -44,26 +44,26 @@ def test_drafts_are_the_weekly_bulletin_of_the_latest_forecast(env, fast_maps, m
     client = env.client
     draft = client.post("/bulletins/generate", json={}).json()
     assert draft["kind"] == "icpac-weekly" and draft["forecast_id"] == record["forecast_id"]
-    assert draft["title"] == "Weekly Forecast for 12-19 October 2026"
+    assert draft["title"] == "Weekly Forecast for 12-18 October 2026"
     # Asking again opens the forecast's open draft instead of adding a duplicate.
     again = client.post("/bulletins/generate", json={"forecast_id": record["forecast_id"]}).json()
     assert again["id"] == draft["id"] and again["reused"] is True
     assert len(client.get("/bulletins").json()) == 1
     assert draft["consistency"]["status"] == "PASS"
-    assert draft["text"].startswith("Weekly Forecast for 12-19 October 2026\n\nHeadline")
+    assert draft["text"].startswith("Weekly Forecast for 12-18 October 2026\n\nHeadline")
     assert {f"bulletins/{draft['id']}/map.png", f"bulletins/{draft['id']}/bulletin.docx"} <= set(
         blobs.blobs
     )
 
     word = client.get(f"/bulletins/{draft['id']}/export?format=docx")
     assert word.headers["content-type"].startswith("application/vnd.openxmlformats")
-    assert "Weekly_Forecast_for_12-19_October_2026.docx" in word.headers["content-disposition"]
+    assert "Weekly_Forecast_for_12-18_October_2026.docx" in word.headers["content-disposition"]
     page = client.get(f"/bulletins/{draft['id']}/export?inline=true")
     assert page.headers["content-disposition"] == "inline"
     text = page.text
     # The page carries the draft's words with their bold leads, the document's maps and the
     # member states' table; products the service does not have are not shown.
-    assert "<h1>Weekly Forecast for 12-19 October 2026</h1>" in text
+    assert "<h1>Weekly Forecast for 12-18 October 2026</h1>" in text
     assert "<strong>Decision-Support Note:</strong>" in text
     assert "<li><strong>Heavy rainfall (above 200 mm)</strong>" in text
     # The regional and the focus rainfall maps, and the correction chart.
@@ -83,7 +83,7 @@ def test_drafts_are_the_weekly_bulletin_of_the_latest_forecast(env, fast_maps, m
     assert ("Method: MBC<" in text) is not hybrid
     assert 'class="chip draft"' in text and "IGAD Climate Prediction and Applications" in text
     attachment = client.get(f"/bulletins/{draft['id']}/export").headers["content-disposition"]
-    assert attachment == 'attachment; filename="Weekly_Forecast_for_12-19_October_2026.html"'
+    assert attachment == 'attachment; filename="Weekly_Forecast_for_12-18_October_2026.html"'
 
     review = {"actor": "Reviewer", "confirmed": True, "comment": "Checked"}
     assert client.post(f"/bulletins/{draft['id']}/submit", json=review).json()["status"] == (

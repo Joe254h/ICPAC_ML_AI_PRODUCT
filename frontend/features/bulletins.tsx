@@ -545,9 +545,24 @@ function Detail({
 export default function Bulletins({ id }: PageProps) {
   const drafts = useApi<Bulletin[]>("/bulletins?archived=true");
   const [showArchived, setShowArchived] = useState(false);
-  const archivedCount = (drafts.data ?? []).filter((d) => d.archived).length;
-  const listed = (drafts.data ?? []).filter((d) => showArchived || !d.archived);
   const forecasts = useApi<ForecastRun[]>("/forecasts");
+  // The bulletin follows the calendar: a week is drafted, listed and opened from its own
+  // Sunday, never before. Next week's forecast is only announced.
+  const nextWeek = useApi<UpcomingForecast[]>("/forecasts/upcoming");
+  const now = Date.now();
+  const begun = (r: { valid_start: string }) =>
+    new Date(r.valid_start).getTime() <= now;
+  const notBegun = new Set([
+    ...(nextWeek.data ?? []).map((f) => f.forecast_id),
+    ...(forecasts.data ?? [])
+      .filter((r) => !begun(r))
+      .map((r) => r.forecast_id),
+  ]);
+  const ofWeeksBegun = (drafts.data ?? []).filter(
+    (d) => !d.forecast_id || !notBegun.has(d.forecast_id),
+  );
+  const archivedCount = ofWeeksBegun.filter((d) => d.archived).length;
+  const listed = ofWeeksBegun.filter((d) => showArchived || !d.archived);
   const router = useRouter();
   const [actor] = useActor();
   const [selected, setSelected] = useState<string | undefined>(id);
@@ -564,11 +579,20 @@ export default function Bulletins({ id }: PageProps) {
   const sundays = issued.filter(
     (r) => r.weekly && (!inUse || r.model_id === inUse),
   );
-  const runs = sundays.length ? sundays : issued;
-  // Next week's forecast (made from last Sunday's run), listed from its own Sunday: its
-  // bulletin is drafted now, for the forecasters to check before it is issued.
-  const nextWeek = useApi<UpcomingForecast[]>("/forecasts/upcoming");
+  const runs = (sundays.length ? sundays : issued).filter(begun);
   const newest = runs.find((r) => r.latest) ?? runs[0];
+  // Whether the newest week is the one we are in (else it has ended: no forecast was made
+  // for this week).
+  const thisWeek =
+    newest && new Date(newest.valid_end).getTime() > now ? newest : undefined;
+  const upcoming = [
+    ...(nextWeek.data ?? []),
+    ...(forecasts.data ?? []).filter(
+      (r) =>
+        !begun(r) &&
+        !(nextWeek.data ?? []).some((n) => n.forecast_id === r.forecast_id),
+    ),
+  ].sort((a, b) => a.valid_start.localeCompare(b.valid_start))[0];
   const target = chosen || newest?.forecast_id || "";
   const groups = byForecast(listed, runs);
   // The bulletin archive: every forecast week, drafted or not, newest first.
@@ -642,15 +666,10 @@ export default function Bulletins({ id }: PageProps) {
           onChange={(e) => setChosen(e.target.value)}
           aria-label="Forecast to draft"
         >
-          {(nextWeek.data ?? []).map((next) => (
-            <option key={next.forecast_id} value={next.forecast_id}>
-              {`${weekPeriod(next.valid_start, next.valid_end)} · run of ${day(next.initialization)} (next week)`}
-            </option>
-          ))}
           {runs.map((run) => (
             <option key={run.forecast_id} value={run.forecast_id}>
               {forecastLabel(run)}
-              {run.forecast_id === newest?.forecast_id ? " (this week)" : ""}
+              {run.forecast_id === thisWeek?.forecast_id ? " (this week)" : ""}
             </option>
           ))}
         </select>
@@ -660,7 +679,12 @@ export default function Bulletins({ id }: PageProps) {
         onClick={() => create(undefined, target)}
         disabled={busy || !target}
       >
-        <FilePlus2 size={18} /> {busy ? "Preparing…" : "Draft this week"}
+        <FilePlus2 size={18} />{" "}
+        {busy
+          ? "Preparing…"
+          : target === thisWeek?.forecast_id
+            ? "Draft this week"
+            : "Draft this forecast"}
       </Button>
     </div>
   );
@@ -679,13 +703,20 @@ export default function Bulletins({ id }: PageProps) {
         <Card
           title="Draft a weekly bulletin"
           subtitle={
-            newest
-              ? `This week: ${weekPeriod(newest.valid_start, newest.valid_end)}, run of ${day(newest.initialization)}`
-              : "No forecast issued yet."
+            thisWeek
+              ? `This week: ${weekPeriod(thisWeek.valid_start, thisWeek.valid_end)}, run of ${day(thisWeek.initialization)}`
+              : newest
+                ? `No forecast for this week; the latest is ${weekPeriod(newest.valid_start, newest.valid_end)}`
+                : "No forecast issued yet."
           }
         >
           {forecasts.loading && !forecasts.data && <Skeleton height={60} />}
           {picker}
+          {upcoming && (
+            <p className="muted" style={{ margin: "8px 0 0" }}>
+              {`Next week's forecast (${weekPeriod(upcoming.valid_start, upcoming.valid_end)}) is ready; its bulletin is drafted on ${day(upcoming.valid_start)}, when that week begins.`}
+            </p>
+          )}
           {opened && <Notice>{opened}</Notice>}
         </Card>
         {error && <ErrorState message={error} />}
@@ -742,7 +773,7 @@ export default function Bulletins({ id }: PageProps) {
                       <small>
                         {group.run
                           ? `Run of ${day(group.run.initialization)}${
-                              group.run.forecast_id === newest?.forecast_id
+                              group.run.forecast_id === thisWeek?.forecast_id
                                 ? " · this week"
                                 : ""
                             }`

@@ -857,7 +857,43 @@ class OperationService:
             latest = forecasts.latest_id()
         except KeyError:
             return result
-        return {**result, **self._prepare_draft(operation_id, body, latest)}
+        week = self._week_to_draft(operation_id, latest)
+        return {**result, **self._prepare_draft(operation_id, body, week)} if week else result
+
+    def _week_to_draft(self, operation_id: str, forecast_id: str) -> str | None:
+        """The bulletin follows the calendar: it is drafted for the week we are in. A
+        forecast for a week that has not begun waits for that week's Sunday (the cycle that
+        day drafts it); a forecast for a week already begun or past is drafted as asked."""
+        from backend.app.services.forecasts import _begun, _moment
+
+        forecasts = self._forecasts()
+        now = datetime.now(timezone.utc)
+        try:
+            listed = forecasts.listing()
+            record = forecasts.repo.get("forecast_run", forecast_id)
+        except Exception:  # the week cannot be read: draft the forecast as asked
+            return forecast_id
+        current = next(
+            (
+                r
+                for r in listed
+                if r.get("of_record")
+                and _begun(r, now)
+                and now < _moment(r["valid_end"])
+                and r.get("weekly")
+            ),
+            None,
+        )
+        if current:
+            return str(current["forecast_id"])
+        if _begun(record, now):
+            return forecast_id
+        self._log(
+            operation_id,
+            "No bulletin draft yet: this forecast's week begins on "
+            f"{_moment(record['valid_start']):%d %B %Y}, and its bulletin is drafted then",
+        )
+        return None
 
     def _compare_last_weeks(self, operation_id: str, forecast_id: str, actor: str) -> None:
         """Score the two newest weeks that ended before this forecast's week against the
@@ -937,7 +973,9 @@ class OperationService:
                 "use, so its forecast is kept for comparison",
             )
         else:
-            result.update(self._prepare_draft(operation_id, body, result["forecast_id"]))
+            week = self._week_to_draft(operation_id, result["forecast_id"])
+            if week:
+                result.update(self._prepare_draft(operation_id, body, week))
         # The monitoring and the further comparisons download many files from slower
         # servers; they run as their own task, so the forecast and its bulletin draft are
         # not held up by them.
