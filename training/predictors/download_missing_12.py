@@ -15,6 +15,10 @@ What it fetches, all at 00 UTC of each day on the 1.5 degree local box (25.5N-13
                        specific snow water content (qsnow) in its own folder. ERA5 has
                        no graupel (qgraup): neither does the ECMWF model
   NOAA CPC indices     QBO zonal wind at 50 and 30 hPa, SOI (monthly text files)
+  ERA5-Land            soil temperature layers 1-2, total evaporation, sensible and latent
+                       heat flux (land/), daily 00 UTC
+  ERA5 fixed maps      high/low vegetation cover and type (static/era5_vegetation.nc)
+  NOAA PSL OLR         interpolated daily OLR, global 2.5 degree (noaa_olr/)
 
 ERA5 describes the state at each start date (hdate); the features use the day of, or the
 days before, initialization. One file per year (months held from an earlier monthly run are skipped); a file
@@ -59,6 +63,20 @@ CPC = {
     "qbo.u30.index": "https://www.cpc.ncep.noaa.gov/data/indices/qbo.u30.index",
     "soi": "https://www.cpc.ncep.noaa.gov/data/indices/soi",
 }
+LAND = [
+    "soil_temperature_level_1",
+    "soil_temperature_level_2",
+    "total_evaporation",
+    "surface_sensible_heat_flux",
+    "surface_latent_heat_flux",
+]
+STATIC = [
+    "high_vegetation_cover",
+    "low_vegetation_cover",
+    "type_of_high_vegetation",
+    "type_of_low_vegetation",
+]
+OLR_URL = "https://downloads.psl.noaa.gov/Datasets/interp_OLR/olr.day.mean.nc"
 DEFAULT_OUT = "/scratch/njoel/s2s_master_data/raw/era5_cpc_missing12"
 
 
@@ -118,6 +136,9 @@ def era5_jobs(years: list[int], out: Path) -> list[tuple[str, dict, Path]]:
             "snow",
             {"variable": ["specific_snow_water_content"], "pressure_level": LEVELS},
         ),
+        # F148-F149 soil temperature, F152-F153 evapotranspiration, F154-F155 sensible and
+        # latent heat flux. ERA5-Land accumulations at 00 UTC are the previous day's total.
+        ("reanalysis-era5-land", "land", {"variable": LAND}),
     ]
     for year in years:
         for dataset, kind, extra in kinds:
@@ -136,7 +157,7 @@ def era5_jobs(years: list[int], out: Path) -> list[tuple[str, dict, Path]]:
                 else (f"era5_{kind}_{year}_{months[0]:02d}-{months[-1]:02d}.nc")
             )
             request = {
-                "product_type": ["reanalysis"],
+                **({} if dataset == "reanalysis-era5-land" else {"product_type": ["reanalysis"]}),
                 "year": [str(year)],
                 "month": [f"{m:02d}" for m in months],
                 "day": [f"{d:02d}" for d in range(1, 32)],
@@ -148,6 +169,27 @@ def era5_jobs(years: list[int], out: Path) -> list[tuple[str, dict, Path]]:
                 **extra,
             }
             jobs.append((dataset, request, folder / name))
+    # F245 vegetation fraction, F212 land-cover class: ERA5's fixed vegetation maps.
+    static = out / "static" / "era5_vegetation.nc"
+    if not static.exists():
+        jobs.append(
+            (
+                "reanalysis-era5-single-levels",
+                {
+                    "product_type": ["reanalysis"],
+                    "variable": STATIC,
+                    "year": ["2024"],
+                    "month": ["01"],
+                    "day": ["01"],
+                    "time": ["00:00"],
+                    "area": AREA,
+                    "grid": GRID,
+                    "data_format": "netcdf",
+                    "download_format": "unarchived",
+                },
+                static,
+            )
+        )
     return jobs
 
 
@@ -166,6 +208,24 @@ def retrieve(dataset: str, request: dict, target: Path, retries: int) -> str:
                 return f"FAILED  {target.name}: {str(exc)[:200]}"
             time.sleep(60 * attempt)
     return f"FAILED  {target.name}"
+
+
+def fetch_olr(out: Path) -> None:
+    """NOAA interpolated daily OLR (2.5 degree, global, 1974 on) for the Kelvin-wave index
+    (F200): one file of about 0.8 GB, streamed to disk and kept once complete."""
+    target = out / "noaa_olr" / "olr.day.mean.nc"
+    if target.exists() and target.stat().st_size > 0:
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix(".part")
+    try:
+        with urllib.request.urlopen(OLR_URL, timeout=600) as response, open(partial, "wb") as f:
+            while chunk := response.read(1 << 20):
+                f.write(chunk)
+        partial.replace(target)
+        print(f"fetched {target.name} ({target.stat().st_size / 1e6:.0f} MB)")
+    except OSError as exc:
+        print(f"FAILED  olr.day.mean.nc: {exc} (needs internet: run on the login node)")
 
 
 def fetch_cpc(out: Path) -> None:
@@ -216,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     fetch_cpc(args.out)
+    fetch_olr(args.out)
     if not todo:
         return 0
     client()  # fail now, not after an hour, if the CDS key is missing

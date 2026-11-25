@@ -137,6 +137,34 @@ BLOCK2 = """    # --- ECMWF S2S downloads in predictors_245/ and other held sour
              'Natural Earth 10 m lake polygons; rasterise to the 0.05 degree grid')
 """
 
+MARK3 = "# --- ERA5-Land, ERA5 vegetation maps and NOAA OLR (download_missing_12.py) ---"
+
+BLOCK3 = """    # --- ERA5-Land, ERA5 vegetation maps and NOAA OLR (download_missing_12.py) ---
+    land = {
+        'LAND:SOIL_TEMPERATURE': 'stl1', 'LAND:EVAP': 'e',
+        'LAND:SENSIBLE': 'sshf', 'LAND:LATENT': 'slhf',
+    }
+    for tok, var in land.items():
+        files, years = era5_coverage('land', var)
+        if files and needed_years <= years:
+            held(tok, 'SOURCE_FOUND_NEEDS_VALIDATION', files[0],
+                 f'ERA5-Land {var}, daily 00 UTC {min(years)}-{max(years)} (accumulations are '
+                 'the previous day); 1.5 degree local box; numeric QC pending')
+        elif files:
+            held(tok, 'PARTIAL_COVERAGE', files[0], f'ERA5-Land {var}: still downloading')
+    veg = extra / 'static' / 'era5_vegetation.nc'
+    if veg.is_file():
+        held('SURF:veg_fraction', 'SOURCE_FOUND_NEEDS_VALIDATION', veg,
+             'ERA5 high + low vegetation cover (cvh + cvl), fixed in time')
+        held('LAND:LANDCOVER', 'SOURCE_FOUND_NEEDS_VALIDATION', veg,
+             'ERA5 high/low vegetation type (tvh, tvl): a coarse land-cover class, not ESA CCI')
+    olr = extra / 'noaa_olr' / 'olr.day.mean.nc'
+    if olr.is_file():
+        held('OBS:OLR_SPATIAL', 'SOURCE_FOUND_NEEDS_VALIDATION', olr,
+             'NOAA interpolated daily OLR, 2.5 degree global: enough for wavenumber-frequency '
+             'filtering of Kelvin waves')
+"""
+
 
 def main() -> int:
     if len(sys.argv) != 2:
@@ -148,7 +176,7 @@ def main() -> int:
     if anchor not in text:
         print("Could not find where to insert (", anchor.strip(), "); nothing changed")
         return 1
-    added = [b for m, b in ((MARK, BLOCK), (MARK2, BLOCK2)) if m not in text]
+    added = [b for m, b in ((MARK, BLOCK), (MARK2, BLOCK2), (MARK3, BLOCK3)) if m not in text]
     if not added:
         print("Already patched:", path)
         return 0
