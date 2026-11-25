@@ -1,6 +1,6 @@
 "use client";
 /** A verified week: the forecast map beside what CHIRPS and the further references
- * observed, with the forecast's RMSE and MAE against each. A week not observed yet says
+ * observed, each captioned with its mean and the forecast's RMSE and MAE. A week not observed yet says
  * when it will be, and links to the newest week that is. */
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -38,13 +38,31 @@ type Observation = {
   scores: Partial<Record<Variant, Metrics>>;
 };
 
-function Scores({ metrics }: { metrics?: Metrics }) {
-  if (!metrics) return <span>No scores for this layer</span>;
+/** A map's caption: what it shows, then its figures on a line of their own. */
+function Caption({
+  title,
+  metrics,
+  mean,
+}: {
+  title: string;
+  metrics?: Metrics;
+  mean?: number;
+}) {
   return (
-    <span>
-      RMSE <strong>{num(metrics.rmse)} mm</strong> · MAE{" "}
-      <strong>{num(metrics.mae)} mm</strong>
-    </span>
+    <>
+      <span>{title}</span>
+      <span className="caption-metrics">
+        {metrics ? (
+          <>
+            Mean <strong>{num(mean ?? metrics.forecast_mean)} mm</strong> · RMSE{" "}
+            <strong>{num(metrics.rmse)} mm</strong> · MAE{" "}
+            <strong>{num(metrics.mae)} mm</strong>
+          </>
+        ) : (
+          "No scores for this layer"
+        )}
+      </span>
+    </>
   );
 }
 
@@ -243,21 +261,21 @@ export default function ObservedComparison({
           src={mapUrl(detail, layer)}
           alt={`${SERIES[layer].label} forecast for ${week}`}
           caption={
-            <>
-              Forecast · {SERIES[layer].label} ·{" "}
-              <Scores metrics={shown.scores[layer]} /> (against {shown.name})
-            </>
+            <Caption
+              title={`Forecast · ${SERIES[layer].label}`}
+              metrics={shown.scores[layer]}
+            />
           }
         />
         <MapFigure
           src={`/api/forecasts/${detail.forecast_id}/observed/map?source=${shown.source}`}
           alt={`Rainfall observed by ${shown.name} for ${week}`}
           caption={
-            <>
-              Observed · {shown.name}
-              {shown.scores[layer] &&
-                ` · mean ${num(shown.scores[layer].observed_mean)} mm`}
-            </>
+            <Caption
+              title={`Observed · ${shown.name}`}
+              metrics={shown.scores[layer]}
+              mean={shown.scores[layer]?.observed_mean}
+            />
           }
         />
       </div>

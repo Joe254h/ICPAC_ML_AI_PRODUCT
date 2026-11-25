@@ -483,7 +483,7 @@ def test_last_week_maps_and_the_correction_chart_go_under_their_sections(inputs,
     inputs = replace(inputs, previous=previous)
     figures = weekly.last_week_figures(previous)
     assert [f["caption"] for f in figures] == [
-        "Forecast · MBC + AI/ML · RMSE 12.0 mm · MAE 6.7 mm (against CHIRPS)",
+        "Forecast · MBC + AI/ML · mean 13.9 mm · RMSE 12.0 mm · MAE 6.7 mm",
         "Observed · CHIRPS · mean 15.2 mm · RMSE 12.0 mm · MAE 6.7 mm",
         "Observed · ARC 2.0 · mean 16.4 mm · RMSE 14.4 mm · MAE 6.7 mm",
     ]

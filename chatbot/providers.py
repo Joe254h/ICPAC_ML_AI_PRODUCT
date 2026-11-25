@@ -20,7 +20,11 @@ from climate_engine.core import config
 
 
 def is_openai(base_url: str) -> bool:
-    """Whether the service is OpenAI's own API (or Azure OpenAI)."""
+    """Whether the service takes OpenAI's own settings: OpenAI's API, Azure OpenAI, or a
+    gateway that passes requests on to OpenAI (a course or company gateway such as
+    ``https://aibe.mygreatlearning.com/openai/v1``), named with LLM_API_STYLE=openai."""
+    if os.getenv("LLM_API_STYLE", "").strip().lower() == "openai":
+        return True
     host = (urlparse(base_url).hostname or "").lower()
     return host == "api.openai.com" or host.endswith(".openai.azure.com")
 

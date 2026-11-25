@@ -285,6 +285,12 @@ def test_openai_is_asked_in_the_fields_its_gpt5_models_accept(env, fast_maps, mo
     assert sent[0]["max_completion_tokens"] >= 4096 and sent[0]["reasoning_effort"] == "low"
     # Other services keep max_tokens and the low temperature.
     assert agent.output_limit("https://api.groq.com/openai/v1", 5) == {"max_tokens": 5}
+    # A gateway to OpenAI (a course's) is named as one and takes OpenAI's settings.
+    gateway = "https://aibe.mygreatlearning.com/openai/v1"
+    assert agent.output_limit(gateway, 5) == {"max_tokens": 5}
+    monkeypatch.setenv("LLM_API_STYLE", "openai")
+    assert agent.output_limit(gateway, 5) == {"max_completion_tokens": 5}
+    monkeypatch.delenv("LLM_API_STYLE")
     monkeypatch.setenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
     assert agent.OpenAIToolsModel().temperature("qwen/qwen3.8-27b") == 0.2
     # The status check asks OpenAI the same way.

@@ -253,9 +253,14 @@ test("past weeks are forecast and verified, and the correlation map appears", as
   await expect(
     observed.getByRole("img", { name: /Rainfall observed by CHIRPS/ }),
   ).toBeVisible({ timeout: 60_000 });
-  await expect(
-    observed.getByText(/RMSE [\d.]+ mm · MAE [\d.]+ mm/),
-  ).toBeVisible();
+  // Each map's caption: what it shows, then its mean, RMSE and MAE on a line below.
+  const metrics = observed.locator(".caption-metrics");
+  await expect(metrics).toHaveCount(2);
+  for (const line of await metrics.all())
+    await expect(line).toHaveText(
+      /^Mean [\d.]+ mm · RMSE [\d.]+ mm · MAE [\d.]+ mm$/,
+    );
+  await expect(observed.getByText(/\(against /)).toHaveCount(0);
   // Under the maps: the week's means and scores, and its chance of a wet week.
   await expect(
     observed.getByRole("columnheader", { name: "Observed mean" }),

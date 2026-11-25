@@ -542,7 +542,17 @@ def last_week_figures(previous: dict[str, Any] | None) -> list[dict[str, Any]]:
             "kind": "forecast",
             "forecast_id": previous["forecast_id"],
             "layer": layer,
-            "caption": f"Forecast · {words} · {_scores(metrics)} (against {observed})",
+            "caption": (
+                f"Forecast · {words} · {_scores(metrics)} (against {observed})"
+                if wording_before("icpac-weekly-v5")
+                else f"Forecast · {words} · "
+                + (
+                    f"mean {metrics['forecast_mean']:.1f} mm · "
+                    if metrics.get("forecast_mean") is not None
+                    else ""
+                )
+                + _scores(metrics)
+            ),
         }
     ]
     sources = [(previous.get("observed_source") or "chirps", observed, metrics)] + [
