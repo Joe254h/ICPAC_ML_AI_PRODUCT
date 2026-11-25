@@ -99,7 +99,7 @@ BLOCK2 = """    # --- ECMWF S2S downloads in predictors_245/ and other held sour
         for tok in toks:
             if not files:
                 continue
-            note = (f'ECMWF S2S control forecast, {cycles} of {n_cycles} model dates in '
+            note = (f'ECMWF S2S control forecast only (no perturbed members), {cycles} of {n_cycles} model dates in '
                     f'{folder}/ (file names only; levels, steps and values not decoded)')
             if tok == 'GEO:MASCARENE_DOMAIN':
                 note += '; mean sea-level pressure is on the global grid, so the SW Indian Ocean is covered'
