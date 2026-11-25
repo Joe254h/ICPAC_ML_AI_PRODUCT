@@ -11,7 +11,9 @@ What it fetches, all at 00 UTC of each day on the 1.5 degree local box (25.5N-13
                        total_column_cloud_liquid_water (liquid-water path),
                        total_column_cloud_ice_water (ice-water path)
   ERA5 pressure levels specific cloud liquid water, cloud ice water and rain water
-                       content at 850, 700 and 500 hPa (the three mixing ratios)
+                       content at 850, 700 and 500 hPa (the three mixing ratios), and
+                       specific snow water content (qsnow) in its own folder. ERA5 has
+                       no graupel (qgraup): neither does the ECMWF model
   NOAA CPC indices     QBO zonal wind at 50 and 30 hPa, SOI (monthly text files)
 
 ERA5 describes the state at each start date (hdate); the features use the day of, or the
@@ -108,6 +110,13 @@ def era5_jobs(years: list[int], out: Path) -> list[tuple[str, dict, Path]]:
             "reanalysis-era5-pressure-levels",
             "pressure",
             {"variable": PRESSURE, "pressure_level": LEVELS},
+        ),
+        # F239 qsnow, added after the first run: its own folder, so the files already
+        # held are not fetched again.
+        (
+            "reanalysis-era5-pressure-levels",
+            "snow",
+            {"variable": ["specific_snow_water_content"], "pressure_level": LEVELS},
         ),
     ]
     for year in years:
