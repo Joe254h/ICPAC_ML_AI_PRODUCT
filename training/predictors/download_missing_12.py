@@ -15,8 +15,8 @@ What it fetches, all at 00 UTC of each day on the 1.5 degree local box (25.5N-13
   NOAA CPC indices     QBO zonal wind at 50 and 30 hPa, SOI (monthly text files)
 
 ERA5 describes the state at each start date (hdate); the features use the day of, or the
-days before, initialization. One file per year and month; a file already on disk is skipped,
-so the script resumes after a stop.
+days before, initialization. One file per year (months held from an earlier monthly run are skipped); a file
+already on disk is skipped, so the script resumes after a stop.
 
 ERA5 comes from the Copernicus Climate Data Store (CDS), not ECDS. Put your CDS key in
 ~/.cdsapirc-era5 (two lines: "url: https://cds.climate.copernicus.eu/api" and
@@ -97,37 +97,48 @@ def client():
 
 
 def era5_jobs(years: list[int], out: Path) -> list[tuple[str, dict, Path]]:
+    """One request per year and level type: the Copernicus queue, not the data, sets the
+    pace, so fewer and larger requests finish sooner. Months already held as monthly files
+    (from an earlier run) are left out of that year's request."""
     jobs = []
     today = datetime.now(timezone.utc)
+    kinds = [
+        ("reanalysis-era5-single-levels", "single", {"variable": SINGLE}),
+        (
+            "reanalysis-era5-pressure-levels",
+            "pressure",
+            {"variable": PRESSURE, "pressure_level": LEVELS},
+        ),
+    ]
     for year in years:
-        for month in range(1, 13):
-            if (year, month) > (today.year, today.month):
+        for dataset, kind, extra in kinds:
+            folder = out / kind
+            months = [
+                m
+                for m in range(1, 13)
+                if (year, m) <= (today.year, today.month)
+                and not (folder / f"era5_{kind}_{year}_{m:02d}.nc").exists()
+            ]
+            if not months:
                 continue
-            base = {
+            name = (
+                f"era5_{kind}_{year}.nc"
+                if len(months) == 12
+                else (f"era5_{kind}_{year}_{months[0]:02d}-{months[-1]:02d}.nc")
+            )
+            request = {
                 "product_type": ["reanalysis"],
                 "year": [str(year)],
-                "month": [f"{month:02d}"],
+                "month": [f"{m:02d}" for m in months],
                 "day": [f"{d:02d}" for d in range(1, 32)],
                 "time": ["00:00"],
                 "area": AREA,
                 "grid": GRID,
                 "data_format": "netcdf",
                 "download_format": "unarchived",
+                **extra,
             }
-            jobs.append(
-                (
-                    "reanalysis-era5-single-levels",
-                    {**base, "variable": SINGLE},
-                    out / "single" / f"era5_single_{year}_{month:02d}.nc",
-                )
-            )
-            jobs.append(
-                (
-                    "reanalysis-era5-pressure-levels",
-                    {**base, "variable": PRESSURE, "pressure_level": LEVELS},
-                    out / "pressure" / f"era5_pressure_{year}_{month:02d}.nc",
-                )
-            )
+            jobs.append((dataset, request, folder / name))
     return jobs
 
 
