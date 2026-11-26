@@ -52,7 +52,11 @@ from pathlib import Path
 
 for _k in ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "OMP_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
     os.environ.setdefault(_k, "1")
+import warnings  # noqa: E402
+
 import numpy as np  # noqa: E402 - thread limits must be set first
+
+warnings.filterwarnings("ignore", category=FutureWarning, module="cfgrib")
 
 S2S = Path(os.environ.get("S2S_ROOT", "/scratch/njoel/s2s_master_data"))
 EXP = S2S / "experiments/ICPAC_WEEK2_DRIVERS_245_V1"
@@ -404,7 +408,8 @@ def d2_fields(grids, year):
     cp = at_year(grids["cp"]["cp"], year)
     hc = step_hours(cp)
     acc = {x: cp.isel(step=int(np.flatnonzero(hc == x)[0])).values for x in (168, 336)}
-    f["cp_week_mm"] = (acc[336] - acc[168]).astype(np.float64) * 1000.0
+    # S2S cp is in kg m-2 (= mm), not metres
+    f["cp_week_mm"] = (acc[336] - acc[168]).astype(np.float64)
     for key in ("t2m", "d2m"):
         g = grids[key]
         f[key] = week2(g[key] if key in g else next(iter(g.values())), year)
