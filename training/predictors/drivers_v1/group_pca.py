@@ -777,6 +777,55 @@ def reduce_case():
     case_pca("G6", names6 + ["mjo_x_enso", "iod_x_mjo"], X6, cases)
 
 
+# ---------------------------------------------------------------- case-level EOFs of rainfall
+def eof():
+    """EOFs of the week-2 forecast rainfall (10-member mean, 1.5 degree domain) and of the
+    antecedent CHIRPS 30-day total (0.25 degree blocks of the mask): one value per case each."""
+    import xarray as xr
+
+    cases = dp.all_cases()
+    lat, lon = dp.geometry()[:2]
+    dest = OUT / "case_eof"
+    dest.mkdir(parents=True, exist_ok=True)
+    tp = xr.open_zarr(TP_ZARR, consolidated=None, chunks={})
+    tp_init = {
+        str(t)[5:7] + str(t)[8:10]: i
+        for i, t in enumerate(tp.init_time.values.astype("datetime64[D]"))
+    }
+    tp_years = np.asarray(tp.time.dt.year.values).astype(int)
+    hours = (np.asarray(tp.step.values) / np.timedelta64(1, "h")).astype(int)
+    pair = [int(np.flatnonzero(hours == h)[0]) for h in (168, 336)]
+    chirps = Chirps()
+    A, wf, row, col, la, lo = fine_geometry()
+    with np.load(MASK, allow_pickle=False) as z:
+        mask = np.asarray(z["domain_mask"], bool)
+    blk = 5  # 0.05 -> 0.25 degree
+    lat25 = la.reshape(-1, blk).mean(1)
+    lon25 = lo.reshape(-1, blk).mean(1)
+    rain, prior = [None] * len(cases), [None] * len(cases)
+    order = sorted(range(len(cases)), key=lambda i: dp.hindcast_date(cases[i][0], cases[i][1]))
+    for n, i in enumerate(order):
+        d, y, mmdd = cases[i]
+        a = np.asarray(tp.tp.isel(init_time=tp_init[mmdd], time=int(np.flatnonzero(tp_years == y)[0]),
+                                  step=pair).values, np.float64)  # fmt: skip
+        rain[i] = lg((a[:, 1] - a[:, 0]).mean(0)).ravel()
+        win, _ = chirps.window(dp.hindcast_date(d, y) - timedelta(days=CHIRPS_LAG_DAYS))
+        full = np.full(mask.shape, np.nan)
+        full[row, col] = lg(win.sum(0))
+        with np.errstate(all="ignore"):
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                prior[i] = np.nanmean(
+                    full.reshape(len(lat25), blk, len(lon25), blk), axis=(1, 3)
+                ).ravel()
+        if (n + 1) % 250 == 0:
+            print(f"EOF fields {n + 1}/{len(cases)}", flush=True)
+    dp.eof_fit("TP_WEEK2", rain, cases, lat, lon, dest / "TP_WEEK2_EOF.npz")
+    dp.eof_fit("CHIRPS_PRIOR30", prior, cases, lat25, lon25, dest / "CHIRPS_PRIOR30_EOF.npz")
+
+
 # ---------------------------------------------------------------- checks
 def preflight():
     import xarray as xr
@@ -818,7 +867,9 @@ def preflight():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=["preflight", "indices", "month", "reduce", "reduce_case"])
+    ap.add_argument(
+        "mode", choices=["preflight", "indices", "month", "reduce", "reduce_case", "eof"]
+    )
     ap.add_argument("--month", type=int)
     a = ap.parse_args()
     if a.mode == "preflight":
@@ -830,6 +881,8 @@ def main():
         month_pass(a.month)
     elif a.mode == "reduce":
         reduce_grid()
+    elif a.mode == "eof":
+        eof()
     else:
         reduce_case()
     return 0

@@ -719,8 +719,8 @@ class Oisst:
         import xarray as xr
 
         if y not in self.cache:
-            if len(self.cache) > 2:
-                self.cache.pop(min(self.cache))
+            for old in [k for k in self.cache if k < y - 1]:
+                self.cache.pop(old)
             with xr.open_dataset(OISST / f"sst.day.mean.{y}.nc") as ds:
                 d = ds["sst"].sel(lat=slice(*self.lat_range), lon=slice(*self.lon_range)).load()
             d = d.coarsen(lat=4, lon=4, boundary="trim").mean()
@@ -746,12 +746,15 @@ def eof():
     dest.mkdir(parents=True, exist_ok=True)
     # SST: Indian (30S-30N, 30-120E) and Pacific (20S-20N, 120-280E)
     sst = Oisst()
-    grids = []
-    for i, (d, y, mmdd) in enumerate(cases):
+    grids = [None] * len(cases)
+    # read in date order: each OISST year file is loaded once, not once per case
+    order = sorted(range(len(cases)), key=lambda i: hindcast_date(cases[i][0], cases[i][1]))
+    for n, i in enumerate(order):
+        d, y, _ = cases[i]
         end = hindcast_date(d, y) - timedelta(days=SST_END_LAG)
-        grids.append(sst.window(end, SST_DAYS))
-        if (i + 1) % 250 == 0:
-            print(f"SST {i + 1}/{len(cases)}", flush=True)
+        grids[i] = sst.window(end, SST_DAYS)
+        if (n + 1) % 250 == 0:
+            print(f"SST {n + 1}/{len(cases)}", flush=True)
     g0 = grids[0]
     for name, la, lo in (
         ("SST_INDIAN", (-30, 30), (30, 120)),
