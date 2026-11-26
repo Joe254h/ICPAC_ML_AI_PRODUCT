@@ -308,7 +308,8 @@ def rainfall_group(tpa, hours, lat, lon, cp_mm):
 
 
 def cloud_group(era):
-    keys = [k for k in era if k not in ("cin_log1p", "stl1", "stl2", "e", "sshf", "slhf")]
+    land = ("cin_log1p", "stl1", "stl2", "e", "e_prior7d", "sshf", "slhf")
+    keys = [k for k in era if k not in land]
     return {k: era[k] for k in keys}
 
 
@@ -340,9 +341,13 @@ class Chirps:
         """Mean of the same calendar day 2006-2021: fills the few days before CHIRPS starts."""
         if (d.month, d.day) not in self.clim_cache:
             idx = [self.day_index(Date(y, d.month, d.day)) for y in range(2006, 2022)]
-            self.clim_cache[(d.month, d.day)] = np.nanmean(
-                np.stack([self.cells(i, i)[0] for i in idx if i is not None]), axis=0
-            )
+            import warnings
+
+            with warnings.catch_warnings():  # cells with no CHIRPS at all stay NaN
+                warnings.simplefilter("ignore", RuntimeWarning)
+                self.clim_cache[(d.month, d.day)] = np.nanmean(
+                    np.stack([self.cells(i, i)[0] for i in idx if i is not None]), axis=0
+                )
         return self.clim_cache[(d.month, d.day)]
 
     def window(self, end, ndays=30):
