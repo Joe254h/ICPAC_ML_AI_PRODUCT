@@ -431,11 +431,13 @@ def g6_values(keep, tp_mean, ctl, lat, lon, mascarene):
     return v
 
 
-def month_pass(month):
+def case_features(month, only=None):
+    """Every group's fields for each case of a month, computed once and shared by the PCA fit
+    (month_pass) and the feature table. only: a set of (date, year) to restrict to."""
     import xarray as xr
 
-    lat, lon, G, b, W = dp.geometry()[:5]
-    A, wf, *_ = fine_geometry()
+    lat, lon = dp.geometry()[:2]
+    A = fine_geometry()[0]
     old = dp.pcasrc()
     by = dp.schedule(month)
     pfiles = {f.name.split("_mv")[1][4:8]: f for f in old.monthly_paths(month)}
@@ -453,18 +455,17 @@ def month_pass(month):
     tp_idx = [int(np.flatnonzero(tp_hours == h)[0]) for h in want]
     era5 = dp.Era5Index()
     chirps = Chirps()
-    acc = {}
     names = {}
-    case_rows = []
-    filled_chirps = 0
+    done = 0
     for mmdd in sorted(by):
         cases = by[mmdd]
+        if only is not None and not any((d, y) in only for d, y in cases):
+            continue
         # G4 CHIRPS for every year of this start date first: anomalies need the stamp mean
-        chirps_feats, totals = {}, {}
+        chirps_feats, totals, nfill = {}, {}, {}
         for date, year in cases:
             end = dp.hindcast_date(date, year) - timedelta(days=CHIRPS_LAG_DAYS)
-            win, nf = chirps.window(end)
-            filled_chirps += nf
+            win, nfill[year] = chirps.window(end)
             chirps_feats[year], totals[year] = chirps_features(win)
         for k in (7, 14, 30):
             clim = np.mean([totals[y][k] for y in totals], axis=0)
@@ -480,6 +481,9 @@ def month_pass(month):
             inds = [int(np.flatnonzero(hours == h)[0]) for h in dp.LEADS]
             lev = {int(x): i for i, x in enumerate(ds.isobaricInhPa.values)}
             for date, year in cases:
+                if only is not None and (date, year) not in only:
+                    continue
+                coarse_out = {}
                 a = ensemble_arrays(ds, int(np.flatnonzero(years == year)[0]), inds)
                 g1, g2, keep = ensemble_groups(a, lev, lat, lon)
                 c1, c2, extra = control_groups(grids, year, lat, lon)
@@ -501,7 +505,7 @@ def month_pass(month):
                     names.setdefault(grp, nm)
                     if not np.isfinite(X).all():
                         raise ValueError(f"{grp} {date} {year}: nonfinite values")
-                    acc.setdefault(grp, dp.Moments(len(nm), thresholds(nm))).add(X, G, b, W, filled)
+                    coarse_out[grp] = (nm, X, filled)
                 # G4 on the 0.05 degree cells
                 coarse = {"sm20": extra["sm20"]}
                 coarse.update(
@@ -513,18 +517,33 @@ def month_pass(month):
                     fine[n] = A @ CX[:, j]
                 nm4 = names.setdefault("G4", list(fine))
                 X4 = np.stack([fine[n] for n in nm4], axis=1)
-                ok = np.isfinite(X4).all(axis=1)
-                if ok.sum() < 205000:
-                    raise ValueError(f"G4 {date} {year}: only {ok.sum()} finite cells")
-                acc.setdefault("G4", FineMoments(len(nm4), thresholds(nm4))).add_fine(
-                    X4[ok], wf[ok]
-                )
                 mval = float(dp.week2(masc, year).mean() / 100.0)
                 row = {"date": date, "year": year, "mmdd": mmdd}
                 row.update(g6_values(keep, tp_mean, c1, lat, lon, mval))
-                case_rows.append(row)
-        print(f"M{month:02d} {mmdd}: {len(case_rows)} cases", flush=True)
-    expected = sum(len(v) for v in by.values())
+                done += 1
+                yield {"date": date, "year": year, "mmdd": mmdd, "coarse": coarse_out,
+                       "G4": (nm4, X4), "g6": row, "chirps_filled": nfill[year]}  # fmt: skip
+        print(f"M{month:02d} {mmdd}: {done} cases", flush=True)
+
+
+def month_pass(month):
+    """PCA moments of every gridded group and the G6 case values for one month."""
+    G, b, W = dp.geometry()[2:5]
+    wf = fine_geometry()[1]
+    acc, names, case_rows, filled_chirps = {}, {}, [], 0
+    for c in case_features(month):
+        for grp, (nm, X, filled) in c["coarse"].items():
+            names.setdefault(grp, nm)
+            acc.setdefault(grp, dp.Moments(len(nm), thresholds(nm))).add(X, G, b, W, filled)
+        nm4, X4 = c["G4"]
+        names.setdefault("G4", nm4)
+        ok = np.isfinite(X4).all(axis=1)
+        if ok.sum() < 205000:
+            raise ValueError(f"G4 {c['date']} {c['year']}: only {ok.sum()} finite cells")
+        acc.setdefault("G4", FineMoments(len(nm4), thresholds(nm4))).add_fine(X4[ok], wf[ok])
+        case_rows.append(c["g6"])
+        filled_chirps += c["chirps_filled"]
+    expected = sum(len(v) for v in dp.schedule(month).values())
     assert len(case_rows) == expected, (len(case_rows), expected)
     for grp, m in acc.items():
         dest = OUT / grp / f"month_{month:02d}_moments.npz"
