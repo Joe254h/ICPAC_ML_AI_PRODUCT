@@ -13,7 +13,8 @@ Per cell and calendar month (fitted on the training years of each fold only):
   additive             y = x + (mean O - mean F)
   linear_scaling       y = x * clip(mean O / mean F, 0.2, 3)            (MBC without shrinkage)
   mbc                  the operational MBC column (year-excluded factors) as reference
-  variance_scaling     on square roots: y = (mean(sqrt O) + sd(sqrt O)/sd(sqrt F) * (sqrt x - mean(sqrt F)))^2
+  variance_scaling     on square roots: y = (mean(sqrt O) + r * (sqrt x - mean(sqrt F)))^2,
+                       r = sd(sqrt O)/sd(sqrt F) capped at 3 (dry cells have sd(F) near 0)
   regression           y = a + b x (least squares per cell and month), clipped at 0
   quantile_mapping     empirical: y = F_O^-1(F_F(x)) with the training years' forecasts and observations
 Pooled over all cells (the statistical counterparts of CatBoost):
@@ -128,7 +129,7 @@ def run_month(month):
             "mbc": M[test],
         }
         so, sf = np.sqrt(np.maximum(Ot, 0)), np.sqrt(np.maximum(Ft, 0))
-        ratio = so.std(0) / np.maximum(sf.std(0), 1e-6)
+        ratio = np.clip(so.std(0) / np.maximum(sf.std(0), 1e-6), 0.0, 3.0)  # dry cells: sd(F) ~ 0
         pred["variance_scaling"] = (
             so.mean(0) + ratio * (np.sqrt(np.maximum(x, 0)) - sf.mean(0))
         ) ** 2
