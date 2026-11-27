@@ -126,13 +126,14 @@ def loadings(g, comps, names, nsel, plt):
     return fig
 
 
-def seasonal(g, plt):
+def seasonal(g, plt, path=None, prefix=None, title=None):
     """Small multiples: one panel per leading component, mean and +-1 sd band by start month."""
-    path = GROUPS / g / "case_pcs.csv"
+    path = path or GROUPS / g / "case_pcs.csv"
+    prefix = prefix or f"{g}_PC"
     if not path.is_file():
         return None
     rows = list(csv.DictReader(path.open()))
-    cols = [c for c in rows[0] if c.startswith(f"{g}_PC")][:3]
+    cols = [c for c in rows[0] if c.startswith(prefix)][:3]
     month = np.array([int(r["mmdd"][:2]) for r in rows])
     fig, axes = plt.subplots(
         1, len(cols), figsize=(3.2 * len(cols), 2.8), sharey=True, constrained_layout=True
@@ -150,9 +151,73 @@ def seasonal(g, plt):
         style(ax)
     np.atleast_1d(axes)[0].set_ylabel("Score (band = ±1 sd across years)", fontsize=8, color=INK)
     fig.suptitle(
-        f"{NAMES[g]}: leading components by start month", fontsize=10, color=INK, x=0.01, ha="left"
+        f"{title or NAMES[g]}: leading components by start month",
+        fontsize=10,
+        color=INK,
+        x=0.01,
+        ha="left",
     )
     return fig
+
+
+EOF_FIELDS = {
+    "SST_INDIAN": ("pca/case_eof", "Indian Ocean SST, 7 days before the start"),
+    "SST_PACIFIC": ("pca/case_eof", "Pacific SST, 7 days before the start"),
+    "MSLP": ("pca/case_eof", "Week-2 mean sea-level pressure (control forecast)"),
+    "TP_WEEK2": ("groups/case_eof", "Week-2 forecast rainfall (10-member mean)"),
+    "CHIRPS_PRIOR30": ("groups/case_eof", "CHIRPS rainfall, 30 days before the start"),
+}
+
+
+def eof_maps(name, title, z, plt):
+    """The leading three EOF patterns as maps (cos-lat weighting undone, each scaled to +-1)."""
+    lat, lon, valid = z["latitude"], z["longitude"], z["valid"]
+    eofs, w, ratio = z["eofs"], z["weights"], z["explained_variance_ratio"]
+    k = min(3, len(eofs))
+    span_x, span_y = float(np.ptp(lon)), float(np.ptp(lat))
+    panel_w = 3.6 if span_x < 1.6 * span_y else 4.8
+    fig, axes = plt.subplots(1, k, figsize=(panel_w * k, panel_w * span_y / max(span_x, 1) + 1.1),
+                             constrained_layout=True)  # fmt: skip
+    for i, ax in enumerate(np.atleast_1d(axes)):
+        pattern = eofs[i] / w
+        pattern = pattern / np.abs(pattern).max()
+        grid = np.full(valid.size, np.nan)
+        grid[valid] = pattern
+        grid = grid.reshape(lat.size, lon.size)
+        ax.set_facecolor("#eceef1")
+        im = ax.pcolormesh(lon, lat, grid, cmap="RdBu_r", vmin=-1, vmax=1, shading="nearest")
+        ax.set_aspect("equal")
+        ax.set_title(
+            f"EOF{i + 1} · {100 * ratio[i]:.1f}% of variance", fontsize=9, color=INK, loc="left"
+        )
+        ax.tick_params(colors=QUIET, labelsize=7)
+        for sp in ax.spines.values():
+            sp.set_color(GRID)
+    cb = fig.colorbar(im, ax=axes, shrink=0.8, pad=0.01)
+    cb.set_label("Pattern (scaled to ±1)", fontsize=8, color=INK)
+    cb.ax.tick_params(labelsize=7, colors=QUIET)
+    fig.suptitle(title, fontsize=10.5, color=INK, x=0.01, ha="left", fontweight="bold")
+    return fig
+
+
+def eof_figures(plt):
+    for name, (folder, title) in EOF_FIELDS.items():
+        f = dp.EXP / folder / f"{name}_EOF.npz"
+        if not f.is_file():
+            print(f"skip {name}: {f} not found")
+            continue
+        with np.load(f, allow_pickle=False) as z:
+            figs = {"eof_maps": eof_maps(name, title, z, plt)}
+        figs["eof_seasonal"] = seasonal(
+            name, plt, f.with_suffix(".case_pcs.csv"), f"{name}_EOF", title
+        )
+        for kind, fig in figs.items():
+            if fig is None:
+                continue
+            for ext in ("png", "pdf"):
+                fig.savefig(OUT / f"{name}_{kind}.{ext}", dpi=300)
+            plt.close(fig)
+        print(f"{name}: EOF figures written")
 
 
 def main():
@@ -200,6 +265,7 @@ def main():
             "variance_selected": f"{100 * c['cum'][nsel - 1]:.1f}",
         })  # fmt: skip
         print(f"{g}: figures written")
+    eof_figures(plt)
     with open(OUT / "selection_criteria.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(table[0]))
         w.writeheader()
