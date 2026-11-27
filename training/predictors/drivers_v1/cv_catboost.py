@@ -31,8 +31,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import drivers_pca as dp  # noqa: E402 - sets thread limits before numpy
 import numpy as np  # noqa: E402
 
-FEAT = dp.EXP / "features"
-OUT = dp.EXP / "cv_catboost"
+# DRIVERS_FEATURES=features_full selects the full-mask table; outputs then go to *_full folders
+FEAT = dp.EXP / os.environ.get("DRIVERS_FEATURES", "features")
+SUFFIX = "_full" if FEAT.name.endswith("_full") else ""
+OUT = dp.EXP / f"cv_catboost{SUFFIX}"
 MASK = Path("/scratch/njoel/ICPAC_DATA_HUB/DOMAIN/authoritative_icpac11_mask.npz")
 FOLDS = [(2005, 2006, 2007), (2008, 2009, 2010), (2011, 2012, 2013), (2014, 2015, 2016),
          (2017, 2018, 2019), (2020, 2021)]  # fmt: skip

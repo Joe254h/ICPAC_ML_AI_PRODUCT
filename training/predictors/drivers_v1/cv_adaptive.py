@@ -30,7 +30,7 @@ import cv_catboost as cvc  # noqa: E402 - sets thread limits before numpy
 import drivers_pca as dp  # noqa: E402
 import numpy as np  # noqa: E402
 
-OUT = dp.EXP / "cv_adaptive"
+OUT = dp.EXP / f"cv_adaptive{cvc.SUFFIX}"
 LAG_DAYS = 16
 WEIGHTS = (0.02, 0.05, 0.10)
 SPIN_UP = (2005,)

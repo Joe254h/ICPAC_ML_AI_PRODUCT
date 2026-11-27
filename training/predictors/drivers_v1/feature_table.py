@@ -97,11 +97,11 @@ def subsample(row, col):
     return (row % 2 == 0) & (col % 2 == 0)
 
 
-def build_month(month, limit=None):
-    out_dir = dp.EXP / ("features_test" if limit else "features")
+def build_month(month, limit=None, full=False):
+    out_dir = dp.EXP / ("features_test" if limit else ("features_full" if full else "features"))
     out_dir.mkdir(parents=True, exist_ok=True)
     A, wf, row, col, la, lo = gp.fine_geometry()
-    sub = subsample(row, col)
+    sub = np.ones(row.size, bool) if full else subsample(row, col)
     A_sub = A[np.flatnonzero(sub)]
     proj = {g: Projector(g) for g in GRID_GROUPS + ("G4",)}
     case_vals, case_cols = case_table()
@@ -194,7 +194,7 @@ def build_month(month, limit=None):
     meta = {
         "month": month, "rows": total, "cases": len(ranges), "columns": columns, "row_width": ncol,
         "dtype": "float32 little-endian, row-major", "sha256": digest.hexdigest(),
-        "cell_pattern": "mask cells on even 0.05 degree rows and columns (1 in 4)",
+        "cell_pattern": "every mask cell with CHIRPS" if full else "mask cells on even 0.05 degree rows and columns (1 in 4)",
         "base_features": "operational refit: refit PCA, year-excluded MBC factor",
         "case_ranges": ranges,
     }  # fmt: skip
@@ -205,10 +205,11 @@ def build_month(month, limit=None):
         print(f"   {c:28s} mean {sample[:, j].mean():11.4g}  sd {sample[:, j].std():10.4g}")
 
 
-def audit():
+def audit(full=False):
+    folder = dp.EXP / ("features_full" if full else "features")
     metas = []
     for m in range(1, 13):
-        p = dp.EXP / "features" / f"month_{m:02d}.json"
+        p = folder / f"month_{m:02d}.json"
         if not p.is_file():
             raise FileNotFoundError(p)
         metas.append(json.loads(p.read_text()))
@@ -217,7 +218,7 @@ def audit():
     cases = sum(m["cases"] for m in metas)
     rows = sum(m["rows"] for m in metas)
     for m in metas:
-        size = (dp.EXP / "features" / f"month_{m['month']:02d}.f32").stat().st_size
+        size = (folder / f"month_{m['month']:02d}.f32").stat().st_size
         assert size == m["rows"] * m["row_width"] * 4, f"month {m['month']}: file size mismatch"
     print(f"cases {cases} (expected {dp.CASE_EXPECT}), rows {rows:,}, columns {len(cols)}")
     assert cases == dp.CASE_EXPECT
@@ -228,7 +229,7 @@ def audit():
     print("rows per year:", {y: years[y] for y in sorted(years)})
     manifest = {"columns": cols, "cases": cases, "rows": rows,
                 "months": {m["month"]: m["sha256"] for m in metas}}  # fmt: skip
-    (dp.EXP / "features" / "FEATURE_TABLE_MANIFEST.json").write_text(json.dumps(manifest, indent=1))
+    (folder / "FEATURE_TABLE_MANIFEST.json").write_text(json.dumps(manifest, indent=1))
     print("PASS feature table")
 
 
@@ -237,12 +238,15 @@ def main():
     ap.add_argument("mode", choices=["month", "audit"])
     ap.add_argument("--month", type=int)
     ap.add_argument("--limit", type=int, help="only the first N cases, written to features_test/")
+    ap.add_argument(
+        "--full", action="store_true", help="every mask cell (features_full/), not 1 in 4"
+    )
     a = ap.parse_args()
     if a.mode == "month":
         assert a.month and 1 <= a.month <= 12
-        build_month(a.month, a.limit)
+        build_month(a.month, a.limit, a.full)
     else:
-        audit()
+        audit(a.full)
     return 0
 
 

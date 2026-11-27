@@ -36,7 +36,7 @@ import cv_catboost as cvc  # noqa: E402 - sets thread limits before numpy
 import drivers_pca as dp  # noqa: E402
 import numpy as np  # noqa: E402
 
-OUT = dp.EXP / "cv_statistical"
+OUT = dp.EXP / f"cv_statistical{cvc.SUFFIX}"
 CELL_METHODS = ["climatology", "raw", "additive", "linear_scaling", "mbc", "variance_scaling",
                 "regression", "quantile_mapping"]  # fmt: skip
 RIDGE = {"ridge_24": "A", "ridge_119": "B"}
