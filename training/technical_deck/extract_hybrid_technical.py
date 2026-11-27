@@ -111,11 +111,16 @@ def training(plt):
         t = list(csv.reader(open(tl), delimiter="\t"))
         say("time_left columns:", t[0], "last:", t[-1])
         arr = np.array(t[1:], float)
-        if arr.shape[1] >= 3:
-            per = np.diff(np.r_[0, arr[:, 2]])
-            say(
-                f"   mean time per tree {per.mean():.1f} ms-or-s units as logged; total {arr[-1, 2]:.0f}"
-            )
+        total_s = arr[-1, 1] / 1000.0  # Passed, milliseconds
+        say(f"   fit time {total_s / 3600:.2f} h, {total_s / len(arr):.0f} s per tree")
+        fig, ax = plt.subplots(figsize=(6.5, 3.0), constrained_layout=True)
+        ax.plot(arr[:, 0] + 1, arr[:, 1] / 3.6e6, color=ACCENT, linewidth=2)
+        ax.set_xlabel("Trees (iterations)", fontsize=9, color=INK)
+        ax.set_ylabel("Elapsed (hours)", fontsize=9, color=INK)
+        ax.set_title(f"Fit time grows linearly: {total_s / len(arr):.0f} s per tree on 192 CPUs",
+                     fontsize=9.5, color=INK, loc="left")  # fmt: skip
+        style(ax)
+        save(fig, "01b_fit_time", plt)
     js = logs / "catboost_training.json"
     if js.is_file():
         d = json.loads(js.read_text())
@@ -142,12 +147,14 @@ def importance(plt):
 
     model = CatBoostRegressor()
     model.load_model(str(F / "model/CatBoost_MBC_LOYO_FINAL_REFIT_2005_2021.cbm"))
-    names = model.feature_names_
-    say("model features:", names == FEATURES, "trees:", model.tree_count_)
+    say("model feature names:", model.feature_names_[:4], "... trees:", model.tree_count_)
+    if len(model.feature_names_) != len(FEATURES):
+        raise RuntimeError("model input count differs from the 24-input manifest")
+    names = FEATURES  # the TSV column order; the model itself stores generic names
     pvc = model.get_feature_importance(type="PredictionValuesChange")
     data = sample_rows()
     X = data[:, 2:]
-    pool = Pool(X, feature_names=names)
+    pool = Pool(X, feature_names=list(model.feature_names_))
     shap = model.get_feature_importance(pool, type="ShapValues", thread_count=-1)
     sv, base = shap[:, :-1], shap[0, -1]
     mean_abs = np.abs(sv).mean(0)
