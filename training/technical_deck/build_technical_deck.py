@@ -163,9 +163,8 @@ def chart_alpha(plt):
     )
     ax.set_ylabel("Validation RMSE, mm/week", fontsize=9.5, color=INK)
     style(ax)
-    sel = ALPHA / "selected_alpha.json"
-    if sel.is_file():
-        notes["alpha"] = json.dumps(json.loads(sel.read_text()))[:300]
+    notes["alpha"] = (f"Validation RMSE is lowest at α = {best:.2f} ({e.min():.3f} mm/week), against "
+                      f"{e[np.argmin(np.abs(a))]:.3f} for MBC alone (α = 0)")  # fmt: skip
     return save(fig, "c11_alpha", plt)
 
 
