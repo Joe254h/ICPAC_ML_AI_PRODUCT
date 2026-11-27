@@ -95,7 +95,9 @@ def legend(ax, models, **kw):
 # ---------------------------------------------------------------- charts
 def global_metrics():
     g = {}
-    for r in rows("global_skill_summary.csv") + rows("GLOBAL_METRICS.csv"):
+    # one source only: the post-refit 2022-2024 table (the frozen summary scores an older fit)
+    post = [r for r in rows("all_continuous_metrics.csv") if r.get("group") == "global"]
+    for r in post + rows("GLOBAL_METRICS.csv"):
         g[r["model"]] = {
             k: num(r.get(k)) for k in ("rmse", "mae", "bias", "pearson_r", "anomaly_correlation")
         }
@@ -272,9 +274,13 @@ def chart_country(plt):
             num(sk[c].get(mdl, {}).get("rmse_skill_against_2005_2021_climatology"))
             for c in countries
         ]
-        ax.bar(np.arange(len(countries)) + (i - (len(models) - 1) / 2) * w, vals, width=w * 0.92,
-               color=COLOR[mdl])  # fmt: skip
+        xs = np.arange(len(countries)) + (i - (len(models) - 1) / 2) * w
+        ax.bar(xs, np.clip(vals, -0.6, None), width=w * 0.92, color=COLOR[mdl])
+        for x, v in zip(xs, vals):
+            if v < -0.6:
+                ax.text(x, -0.62, f"{v:.1f}", ha="center", va="top", fontsize=7.5, color=INK)
     ax.axhline(0, color=INK, linewidth=0.8)
+    ax.set_ylim(-0.8, None)
     ax.set_xticks(
         range(len(countries)), [names.get(c, c) for c in countries], fontsize=9, rotation=20
     )
@@ -453,7 +459,7 @@ def chart_bootstrap(plt):
         ax.plot([lo_, hi_], [i, i], color=INK, linewidth=1.6)
         ax.plot(d, i, "o", color=COLOR["MAMProtected"] if sig else QUIET, markersize=7)
         ax.text(
-            hi_ + 0.01,
+            max(hi_, 0) + 0.05,
             i,
             f"{d:+.3f} [{lo_:+.3f}, {hi_:+.3f}]",
             va="center",
@@ -461,6 +467,7 @@ def chart_bootstrap(plt):
             color=INK,
         )
     ax.axvline(0, color=INK, linewidth=0.8)
+    ax.set_xlim(None, max(num(x["ci95_upper"]) for x in r) + 0.9)
     ax.set_yticks(
         range(len(r)),
         [f"MAM-protected − {NAME.get(x['comparator'], x['comparator'])}" for x in r],
@@ -484,22 +491,25 @@ def chart_cases(plt):
         season[x["date"]] = x["season"]
     fig, ax = plt.subplots(figsize=(7, 3.2), constrained_layout=True)
     shares = []
-    for s in SEASONS:
-        diffs = [v["MAMProtected"] - v["MBC"] for k, v in d.items()
-                 if season[k] == s and "MAMProtected" in v and "MBC" in v]  # fmt: skip
-        shares.append((s, 100 * np.mean(np.array(diffs) < 0) if diffs else np.nan, len(diffs)))
-    ax.bar(range(4), [x[1] for x in shares], color=COLOR["MAMProtected"], width=0.6)
-    for i, (s, v, n) in enumerate(shares):
-        ax.text(i, v, f"{v:.0f}%\n({n} weeks)", ha="center", va="bottom", fontsize=9, color=INK)
+    for s_ in SEASONS:
+        diffs = np.array([v["MAMProtected"] - v["MBC"] for k, v in d.items()
+                          if season[k] == s_ and "MAMProtected" in v and "MBC" in v])  # fmt: skip
+        ties = np.abs(diffs) < 1e-9
+        win = 100 * np.mean(diffs[~ties] < 0) if (~ties).any() else np.nan
+        shares.append((s_, win, len(diffs), bool(ties.all()) and len(diffs) > 0))
+    ax.bar(range(4), [0 if x[3] else x[1] for x in shares], color=COLOR["MAMProtected"], width=0.6)
+    for i, (s_, v, n, tie) in enumerate(shares):
+        label = f"same as MBC\n(α = 0, {n} weeks)" if tie else f"{v:.0f}%\n({n} weeks)"
+        ax.text(i, 2 if tie else v, label, ha="center", va="bottom", fontsize=9, color=INK)
     ax.axhline(50, color=INK, linewidth=0.8, linestyle="--")
     ax.set_xticks(range(4), SEASONS)
     ax.set_ylim(0, 105)
     ax.set_ylabel("Weeks the blend beats MBC (%)", fontsize=9.5, color=INK)
     style(ax)
     allv = [v["MAMProtected"] - v["MBC"] for v in d.values() if "MAMProtected" in v and "MBC" in v]
-    notes["cases"] = (
-        f"The MAM-protected blend has lower RMSE than MBC in {100 * np.mean(np.array(allv) < 0):.0f}% of {len(allv)} weeks."
-    )
+    allv = [x for x in allv if abs(x) >= 1e-9]  # March-May weeks equal MBC by design
+    notes["cases"] = (f"Outside March–May the blend has lower RMSE than MBC in "
+                      f"{100 * np.mean(np.array(allv) < 0):.0f}% of {len(allv)} weeks.")  # fmt: skip
     return save(fig, "c51_case_wins", plt)
 
 
@@ -507,7 +517,8 @@ def chart_crps(plt):
     r = rows("ecmwf_ensemble_crps.csv")
     if not r:
         return None
-    s = [x for x in r if x["group"] == "season"]
+    s = sorted((x for x in r if x["group"] == "season"),
+               key=lambda x: SEASONS.index(x["group_id"]) if x["group_id"] in SEASONS else 9)  # fmt: skip
     fig, ax = plt.subplots(figsize=(5.5, 3), constrained_layout=True)
     ax.bar(range(len(s)), [num(x["crps_mmweek"]) for x in s], color=COLOR["RawECMWF"], width=0.6)
     for i, x in enumerate(s):
@@ -529,6 +540,14 @@ def chart_crps(plt):
 
 
 # ---------------------------------------------------------------- deck
+def top3_title():
+    imp = sorted(rows("feature_importance.csv"), key=lambda r: -num(r["mean_abs_shap_mm_week"]))[:3]
+    lab = {"X_mean_mmweek": "ensemble mean", "X_spread_mmweek": "ensemble spread",
+           "MBC_forecast_mmweek": "MBC forecast", "latitude_deg": "latitude", "longitude_deg": "longitude"}  # fmt: skip
+    top = [lab.get(r["feature"], r["feature"].replace("atmospheric_", "atmospheric ")) for r in imp]
+    return f"{top[0]}, {top[1]} and {top[2]}" if len(top) == 3 else "the leading inputs"
+
+
 def build(charts, g):
     from PIL import Image
     from pptx import Presentation
@@ -586,7 +605,7 @@ def build(charts, g):
                 ink,
             )
         elif items:
-            text(s, bx, 1.7, 13.333 - bx - 0.5, 5.4, items, 13, ink)
+            text(s, bx, 1.7, 13.333 - bx - 0.5, 5.4, items, 13 if image else 18, ink)
         return s
 
     raw, mbc = g.get("RawECMWF", {}), g.get("MBC", {})
@@ -636,7 +655,7 @@ def build(charts, g):
               "March is the only month with median factor above 1 (1.04)",
               "Fewer than 1% of cells reach the cap (3) or the floor (0.2)",
           ], img_box=(0.6, 1.45, 7.0, 5.9))  # fmt: skip
-    slide("What CatBoost learned: the MBC forecast and the ensemble drive the correction", "What CatBoost learned",
+    slide(f"What CatBoost learned: {top3_title()} drive the correction", "What CatBoost learned",
           FIG / "02_shap_importance.png", [
               "SHAP: average change each input makes to the correction (mm/week)",
               "Correction sd 2.3 mm/week vs residual sd 13.8: a small, targeted adjustment",
